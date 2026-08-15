@@ -29,7 +29,25 @@ export function buildRequest(rpcId: string, method: string, payload: unknown): o
   return { type: 'client-request', rpcId, method, payload };
 }
 
-/** 发一次信封请求并解包 result（ok:false 或协议异常一律抛错） */
+/** 信封响应中 result 的静态形状（仅用于解包，不对外导出） */
+interface EnvelopeResult {
+  ok: boolean;
+  value?: unknown;
+  error?: { code?: string; message?: string };
+}
+
+/** 从「任意」响应体文本中尽力提取服务端信封错误（{result:{error:{code,message}}}）。 */
+function extractServerError(text: string): EnvelopeResult['error'] | undefined {
+  try {
+    const parsed = JSON.parse(text) as { result?: { error?: { code?: string; message?: string } } };
+    return parsed?.result?.error;
+  } catch {
+    // 非 JSON 或结构不符，视为无法提取，返回 undefined 由调用方降级处理
+    return undefined;
+  }
+}
+
+/** 发一次信封请求并解包 result（ok:false 或协议异常一律抛错，且错误信息携带 code） */
 async function call(baseUrl: string, fetchImpl: typeof fetch, method: string, payload: unknown): Promise<unknown> {
   // 生成一个尽量不重复的 rpcId，便于日志与响应对应
   const rpcId = `dsh-vscode-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -39,11 +57,30 @@ async function call(baseUrl: string, fetchImpl: typeof fetch, method: string, pa
     headers: { 'content-type': 'application/json' },
     body,
   });
-  const json = (await res.json()) as {
-    result?: { ok: boolean; value?: unknown; error?: { code?: string; message?: string } };
-  };
+
+  // 1. 协议层检查：非 2xx 视为 HTTP 错误。
+  //    先尝试从响应体读取文本并解析出服务端信封错误 {result:{ok:false,error:{code,message}}}，
+  //    能提取到 code 则抛出携带该 code 的错误；否则统一抛 code='http-error'。
+  if (!res.ok) {
+    const serverError = extractServerError(await res.text());
+    if (serverError?.code) {
+      throw new Error(`dsh api ${method} failed: ${serverError.code}: ${serverError.message ?? ''}`);
+    }
+    throw new Error(`dsh api ${method} failed: http-error: HTTP ${res.status}`);
+  }
+
+  // 2. 2xx 分支解析 JSON；解析失败（空 body、HTML 等）抛 code='invalid-response'，
+  //    避免 res.json() 抛出裸 SyntaxError（不带 code，违反协议异常必须携带 code 的约束）。
+  let json: { result?: EnvelopeResult };
+  try {
+    json = (await res.json()) as { result?: EnvelopeResult };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`dsh api ${method} failed: invalid-response: ${reason}`);
+  }
+
+  // 3. 信封解包：响应缺 result、result.ok 为 false 一律抛错，错误码优先取服务端 error.code。
   const result = json?.result;
-  // 响应缺 result、result.ok 为 false，或任何协议异常，一律抛出错误
   if (result === undefined || !result.ok) {
     const code = result?.error?.code ?? 'http-error';
     const message = result?.error?.message ?? `HTTP ${res.status}`;
