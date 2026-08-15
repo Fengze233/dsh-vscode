@@ -1,0 +1,9 @@
+.vscode/**
+.superpowers/**
+src/**
+test/**
+scripts/**
+docs/**
+out/test/**
+**/*.map
+tsconfig.json

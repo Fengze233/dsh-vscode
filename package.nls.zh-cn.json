@@ -1,0 +1,21 @@
+{
+  "dsh.container.title": "DSH",
+  "dsh.view.panel.name": "DSH 面板",
+  "dsh.view.panelSecondary.name": "DSH 面板（右）",
+  "dsh.cmd.openPanel.title": "DSH: 打开面板",
+  "dsh.cmd.openSecondary.title": "DSH: 在辅助侧边栏打开",
+  "dsh.cmd.openExternal.title": "在浏览器中打开",
+  "dsh.cmd.restart.title": "重启服务",
+  "dsh.cmd.stop.title": "停止服务",
+  "dsh.cmd.copyUrl.title": "复制网址",
+  "dsh.cmd.showLogs.title": "查看日志",
+  "dsh.config.host": "服务地址。仅允许回环地址（`127.0.0.1` / `localhost` / `[::1]`），非法值回退默认。",
+  "dsh.config.port": "DSH web 服务的期望端口（探测与启动共用）。",
+  "dsh.config.autoStart": "服务未运行时自动启动 `dsh web`。",
+  "dsh.config.stopOnExit": "关闭最后一个 VS Code 窗口时停止插件启动的服务。",
+  "dsh.config.extraArgs": "插件启动 `dsh web` 时附加的参数（如 `--trusted-host`）。",
+  "dsh.walkthrough.title": "DSH 入门",
+  "dsh.walkthrough.description": "在 VS Code 内直接使用 DeepSeek Harness 网页界面。",
+  "dsh.walkthrough.step.title": "打开 DSH 面板",
+  "dsh.walkthrough.step.description": "点击左侧活动栏或右侧辅助侧边栏的 DSH 图标，或运行 [DSH: 打开面板](command:dsh.openPanel)。面板会自动启动（或复用）dsh web 服务，并在侧边栏内嵌显示 DSH 网页。"
+}

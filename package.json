@@ -1,0 +1,208 @@
+{
+  "name": "dsh-vscode",
+  "displayName": "DSH",
+  "description": "在 VS Code 侧边栏中使用 DeepSeek Harness（DSH）网页界面",
+  "version": "0.1.0",
+  "publisher": "fengze233",
+  "icon": "assets/icon.png",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dsh",
+          "title": "%dsh.container.title%",
+          "icon": "assets/whale-icon.svg"
+        }
+      ],
+      "secondarySidebar": [
+        {
+          "id": "dsh-secondary",
+          "title": "%dsh.container.title%",
+          "icon": "assets/whale-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "dsh": [
+        {
+          "id": "dsh.panel",
+          "name": "%dsh.view.panel.name%",
+          "type": "webview"
+        }
+      ],
+      "dsh-secondary": [
+        {
+          "id": "dsh.panel.secondary",
+          "name": "%dsh.view.panelSecondary.name%",
+          "type": "webview"
+        }
+      ]
+    },
+    "walkthroughs": [
+      {
+        "id": "dsh.getStarted",
+        "title": "%dsh.walkthrough.title%",
+        "description": "%dsh.walkthrough.description%",
+        "steps": [
+          {
+            "id": "dsh.openPanel",
+            "title": "%dsh.walkthrough.step.title%",
+            "description": "%dsh.walkthrough.step.description%",
+            "media": {
+              "image": "assets/icon.png"
+            },
+            "completionEvents": [
+              "onCommand:dsh.openPanel"
+            ]
+          }
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "dsh.openPanel",
+        "title": "%dsh.cmd.openPanel.title%",
+        "icon": "$(panel)"
+      },
+      {
+        "command": "dsh.openSecondary",
+        "title": "%dsh.cmd.openSecondary.title%",
+        "icon": "$(layout-sidebar-right)"
+      },
+      {
+        "command": "dsh.openExternal",
+        "title": "%dsh.cmd.openExternal.title%",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "dsh.restart",
+        "title": "%dsh.cmd.restart.title%",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "dsh.stop",
+        "title": "%dsh.cmd.stop.title%",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "dsh.copyUrl",
+        "title": "%dsh.cmd.copyUrl.title%",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "dsh.showLogs",
+        "title": "%dsh.cmd.showLogs.title%",
+        "icon": "$(output)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "dsh.openExternal",
+          "when": "view == dsh.panel || view == dsh.panel.secondary",
+          "group": "navigation@1"
+        },
+        {
+          "command": "dsh.restart",
+          "when": "view == dsh.panel || view == dsh.panel.secondary",
+          "group": "navigation@2"
+        },
+        {
+          "command": "dsh.stop",
+          "when": "view == dsh.panel || view == dsh.panel.secondary",
+          "group": "navigation@3"
+        },
+        {
+          "command": "dsh.copyUrl",
+          "when": "view == dsh.panel || view == dsh.panel.secondary",
+          "group": "navigation@4"
+        },
+        {
+          "command": "dsh.showLogs",
+          "when": "view == dsh.panel || view == dsh.panel.secondary",
+          "group": "navigation@5"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "DSH",
+      "properties": {
+        "dsh.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "enum": [
+            "127.0.0.1",
+            "localhost",
+            "[::1]"
+          ],
+          "markdownDescription": "%dsh.config.host%"
+        },
+        "dsh.port": {
+          "type": "number",
+          "default": 3080,
+          "minimum": 0,
+          "maximum": 65535,
+          "markdownDescription": "%dsh.config.port%"
+        },
+        "dsh.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%dsh.config.autoStart%"
+        },
+        "dsh.stopOnExit": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%dsh.config.stopOnExit%"
+        },
+        "dsh.extraArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "%dsh.config.extraArgs%"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/build.mjs --test && node --test \"out/test/**/*.test.js\"",
+    "package": "npm run compile && vsce package -o dsh-vscode.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.5.0"
+  },
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "deepseek-harness",
+    "ai",
+    "assistant"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Fengze233/dsh-vscode.git"
+  },
+  "homepage": "https://github.com/Fengze233/dsh-vscode#readme",
+  "bugs": {
+    "url": "https://github.com/Fengze233/dsh-vscode/issues"
+  }
+}

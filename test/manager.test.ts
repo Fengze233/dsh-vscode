@@ -1,0 +1,248 @@
+// test/manager.test.ts — 服务管理器状态机的单元测试（假探测 + 假子进程）
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { ServiceManager, type ManagerDeps } from '../src/service/manager';
+import type { ProbeResult } from '../src/service/detect';
+import type { ChildProcessLike, ProcessRunner } from '../src/service/process';
+
+/** 假子进程（同 process.test.ts 的 FakeChild） */
+class FakeChild implements ChildProcessLike {
+  pid = 1234;
+  killed: string[] = [];
+  exitCbs: ((code: number | null) => void)[] = [];
+  errorCbs: ((err: Error) => void)[] = [];
+  stdout = { on: (_e: 'data', _cb: (chunk: Buffer) => void) => {} };
+  stderr = { on: (_e: 'data', _cb: (chunk: Buffer) => void) => {} };
+  on(event: 'exit' | 'error', cb: (...args: never[]) => void): void {
+    if (event === 'exit') this.exitCbs.push(cb as (code: number | null) => void);
+    else this.errorCbs.push(cb as (err: Error) => void);
+  }
+  kill(signal?: NodeJS.Signals): boolean {
+    this.killed.push(signal ?? 'SIGTERM');
+    return true;
+  }
+  emitExit(code: number | null = null): void {
+    for (const cb of [...this.exitCbs]) cb(code);
+  }
+}
+
+interface Harness {
+  manager: ServiceManager;
+  probeQueue: ProbeResult[];   // 探测结果队列，取完后循环最后一个
+  child: FakeChild | null;
+  spawnCount: number;
+  probeCount: number;          // 探测调用次数，用于断言定时器已清理
+  states: string[];            // 记录状态变化序列
+}
+
+function makeHarness(opts?: Partial<Parameters<ServiceManager['reconfigure']>[0]>, depsOpts?: Partial<ManagerDeps>): Harness {
+  const h: Harness = {
+    manager: null as unknown as ServiceManager,
+    probeQueue: [],
+    child: null,
+    spawnCount: 0,
+    probeCount: 0,
+    states: [],
+  };
+  const probeService = async (_host: string, _port: number): Promise<ProbeResult> => {
+    h.probeCount += 1;
+    return h.probeQueue.length > 1 ? h.probeQueue.shift()! : h.probeQueue[0];
+  };
+  const processRunner: ProcessRunner = {
+    startDsh: () => {
+      h.spawnCount += 1;
+      h.child = new FakeChild();
+      return h.child;
+    },
+    stopChild: async (c) => {
+      c.kill('SIGTERM');
+      c.kill('SIGKILL');
+    },
+    lastChild: null,
+  };
+  h.manager = new ServiceManager(
+    {
+      host: '127.0.0.1', port: 3080, extraArgs: [], autoStart: true,
+      timeoutMs: 100, pollMs: 5, ...opts,
+    },
+    { probeService, processRunner, log: () => {}, startTimeoutMs: 50, ...depsOpts },
+  );
+  h.manager.onChange((s) => h.states.push(s.state));
+  return h;
+}
+
+test('探测到 dsh：直接复用（owned=false），不启动子进程', async () => {
+  const h = makeHarness();
+  h.probeQueue = ['dsh'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'ready');
+  assert.equal(s.owned, false);
+  assert.equal(s.url, 'http://127.0.0.1:3080/');
+  assert.equal(h.spawnCount, 0);
+  assert.deepEqual(h.states, ['detecting', 'ready']);
+  h.manager.dispose();
+});
+
+test('探测到外来服务：failed + err.portOccupied', async () => {
+  const h = makeHarness();
+  h.probeQueue = ['foreign'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.portOccupied');
+  assert.equal(h.spawnCount, 0);
+  h.manager.dispose();
+});
+
+test('服务未运行且 autoStart=false：failed + err.notRunning', async () => {
+  const h = makeHarness({ autoStart: false });
+  h.probeQueue = ['down'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.notRunning');
+  assert.equal(h.spawnCount, 0);
+  h.manager.dispose();
+});
+
+test('自动启动成功：down,down,dsh → ready(owned=true)，状态序列正确', async () => {
+  const h = makeHarness();
+  h.probeQueue = ['down', 'down', 'dsh'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'ready');
+  assert.equal(s.owned, true);
+  assert.equal(h.spawnCount, 1);
+  assert.deepEqual(h.states, ['detecting', 'starting', 'waiting', 'ready']);
+  h.manager.dispose();
+});
+
+test('启动超时：failed + err.startTimeout', async () => {
+  const h = makeHarness();
+  h.probeQueue = ['down'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.startTimeout');
+  assert.equal(s.errorVars?.seconds, 0); // startTimeoutMs=50 → round(50/1000)=0（真实环境为 15 秒）
+  h.manager.dispose();
+});
+
+test('等待中子进程退出：failed + err.startCrashed', async () => {
+  const h = makeHarness();
+  h.probeQueue = ['down', 'down', 'down'];
+  const p = h.manager.ensureRunning();
+  // 第一次探测后子进程已 spawn，模拟崩溃
+  await new Promise((r) => setTimeout(r, 1));
+  h.child?.emitExit(1);
+  const s = await p;
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.startCrashed');
+  h.manager.dispose();
+});
+
+test('ready 后子进程意外退出：回到 idle（面板据此显示已断开）', async () => {
+  const h = makeHarness();
+  h.probeQueue = ['down', 'dsh'];
+  await h.manager.ensureRunning();
+  assert.equal(h.manager.getSnapshot().state, 'ready');
+  h.child?.emitExit(1);
+  assert.equal(h.manager.getSnapshot().state, 'idle');
+  assert.equal(h.manager.getSnapshot().url, null);
+  h.manager.dispose();
+});
+
+test('spawn 报 ENOENT：failed + err.dshNotFound（不空等超时）', async () => {
+  const h = makeHarness();
+  h.probeQueue = ['down', 'down', 'down'];
+  const p = h.manager.ensureRunning();
+  await new Promise((r) => setTimeout(r, 1));
+  // 模拟 dsh 命令不存在
+  const err = Object.assign(new Error('spawn dsh ENOENT'), { code: 'ENOENT' });
+  for (const cb of h.child!.errorCbs) cb(err);
+  const s = await p;
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.dshNotFound');
+  h.manager.dispose();
+});
+
+test('stop() 只停插件自启的子进程', async () => {
+  const h = makeHarness();
+  h.probeQueue = ['down', 'dsh'];
+  await h.manager.ensureRunning();
+  await h.manager.stop();
+  assert.deepEqual(h.child!.killed, ['SIGTERM', 'SIGKILL']);
+  assert.equal(h.manager.getSnapshot().state, 'idle');
+  h.manager.dispose();
+});
+
+test('复用外部服务时 stop() 不杀任何进程', async () => {
+  const h = makeHarness();
+  h.probeQueue = ['dsh'];
+  await h.manager.ensureRunning();
+  await h.manager.stop();
+  assert.equal(h.spawnCount, 0);
+  assert.equal(h.manager.getSnapshot().state, 'idle');
+  h.manager.dispose();
+});
+
+test('ensureRunning 并发幂等：只 spawn 一次', async () => {
+  const h = makeHarness();
+  h.probeQueue = ['down', 'dsh'];
+  const [a, b] = await Promise.all([h.manager.ensureRunning(), h.manager.ensureRunning()]);
+  assert.equal(a.state, 'ready');
+  assert.equal(b.state, 'ready');
+  assert.equal(h.spawnCount, 1);
+  h.manager.dispose();
+});
+
+test('reconfigure 换端口：自启服务先停再按新端口启动', async () => {
+  const h = makeHarness();
+  h.probeQueue = ['down', 'dsh'];
+  await h.manager.ensureRunning();
+  const oldChild = h.child!; // 捕获旧子进程引用（reconfigure 重启后 h.child 会指向新子进程）
+  h.probeQueue = ['down', 'dsh'];
+  const s = await h.manager.reconfigure({
+    host: '127.0.0.1', port: 4000, extraArgs: [], autoStart: true, timeoutMs: 100, pollMs: 5,
+  });
+  assert.equal(s.state, 'ready');
+  assert.ok(oldChild.killed.length > 0); // 旧服务确实被停止（SIGTERM+SIGKILL）
+  assert.equal(h.manager.getTarget().port, 4000);
+  h.manager.dispose();
+});
+
+test('启动等待阶段 stop()：立即停掉子进程、流程以 idle 结束（不误报崩溃）', async () => {
+  const h = makeHarness();
+  h.probeQueue = ['down', 'down', 'down'];
+  const p = h.manager.ensureRunning();
+  await new Promise((r) => setTimeout(r, 1)); // 子进程已 spawn，进入 waiting
+  await h.manager.stop();
+  h.child?.emitExit(1); // 模拟真实 kill 触发的 exit 事件竞态
+  const s = await p;
+  assert.equal(s.state, 'idle'); // stopRequested 判定先于 childExited，不误报 startCrashed
+  assert.equal(h.manager.getSnapshot().state, 'idle');
+  assert.ok(h.child!.killed.length > 0); // 子进程被停掉，无孤儿
+  h.manager.dispose();
+});
+
+test('复用外部服务失联：健康探测发现后回到 idle（面板显示已断开）', async () => {
+  const h = makeHarness({}, { healthIntervalMs: 30 });
+  h.probeQueue = ['dsh'];
+  await h.manager.ensureRunning();
+  assert.equal(h.manager.getSnapshot().state, 'ready');
+  h.probeQueue = ['down']; // 外部服务失联
+  await new Promise((r) => setTimeout(r, 90));
+  assert.equal(h.manager.getSnapshot().state, 'idle');
+  h.manager.dispose();
+});
+
+test('复用外部服务 stop()：清理健康定时器并回到 idle', async () => {
+  const h = makeHarness({}, { healthIntervalMs: 30 });
+  h.probeQueue = ['dsh'];
+  await h.manager.ensureRunning();
+  assert.equal(h.manager.getSnapshot().state, 'ready');
+  await h.manager.stop();
+  assert.equal(h.manager.getSnapshot().state, 'idle');
+  // 停止后不应再有探测发生：若定时器泄漏，30ms 间隔会在 90ms 内触发约 3 次探测
+  const probesBefore = h.probeCount;
+  h.probeQueue = ['foreign'];
+  await new Promise((r) => setTimeout(r, 90));
+  assert.equal(h.probeCount, probesBefore); // 无新增探测 = 定时器已清理
+  h.manager.dispose();
+});

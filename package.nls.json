@@ -1,0 +1,21 @@
+{
+  "dsh.container.title": "DSH",
+  "dsh.view.panel.name": "DSH Panel",
+  "dsh.view.panelSecondary.name": "DSH Panel (Right)",
+  "dsh.cmd.openPanel.title": "DSH: Open Panel",
+  "dsh.cmd.openSecondary.title": "DSH: Open in Secondary Side Bar",
+  "dsh.cmd.openExternal.title": "Open in Browser",
+  "dsh.cmd.restart.title": "Restart Service",
+  "dsh.cmd.stop.title": "Stop Service",
+  "dsh.cmd.copyUrl.title": "Copy URL",
+  "dsh.cmd.showLogs.title": "Show Logs",
+  "dsh.config.host": "Service host. Only loopback values (`127.0.0.1` / `localhost` / `[::1]`) are allowed; invalid values fall back to the default.",
+  "dsh.config.port": "Expected port for the DSH web service (used for both detection and startup).",
+  "dsh.config.autoStart": "Automatically start `dsh web` when the service is not running.",
+  "dsh.config.stopOnExit": "Stop the plugin-started service when the last VS Code window closes.",
+  "dsh.config.extraArgs": "Extra arguments appended when the plugin starts `dsh web` (e.g. `--trusted-host`).",
+  "dsh.walkthrough.title": "Get Started with DSH",
+  "dsh.walkthrough.description": "Use the DeepSeek Harness web UI right inside VS Code.",
+  "dsh.walkthrough.step.title": "Open the DSH panel",
+  "dsh.walkthrough.step.description": "Click the DSH icon in the Activity Bar or the Secondary Side Bar, or run [DSH: Open Panel](command:dsh.openPanel). The panel starts (or reuses) the dsh web service and embeds the DSH page in the sidebar."
+}
