@@ -28,7 +28,7 @@
 
 1. **链接失效根因**：DSH 前端所有外链均为 `target="_blank"`；VS Code webview 是沙箱 iframe（sandbox 无 `allow-popups`），沙箱标志继承到嵌套 iframe，`window.open` 被 Chromium 拦截，点击无任何反应。DSH 前端无 postMessage / 无 iframe 适配（已确认无 `window.parent` 使用）。
 2. **修复必须注入脚本**：把"点击"转为"postMessage → 扩展 → `vscode.env.openExternal` / `showTextDocument`"。
-3. **DSH 客户端插件机制（官方扩展点）**：web profile 由配置树汇编；客户端插件包在 `package.json` 声明 `dsh.client`（inject/platform），注册进配置树后由 `__DSH_BOOT__.entries` 以 `/plugins/<id>/client.js` 形式加载。profile 的 `cordis.patch.yml` 是用户个性化 patch 层（数组格式，支持按 id 的条目追加），写入用户目录即可，不碰 DSH 安装目录。
+3. **DSH 客户端插件机制（官方扩展点）**：web profile 由配置树汇编；客户端插件包在 `package.json` 声明 `dsh.client`（inject/platform），注册进配置树后由 `__DSH_BOOT__.entries` 以 `/plugins/<id>/client.js` 形式加载。profile 的 `cordis.patch.yml` 是用户个性化 patch 层（顶层 YAML 数组；新增条目须用 `insert:` 包裹，裸 `{id,name}` 形状只用于按 id 覆盖/禁用既有行），写入用户目录即可，不碰 DSH 安装目录。已由 Task 0 spike 实证（详见 §5.3）。
 4. **会话工作区机制**：DSH 有 workspace 实体（durable registry），`session.create` API 接受 `workspaceId` 或 `cwd`（互斥）；会话 header 记录绝对路径 cwd，持久化按 projectKey 分组。bash 工具 workdir 解析顺序：模型参数 → 会话 header.cwd → bash 插件 config.cwd → 服务进程 cwd。
 5. **插件可直调 DSH HTTP API**：API 为信封协议 `POST /api/<namespace>.<method>`，请求体 `{type:"client-request", rpcId, method, payload}`。Node 直连（无 Origin 头）不受 browser-trust 栅栏限制（实测通过）；带恶意 Origin 头返回 forbidden。
 6. **`dsh web` 无 cwd 参数**；DSH 前端不读取任何 URL 查询参数（`URLSearchParams` 仅用于测试 fixture 模式）。
@@ -115,6 +115,64 @@ webview 顶层握手脚本（校验 origin + source + token）
 1. 桥接作为 client 插件注册进 profile 后，`__DSH_BOOT__.entries` 是否出现对应条目、`/plugins/<id>/client.js` 是否可加载；
 2. 桥接能否可靠触发前端"选中工作区"（若不能 → 启用 5.2 兜底注入 cwd）；
 3. 用户执行 `dsh plugin add` 时 pnpm 是否会清掉我们放于 profile `node_modules` 的桥接包（若会 → 改为 profile 独立目录 + 注册方式的备选）。
+
+#### Task 0 spike 已验证结论（2026-08-15，实证于 0.1.0-rc.6）
+
+验证 1 已由 spike 实证，官方扩展点**可行**，最终可用形状如下（供 Task 1/5 直接使用）：
+
+**① 客户端包 `package.json`（`exports` 必须含 `./package.json`，否则客户端扫描静默 404）**：
+```json
+{
+  "name": "dsh-vscode-bridge",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": { "client": { "inject": [], "platform": "web" } },
+  "license": "MIT"
+}
+```
+
+**② host 侧 `lib/index.js`（空插件，仅配置树注册用）**：
+```js
+import { Service } from "@deepseek-ai/cordis";
+export const name = "dsh-vscode-bridge";
+export default class extends Service {
+  constructor(ctx) { super(ctx, name); }
+}
+```
+
+**③ 浏览器端 `lib/client.js`（必须是工厂注册 bundle，不能是裸副作用脚本）**：
+```js
+window.__ModuleLoader__.load({
+  id: "dsh-vscode-bridge",
+  factory: (require) => {
+    // 桥接逻辑：捕获阶段拦截外链/fileMention、postMessage 转发、握手回执
+    var module = { exports: {} };
+    var exports = module.exports;
+    exports.apply = () => {};
+    return module.exports;
+  }
+});
+```
+
+**④ `cordis.patch.yml` 追加条目（新增必须 `insert:` 包裹，且不能 `cat >>` 到 `[]` 后）**：
+```yaml
+# dsh-vscode-bridge: begin
+- insert:
+    - id: dsh-vscode-bridge
+      name: dsh-vscode-bridge
+# dsh-vscode-bridge: end
+```
+
+**实测结论摘要**：
+1. patch 条目形状：裸 `{id,name}` 会被 `applyEntryPatches` 判为「按 id 覆盖既有行」→ 目标不存在时告警 `patch: entry ... not found` 并跳过；新增必须 `insert:` 包裹。原文件顶层 `[]` 是流式数组，直接追加块序列会 YAML 解析失败。
+2. client.js 提供与执行：节点侧以 `require.resolve("<包名>/package.json")` 识别客户端包（故 `exports` 必须导出 `./package.json`）；浏览器端 bundle 必须 `window.__ModuleLoader__.load({id, factory})` 注册工厂，工厂体在页面启动时 `loader.create({name})` 触发 materialize 执行；`__DSH_BOOT__.entries` 中图条目 `id` = 包名（`entry.options.name`）。
+3. pnpm-workspace：`packages:[.]` / `nodeLinker: hoisted` / `autoInstallPeers: false`，profile 自有 `node_modules/` 受 pnpm 管理（`dsh plugin` 维护）；`@deepseek-ai/cordis` 等依赖经 `~/.dsh/profiles/node_modules/` 扁平 fallback 符号链接解析，host 侧 `import` 可用。
 
 ## 6. 降级与警告
 
