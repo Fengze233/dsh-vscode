@@ -56,8 +56,9 @@ test('readyPage 握手脚本下行 syncWorkspace 走缓冲 + source 收紧为 wi
   // 下行缓冲：iframe 加载完成前先记录 pendingPath，load 后统一补发（可覆盖旧值、最后一次生效）
   assert.ok(html.includes('pendingPath'), '脚本应包含下行缓冲变量 pendingPath');
   assert.ok(html.includes('iframeLoaded'), '脚本应包含 iframe 加载状态标志 iframeLoaded');
-  // 下行分支 source 判定收紧为 e.source === window（仅 webview 顶层自身，避免误认 DSH 页内嵌套 iframe）
-  assert.ok(html.includes('e.source === window'), '下行分支 source 判定应为 e.source === window');
+  // 下行分支 source 判定收紧为 e.source === window.parent（扩展消息经 bootstrap 以 postMessage 转进嵌套 iframe，
+  // 到达时 source 即 bootstrap 窗口，而非本 webview 内容自身的 window；避免误认 DSH 页内嵌套 iframe）
+  assert.ok(html.includes('e.source === window.parent'), '下行分支 source 判定应为 e.source === window.parent');
   // iframe load 后先发 bridgeHello，再补发缓冲的 syncWorkspace（带 token）
   assert.ok(html.includes("kind: 'bridgeHello'"), 'load 后应先发 bridgeHello');
   assert.ok(html.includes("kind: 'syncWorkspace'"), 'load 后应补发 syncWorkspace');
