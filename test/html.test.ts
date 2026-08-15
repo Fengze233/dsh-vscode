@@ -32,8 +32,21 @@ test('disconnectedPage 与 stoppedPage 都包含重连按钮', () => {
 
 test('readyPage 包含目标地址 iframe 且无 sandbox 属性', () => {
   const html = readyPage('http://127.0.0.1:3080/', ctx());
-  assert.ok(html.includes('<iframe class="frame" src="http://127.0.0.1:3080/"></iframe>'));
+  assert.ok(html.includes('<iframe id="dsh-frame" class="frame" src="http://127.0.0.1:3080/"></iframe>'));
   assert.ok(!html.includes('sandbox'));
+});
+
+test('readyPage 启用桥接时注入握手脚本', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
+  // 握手脚本标记与 token 均需出现在产物中（脚本会向 iframe 下发 bridgeHello）
+  assert.ok(html.includes('dsh-bridge-handshake'));
+  assert.ok(html.includes('tok123'));
+});
+
+test('readyPage 未启用桥接时不注入握手脚本', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx());
+  // 未传第三参（或 enabled=false）时保持向后兼容，不注入握手脚本
+  assert.ok(!html.includes('dsh-bridge-handshake'));
 });
 
 test('CSP 声明 frame-src 与 script-src nonce', () => {

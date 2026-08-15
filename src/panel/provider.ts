@@ -1,6 +1,7 @@
 // src/panel/provider.ts — 侧边栏面板：iframe 与占位页切换
 import * as vscode from 'vscode';
 import { ServiceManager } from '../service/manager';
+import { handleBridgeMessage } from '../bridge/host';
 import { t } from '../i18n';
 import {
   loadingPage,
@@ -18,9 +19,21 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   private wasConnected = false;
   /** 面板是否已首次打开过（用于一次性回调） */
   private openedOnce = false;
+  /** 握手 token：面板与 iframe 之间的防伪凭据（每实例随机，Task 5 下行同步复用同一 token） */
+  private readonly bridgeToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
-  /** @param onFirstOpen 面板首次打开时调用一次的回调（用于引导提示，由入口注入） */
-  constructor(private manager: ServiceManager, private onFirstOpen?: () => void) {
+  /**
+   * @param manager 服务管理器（面板与服务状态联动）
+   * @param onFirstOpen 面板首次打开时调用一次的回调（用于引导提示，由入口注入）
+   * @param onBridgeAck 桥接握手回执回调（Task 7 评估桥接状态时注入；可选）
+   * @param workspaceRoot 工作区根目录注入函数（Task 5 工作区同步使用；可选，默认无根）
+   */
+  constructor(
+    private manager: ServiceManager,
+    private onFirstOpen?: () => void,
+    private onBridgeAck?: (ok: boolean) => void,
+    private workspaceRoot: () => string | undefined = () => undefined,
+  ) {
     // 订阅状态变化，重绘面板（iframe 与占位页由状态驱动，无白屏路径）
     manager.onChange(() => this.render());
   }
@@ -64,6 +77,22 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       case 'showLogs':
         void vscode.commands.executeCommand('dsh.showLogs');
         break;
+      case 'bridgeOpenExternal':
+      case 'bridgeOpenFile':
+        // 桥接跳转消息统一走 host 的 handleBridgeMessage（内部分流外链/文件，做白名单与路径解析）
+        void handleBridgeMessage(msg, {
+          openExternal: (u) => vscode.env.openExternal(vscode.Uri.parse(u)),
+          // showTextDocument 返回 TextEditor，而依赖约定返回 Thenable<void>：用 async 包装丢弃返回值
+          openTextDocument: async (p) => {
+            await vscode.window.showTextDocument(vscode.Uri.file(p), { preview: false });
+          },
+          workspaceRoot: this.workspaceRoot(), // 见 Task 5 的 resolveWorkspaceRoot 结果
+        });
+        break;
+      case 'bridgeAck':
+        // 握手回执：通知注入的回调（Task 7 据此评估桥接状态）
+        this.onBridgeAck?.(msg.ok);
+        break;
     }
   }
 
@@ -79,7 +108,10 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
     switch (s.state) {
       case 'ready':
         this.wasConnected = true;
-        html = readyPage(s.url ?? `http://${host}:${port}/`, ctx);
+        html = readyPage(s.url ?? `http://${host}:${port}/`, ctx, {
+          token: this.bridgeToken,
+          enabled: true, // Task 6 引入 bridgeEnabled 设置后改由配置驱动
+        });
         break;
       case 'failed':
         html = errorPage(t, ctx, s.error ? t(s.error, s.errorVars) : t('err.loadFailed'));

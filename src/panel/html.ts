@@ -4,7 +4,7 @@ import type { MsgKey } from '../i18n';
 /** 翻译函数签名（把 i18n.t 传入模板） */
 export type T = (key: MsgKey, vars?: Record<string, string | number>) => string;
 
-/** 面板内按钮发回扩展的消息类型 */
+/** 面板内按钮发回扩展的消息类型（含桥接跳转与握手回执三类） */
 export type PanelMessage =
   | { type: 'retry' }
   | { type: 'reconnect' }
@@ -12,7 +12,10 @@ export type PanelMessage =
   | { type: 'restart' }
   | { type: 'stop' }
   | { type: 'copyUrl' }
-  | { type: 'showLogs' };
+  | { type: 'showLogs' }
+  | { type: 'bridgeOpenExternal'; url: string }
+  | { type: 'bridgeOpenFile'; path: string; cwd?: string }
+  | { type: 'bridgeAck'; ok: boolean };
 
 /** 渲染上下文 */
 export interface PageCtx {
@@ -58,6 +61,40 @@ document.addEventListener('click', (e) => {
 });
 `;
 
+/**
+ * 桥接握手脚本（内联，nonce 放行，紧随 BUTTON_SCRIPT 之后、共用其声明的 vscode）。
+ * 职责：向 iframe 下发 { kind:'bridgeHello', token } 握手消息，接收其 bridgeAck 回执，
+ * 并把 iframe 上行消息（openExternal / openFile）转发给扩展侧处理。
+ * 安全约束：仅接收「目标 origin」且「source 为 iframe 内容窗口」的消息，防止其它站点伪造。
+ * @param token 握手防伪凭据（与桥接侧 isBridgeMessage 校验的一致）
+ * @param allowedOrigin 允许的消息来源 origin（由 DSH 页面地址推导，如 http://127.0.0.1:3080）
+ */
+function bridgeHandshakeScript(token: string, allowedOrigin: string): string {
+  return `
+// dsh-bridge-handshake：DSH 页面桥接握手与消息路由
+const iframeEl = document.getElementById('dsh-frame');
+if (iframeEl) {
+  const iframeSrc = iframeEl.src;
+  window.addEventListener('message', (e) => {
+    // origin + source 双重校验：跨域 postMessage 的 event.origin 形如 http://127.0.0.1:3080
+    if (e.origin !== ${JSON.stringify(allowedOrigin)} || e.source !== iframeEl.contentWindow) return;
+    const d = e.data;
+    // 握手回执：统一形状 { kind:'bridgeAck', ok }（不带 token 字段），只读 ok
+    if (d && d.kind === 'bridgeAck') { vscode.postMessage({ type: 'bridgeAck', ok: d.ok === true }); return; }
+    // 打开外链：转发给扩展 → vscode.env.openExternal
+    if (d && d.kind === 'openExternal' && typeof d.url === 'string') { vscode.postMessage({ type: 'bridgeOpenExternal', url: d.url }); return; }
+    // 打开文件：转发给扩展 → showTextDocument（携带可选 cwd）
+    if (d && d.kind === 'openFile' && typeof d.path === 'string') {
+      vscode.postMessage({ type: 'bridgeOpenFile', path: d.path, cwd: typeof d.cwd === 'string' ? d.cwd : undefined });
+    }
+  });
+  // iframe 加载完成后向其中下发握手消息（携带 token），等待 bridgeAck 回执
+  iframeEl.addEventListener('load', () => {
+    iframeEl.contentWindow.postMessage({ kind: 'bridgeHello', token: ${JSON.stringify(token)} }, iframeSrc);
+  });
+}`;
+}
+
 /** HTML 转义（防御性，消息来自 i18n 但转义不费事） */
 function escapeHtml(s: string): string {
   return s
@@ -67,8 +104,11 @@ function escapeHtml(s: string): string {
     .replaceAll('"', '&quot;');
 }
 
-/** 页面外壳 */
-function shell(ctx: PageCtx, title: string, bodyClass: string, body: string): string {
+/**
+ * 页面外壳：公共骨架 + BUTTON_SCRIPT，可选追加额外内联脚本（如桥接握手脚本）。
+ * @param extraScripts 追加在 BUTTON_SCRIPT 之后、</body> 之前的内联脚本（含 <script> 标签）
+ */
+function shell(ctx: PageCtx, title: string, bodyClass: string, body: string, extraScripts = ''): string {
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -79,7 +119,7 @@ function shell(ctx: PageCtx, title: string, bodyClass: string, body: string): st
 <style>${STYLE}</style>
 </head>
 <body class="${bodyClass}">${body}
-<script nonce="${ctx.nonce}">${BUTTON_SCRIPT}</script>
+<script nonce="${ctx.nonce}">${BUTTON_SCRIPT}</script>${extraScripts}
 </body>
 </html>`;
 }
@@ -124,7 +164,15 @@ export function stoppedPage(t: T, ctx: PageCtx): string {
   );
 }
 
-/** 就绪页：全屏 iframe 加载真实 DSH 网页（无 sandbox，避免破坏页面自身功能） */
-export function readyPage(url: string, ctx: PageCtx): string {
-  return shell(ctx, 'DSH', 'frame-body', `<iframe class="frame" src="${url}"></iframe>`);
+/**
+ * 就绪页：全屏 iframe 加载真实 DSH 网页（无 sandbox，避免破坏页面自身功能）。
+ * 桥接启用时注入握手脚本，让顶层 webview 与 DSH 页面 iframe 建立握手并转发跳转消息。
+ * @param bridge 桥接配置（可选，向后兼容既有调用）：token 为握手凭据，enabled 为是否注入握手脚本
+ */
+export function readyPage(url: string, ctx: PageCtx, bridge?: { token: string; enabled: boolean }): string {
+  // 桥接启用时注入握手脚本；未传入或 enabled=false 时保持向后兼容，不注入
+  const extraScripts = bridge?.enabled
+    ? `<script nonce="${ctx.nonce}">${bridgeHandshakeScript(bridge.token, new URL(url).origin)}</script>`
+    : '';
+  return shell(ctx, 'DSH', 'frame-body', `<iframe id="dsh-frame" class="frame" src="${url}"></iframe>`, extraScripts);
 }
