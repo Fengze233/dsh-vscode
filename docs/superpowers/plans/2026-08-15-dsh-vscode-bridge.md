@@ -165,7 +165,7 @@ git commit -m "docs: 记录 DSH 客户端插件注册机制验证结论"
   - `buildOpenFileMessage(path: string, cwd: string | undefined): { kind: 'openFile'; path: string; cwd?: string }`
   - `buildSyncWorkspaceAck(ok: boolean, path?: string): { kind: 'bridgeAck'; ok: boolean; path?: string }`
   - `isBridgeMessage(data: unknown, token: string): boolean` — 校验 `data.token === token`
-  - `WORKSPACE_MESSAGE_KIND = 'syncWorkspace'`、`HANDSHAKE_TOKEN_KEY = 'dsh-vscode-bridge-token'`
+  - `WORKSPACE_MESSAGE_KIND = 'syncWorkspace'`、`HANDSHAKE_TOKEN_KEY = 'token'`（桥接消息字段名，握手/同步消息一律用 `token` 字段承载）
 - Consumes: Task 0 的注册形状结论（package.json 的 dsh.client 字段）。
 
 - [ ] **Step 1: 写失败测试**
