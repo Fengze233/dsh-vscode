@@ -2,3 +2,6 @@ node_modules/
 out/
 *.vsix
 .superpowers/
+
+# git worktree 工作区（本计划隔离开发用）
+.worktrees/
