@@ -25,7 +25,10 @@ window.__ModuleLoader__.load({
       // 握手：父页面下发 { kind: 'bridgeHello', token }，校验非空后回执 bridgeAck
       if (d.kind === "bridgeHello" && typeof d.token === "string" && d.token !== "") {
         bridgeToken = d.token;
-        parent.postMessage({ kind: "bridgeAck", ok: true, token: bridgeToken }, "*");
+        // 回执统一用 core.js 的 buildSyncWorkspaceAck 构造，形状与工作区同步回执一致
+        // （{ kind: 'bridgeAck', ok }，不带 token 字段）；顶层 webview 靠 origin + source
+        // 校验消息来源，Task 4 统一按 { kind: 'bridgeAck', ok } 解析，避免同 kind 两种形状。
+        parent.postMessage(buildSyncWorkspaceAck(true), "*");
         return;
       }
       // 后续消息统一校验 token（isBridgeMessage 来自内联的 core.js）
