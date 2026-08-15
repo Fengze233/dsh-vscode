@@ -66,10 +66,13 @@ document.addEventListener('click', (e) => {
  * 职责：
  *  - 下行：接收扩展发来的 { kind:'syncWorkspace', path }（无 token），补上 token 后转发给 iframe，
  *    让桥接侧把 VS Code 工作区落地为会话 cwd（fetch 拦截注入兜底）；
+ *    因晚开/重建面板时扩展可能在 iframe 加载完成前就下发 syncWorkspace（桥接监听器尚未注册、
+ *    消息会被静默丢弃），故先缓冲到 pendingPath，待 iframe load 后再补发；iframe 已加载则立即转发。
  *  - 上行：向 iframe 下发 { kind:'bridgeHello', token } 握手消息，接收其 bridgeAck 回执，
  *    并把 iframe 上行消息（openExternal / openFile）转发给扩展侧处理。
  * 安全约束：上行仅接收「目标 origin」且「source 为 iframe 内容窗口」的消息，防止其它站点伪造；
- * 下行与上行按 source 区分（下行 source 为 webview 自身、data 无 token 字段，避免互相干扰）。
+ * 下行与上行按 source 区分（下行 source 收紧为 webview 顶层 window 自身、data 无 token 字段，
+ * 避免误把非 iframe 来源——含 DSH 页面内嵌套 iframe——当成扩展消息携带 token 转发）。
  * @param token 握手防伪凭据（与桥接侧 isBridgeMessage 校验的一致）
  * @param allowedOrigin 允许的消息来源 origin（由 DSH 页面地址推导，如 http://127.0.0.1:3080）
  */
@@ -82,13 +85,26 @@ if (iframeEl) {
   // 握手 token 与允许的 DSH 页面 origin（下行转发时给桥接侧做来源校验）
   const TOKEN = ${JSON.stringify(token)};
   const ALLOWED_ORIGIN = ${JSON.stringify(allowedOrigin)};
+  // 下行工作区同步缓冲：晚开/重建面板时扩展可能在 iframe 加载完成前就下发 syncWorkspace，
+  // 此时桥接监听器尚未注册、消息会被静默丢弃，故先记录 pendingPath（可覆盖旧值，最后一次生效），
+  // 待 iframe load 后统一补发；iframe 已加载时立即转发。
+  let pendingPath = undefined;
+  // iframe 是否已加载完成：load 后下行同步可直接转发，无需再走缓冲
+  let iframeLoaded = false;
   window.addEventListener('message', (e) => {
     const d = e.data;
-    // —— 下行：扩展经 vscode.postMessage 发来的消息（source 为 webview 自身，非 iframe 内容窗口）——
+    // —— 下行：扩展经 vscode.postMessage 发来的消息（source 为 webview 顶层 window 自身）——
     // 特征：data.kind === 'syncWorkspace' 且不带 token 字段；据此与上行消息区分，避免互相干扰。
-    if (e.source !== iframeEl.contentWindow && d && d.kind === 'syncWorkspace' && typeof d.path === 'string') {
-      // 转发给 iframe：补上握手 token，桥接侧用 isBridgeMessage 校验来源后落地
-      iframeEl.contentWindow.postMessage({ kind: 'syncWorkspace', path: d.path, token: TOKEN }, ALLOWED_ORIGIN);
+    // 注意：不能以 e.source !== iframeEl.contentWindow 判定下行——那会把任何非 iframe 来源
+    // （含 DSH 页面内嵌套 iframe）误判为扩展消息并携带 token 转发；必须收紧为 e.source === window。
+    if (e.source === window && d && d.kind === 'syncWorkspace' && typeof d.path === 'string') {
+      if (iframeLoaded) {
+        // iframe 已加载：桥接监听器已就绪，立即转发（补 token 供桥接侧校验来源）
+        iframeEl.contentWindow.postMessage({ kind: 'syncWorkspace', path: d.path, token: TOKEN }, ALLOWED_ORIGIN);
+      } else {
+        // iframe 未加载：仅记录待同步路径，待 load 事件后统一补发
+        pendingPath = d.path;
+      }
       return;
     }
     // —— 上行：iframe 发来的消息，origin + source 双重校验 ——
@@ -102,9 +118,14 @@ if (iframeEl) {
       vscode.postMessage({ type: 'bridgeOpenFile', path: d.path, cwd: typeof d.cwd === 'string' ? d.cwd : undefined });
     }
   });
-  // iframe 加载完成后向其中下发握手消息（携带 token），等待 bridgeAck 回执
+  // iframe 加载完成后：先下发握手消息（携带 token），再补发缓冲的待同步路径
   iframeEl.addEventListener('load', () => {
+    iframeLoaded = true;
     iframeEl.contentWindow.postMessage({ kind: 'bridgeHello', token: TOKEN }, iframeSrc);
+    if (pendingPath !== undefined) {
+      iframeEl.contentWindow.postMessage({ kind: 'syncWorkspace', path: pendingPath, token: TOKEN }, ALLOWED_ORIGIN);
+      pendingPath = undefined;
+    }
   });
 }`;
 }
