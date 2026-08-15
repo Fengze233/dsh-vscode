@@ -43,6 +43,14 @@ test('readyPage 启用桥接时注入握手脚本', () => {
   assert.ok(html.includes('tok123'));
 });
 
+test('readyPage 握手脚本包含下行 syncWorkspace 转发（补 token）', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
+  // 下行转发：收到扩展发来的 {kind:'syncWorkspace', path}（无 token）时，
+  // 向 iframe 补发携带 token 的 {kind:'syncWorkspace', path, token}，供桥接侧校验来源。
+  assert.ok(html.includes("kind: 'syncWorkspace'"), '脚本应包含 syncWorkspace 下行转发逻辑');
+  assert.ok(html.includes("token: TOKEN"), '下行转发应向 iframe 补发握手 token');
+});
+
 test('readyPage 未启用桥接时不注入握手脚本', () => {
   const html = readyPage('http://127.0.0.1:3080/', ctx());
   // 未传第三参（或 enabled=false）时保持向后兼容，不注入握手脚本

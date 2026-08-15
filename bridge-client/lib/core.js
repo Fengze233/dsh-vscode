@@ -41,6 +41,15 @@ export function isBridgeMessage(data, token) {
   );
 }
 
+// 从父页面消息中解析"工作区同步"指令：token 校验通过且 kind/path 形状合法时返回 path，否则 undefined。
+// 把 client.js 父消息路由里"是否合法同步消息"的判断收敛为纯逻辑，便于 node 环境单测，
+// 也保证生产运行逻辑（内联进 client.js 工厂）与单测验证逻辑同一份源码。
+export function parseWorkspaceMessage(data, token) {
+  if (!isBridgeMessage(data, token)) return undefined;
+  if (data.kind !== WORKSPACE_MESSAGE_KIND) return undefined;
+  return typeof data.path === 'string' ? data.path : undefined;
+}
+
 // 工作区同步消息类型（父页面 → iframe）
 export const WORKSPACE_MESSAGE_KIND = 'syncWorkspace';
 // 握手 token 字段名（父页面发来的消息里携带）

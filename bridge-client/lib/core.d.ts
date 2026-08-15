@@ -16,6 +16,9 @@ export function buildSyncWorkspaceAck(ok: boolean, path?: string): { kind: 'brid
 /** 校验来自父页面的消息 token（握手防伪） */
 export function isBridgeMessage(data: unknown, token: string): boolean;
 
+/** 从父页面消息中解析工作区同步指令：合法返回 path，否则 undefined */
+export function parseWorkspaceMessage(data: unknown, token: string): string | undefined;
+
 /** 工作区同步消息类型（父页面 → iframe） */
 export const WORKSPACE_MESSAGE_KIND: 'syncWorkspace';
 

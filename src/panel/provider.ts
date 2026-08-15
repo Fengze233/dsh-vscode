@@ -27,18 +27,23 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
    * @param onFirstOpen 面板首次打开时调用一次的回调（用于引导提示，由入口注入）
    * @param onBridgeAck 桥接握手回执回调（Task 7 评估桥接状态时注入；可选）
    * @param workspaceRoot 工作区根目录注入函数（Task 5 工作区同步使用；可选，默认无根）
+   * @param pendingSyncPath 待补发的工作区同步路径 getter（服务就绪先于面板创建时补发；可选）
    */
   constructor(
     private manager: ServiceManager,
     private onFirstOpen?: () => void,
     private onBridgeAck?: (ok: boolean) => void,
     private workspaceRoot: () => string | undefined = () => undefined,
+    private pendingSyncPath?: () => string | undefined,
   ) {
     // 订阅状态变化，重绘面板（iframe 与占位页由状态驱动，无白屏路径）
     manager.onChange(() => this.render());
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
+    // 记录是否为「新创建」的 view：webview 重建（窗口重载等）时 this.view 与传入 view 不同对象，
+    // 需要补发一次下行工作区同步（否则重建后的 iframe 丢失已同步的 cwd）。
+    const isNewView = this.view !== view;
     this.view = view;
     // enableScripts 允许占位页的内联按钮脚本（nonce 放行）运行。
     // 注意：retainContextWhenHidden 不在这里设置——它不是 WebviewOptions 字段，
@@ -50,8 +55,24 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       this.onFirstOpen?.(); // 首次打开：触发一次性引导（如"移到右侧栏"提示）
     }
     this.render();
+    // 服务就绪后已同步过工作区，而此面板此刻才创建（或 webview 重建）：
+    // 补发一次下行同步消息，让 iframe 内桥接落地 cwd（notifySyncWorkspace 内部已判空）。
+    if (isNewView) {
+      const pending = this.pendingSyncPath?.();
+      if (pending !== undefined) this.notifySyncWorkspace(pending);
+    }
     // 面板打开即确保服务运行：复用已有或自动启动
     void this.manager.ensureRunning();
+  }
+
+  /**
+   * 向 webview 下发工作区同步指令（扩展 → webview 顶层 → iframe 桥接）。
+   * 顶层握手脚本会补上 token 后转发给 iframe；桥接侧校验后做 fetch 拦截注入 cwd 兜底。
+   * @param path VS Code 工作区根目录绝对路径（与 DSH workspace 的 path 一致）
+   */
+  notifySyncWorkspace(path: string): void {
+    // view 未创建时静默忽略：此时无法 postMessage，由 resolveWebviewView 的补发逻辑覆盖
+    this.view?.webview.postMessage({ kind: 'syncWorkspace', path });
   }
 
   /** 处理面板内按钮消息（全部转交给 manager 或对应命令） */

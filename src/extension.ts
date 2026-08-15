@@ -7,9 +7,13 @@ import { createProcessRunner } from './service/process';
 import { ServiceManager, type ManagerOptions } from './service/manager';
 import { DshPanelProvider } from './panel/provider';
 import { StatusBarController } from './statusbar';
+import { createDshApiClient } from './bridge/api';
+import { resolveWorkspaceRoot, syncWorkspace } from './bridge/sync';
 
 let manager: ServiceManager | null = null;
 let output: vscode.OutputChannel | null = null;
+/** 最近一次工作区同步成功的根目录（供服务就绪先于面板创建时补发下行同步） */
+let lastSyncedRoot: string | undefined;
 
 /** DshConfig → ManagerOptions（探测 3s、轮询 0.5s，与规格一致） */
 function toManagerOptions(config: DshConfig): ManagerOptions {
@@ -28,6 +32,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // 语言规则：vscode.env.language 以 zh- 开头 → 中文，其余一律英文
   initI18n(vscode.env.language);
   output = vscode.window.createOutputChannel('DSH');
+  lastSyncedRoot = undefined; // 重置上次同步记录（activate 理论上只调用一次，此处防御性初始化）
 
   const { config, errors } = readConfig();
   for (const err of errors) output?.appendLine(`[config] ${err}`);
@@ -39,12 +44,59 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   manager.setExitBehavior(!config.stopOnExit);
 
+  // 工作区根目录解析：多根工作区默认取第一个根（索引 0）。
+  // Task 6 引入 dsh.workspaceRootIndex 设置项后，把这里的硬编码 0 替换为 readConfig().config.workspaceRootIndex。
+  const workspaceRootGetter = (): string | undefined =>
+    resolveWorkspaceRoot(vscode.workspace.workspaceFolders ?? [], 0);
+  // 待补发路径 getter：syncOnce 成功后更新 lastSyncedRoot，面板晚于服务就绪创建时据此补发下行同步
+  const pendingSyncPath = (): string | undefined => lastSyncedRoot;
+
   // 左右两侧各一个 provider 实例，共享同一 manager（服务状态一致）
-  const panelPrimary = new DshPanelProvider(manager, () => {
-    void showSecondaryGuideOnce(context); // 首次打开面板弹一次入口引导
-  });
-  const panelSecondary = new DshPanelProvider(manager);
+  const panelPrimary = new DshPanelProvider(
+    manager,
+    () => {
+      void showSecondaryGuideOnce(context); // 首次打开面板弹一次入口引导
+    },
+    undefined, // onBridgeAck：Task 7 注入桥接状态评估回调
+    workspaceRootGetter, // workspaceRoot：文件相对路径解析的兜底基准
+    pendingSyncPath, // pendingSyncPath：服务就绪先于面板创建时补发同步
+  );
+  const panelSecondary = new DshPanelProvider(
+    manager,
+    undefined,
+    undefined,
+    workspaceRootGetter,
+    pendingSyncPath,
+  );
   new StatusBarController(manager);
+
+  // 服务就绪后首次触发一次工作区同步（幂等：list 命中复用，否则 create）
+  let syncedOnce = false;
+  manager.onChange((s) => {
+    if (s.state === 'ready' && !syncedOnce) {
+      syncedOnce = true;
+      void syncOnce();
+    }
+  });
+
+  /** 工作区同步主流程：解析根目录 → 幂等 syncWorkspace → 通知两个面板下发 */
+  async function syncOnce(): Promise<void> {
+    const root = workspaceRootGetter();
+    if (root === undefined) return; // 无工作区（空窗口）不同步
+    try {
+      const snap = manager?.getSnapshot();
+      if (!snap?.url) return; // ready 状态必有 url，此处防御性兜底
+      // 幂等同步：list 命中复用，否则 create（Task 3 的 DSH API 信封客户端）
+      await syncWorkspace(createDshApiClient(snap.url), root);
+      lastSyncedRoot = root; // 成功后记录，供后续创建的面板补发
+      // 通知两个面板下发 syncWorkspace（view 未创建时 postMessage 静默忽略，由 resolveWebviewView 补发）
+      panelPrimary.notifySyncWorkspace(root);
+      panelSecondary.notifySyncWorkspace(root);
+    } catch (err) {
+      // 同步失败只记日志，不打断面板与桥接其余功能
+      output?.appendLine(`[bridge] sync workspace failed: ${String(err)}`);
+    }
+  }
 
   context.subscriptions.push(
     // 第三参数：隐藏面板时保留 webview（iframe 不销毁、DSH 页面会话不丢）

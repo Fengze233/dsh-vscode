@@ -63,22 +63,36 @@ document.addEventListener('click', (e) => {
 
 /**
  * 桥接握手脚本（内联，nonce 放行，紧随 BUTTON_SCRIPT 之后、共用其声明的 vscode）。
- * 职责：向 iframe 下发 { kind:'bridgeHello', token } 握手消息，接收其 bridgeAck 回执，
- * 并把 iframe 上行消息（openExternal / openFile）转发给扩展侧处理。
- * 安全约束：仅接收「目标 origin」且「source 为 iframe 内容窗口」的消息，防止其它站点伪造。
+ * 职责：
+ *  - 下行：接收扩展发来的 { kind:'syncWorkspace', path }（无 token），补上 token 后转发给 iframe，
+ *    让桥接侧把 VS Code 工作区落地为会话 cwd（fetch 拦截注入兜底）；
+ *  - 上行：向 iframe 下发 { kind:'bridgeHello', token } 握手消息，接收其 bridgeAck 回执，
+ *    并把 iframe 上行消息（openExternal / openFile）转发给扩展侧处理。
+ * 安全约束：上行仅接收「目标 origin」且「source 为 iframe 内容窗口」的消息，防止其它站点伪造；
+ * 下行与上行按 source 区分（下行 source 为 webview 自身、data 无 token 字段，避免互相干扰）。
  * @param token 握手防伪凭据（与桥接侧 isBridgeMessage 校验的一致）
  * @param allowedOrigin 允许的消息来源 origin（由 DSH 页面地址推导，如 http://127.0.0.1:3080）
  */
 function bridgeHandshakeScript(token: string, allowedOrigin: string): string {
   return `
-// dsh-bridge-handshake：DSH 页面桥接握手与消息路由
+// dsh-bridge-handshake：DSH 页面桥接握手与消息路由（上行转发 + 下行同步）
 const iframeEl = document.getElementById('dsh-frame');
 if (iframeEl) {
   const iframeSrc = iframeEl.src;
+  // 握手 token 与允许的 DSH 页面 origin（下行转发时给桥接侧做来源校验）
+  const TOKEN = ${JSON.stringify(token)};
+  const ALLOWED_ORIGIN = ${JSON.stringify(allowedOrigin)};
   window.addEventListener('message', (e) => {
-    // origin + source 双重校验：跨域 postMessage 的 event.origin 形如 http://127.0.0.1:3080
-    if (e.origin !== ${JSON.stringify(allowedOrigin)} || e.source !== iframeEl.contentWindow) return;
     const d = e.data;
+    // —— 下行：扩展经 vscode.postMessage 发来的消息（source 为 webview 自身，非 iframe 内容窗口）——
+    // 特征：data.kind === 'syncWorkspace' 且不带 token 字段；据此与上行消息区分，避免互相干扰。
+    if (e.source !== iframeEl.contentWindow && d && d.kind === 'syncWorkspace' && typeof d.path === 'string') {
+      // 转发给 iframe：补上握手 token，桥接侧用 isBridgeMessage 校验来源后落地
+      iframeEl.contentWindow.postMessage({ kind: 'syncWorkspace', path: d.path, token: TOKEN }, ALLOWED_ORIGIN);
+      return;
+    }
+    // —— 上行：iframe 发来的消息，origin + source 双重校验 ——
+    if (e.origin !== ALLOWED_ORIGIN || e.source !== iframeEl.contentWindow) return;
     // 握手回执：统一形状 { kind:'bridgeAck', ok }（不带 token 字段），只读 ok
     if (d && d.kind === 'bridgeAck') { vscode.postMessage({ type: 'bridgeAck', ok: d.ok === true }); return; }
     // 打开外链：转发给扩展 → vscode.env.openExternal
@@ -90,7 +104,7 @@ if (iframeEl) {
   });
   // iframe 加载完成后向其中下发握手消息（携带 token），等待 bridgeAck 回执
   iframeEl.addEventListener('load', () => {
-    iframeEl.contentWindow.postMessage({ kind: 'bridgeHello', token: ${JSON.stringify(token)} }, iframeSrc);
+    iframeEl.contentWindow.postMessage({ kind: 'bridgeHello', token: TOKEN }, iframeSrc);
   });
 }`;
 }
