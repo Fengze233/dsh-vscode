@@ -86,6 +86,8 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
           openTextDocument: async (p) => {
             await vscode.window.showTextDocument(vscode.Uri.file(p), { preview: false });
           },
+          // 用户提示统一走 vscode.window.showWarningMessage（host 层不 import vscode，保持纯逻辑可单测）
+          showWarning: (m) => void vscode.window.showWarningMessage(m),
           workspaceRoot: this.workspaceRoot(), // 见 Task 5 的 resolveWorkspaceRoot 结果
         });
         break;

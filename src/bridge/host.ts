@@ -3,7 +3,6 @@
 // VS Code 动作（打开外部浏览器 / 打开文本文档），并做协议白名单与路径解析的纵深防御。
 // 依赖注入设计：生产侧接 vscode API（openExternal / showTextDocument），测试侧注入假实现，
 // 保证纯逻辑可被 node:test 直接验证。
-import * as vscode from 'vscode';
 import { isAbsolute, resolve } from 'node:path';
 import type { PanelMessage } from '../panel/html';
 
@@ -13,8 +12,21 @@ export interface BridgeMessageDeps {
   openExternal(url: string): Thenable<boolean>;
   /** 打开文本文档（生产接 vscode.window.showTextDocument） */
   openTextDocument(path: string): Thenable<void>;
+  /** 弹用户可见提示（生产接 vscode.window.showWarningMessage，测试注入假实现以断言） */
+  showWarning(msg: string): void;
   /** 工作区根目录（相对路径解析的兜底基准，生产由 Task 5 注入） */
   workspaceRoot?: string;
+}
+
+/**
+ * 提取错误摘要：优先取 Error.message，其余类型做保守的字符串化，兜底空串。
+ * 用于把打开失败原因并入用户提示，避免把内部错误对象原样展示。
+ */
+function errSummary(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  if (err === null || err === undefined) return '';
+  return String(err);
 }
 
 /**
@@ -49,10 +61,16 @@ export async function handleBridgeMessage(msg: PanelMessage, deps: BridgeMessage
   if (msg.type === 'bridgeOpenFile') {
     const r = resolveBridgePath(msg.path, msg.cwd, deps.workspaceRoot);
     if (r.kind === 'abs') {
-      await deps.openTextDocument(r.path);
+      try {
+        // 打开文档可能因文件不存在/无权限等失败，捕获后给用户可见反馈而非未处理拒绝
+        await deps.openTextDocument(r.path);
+      } catch (err) {
+        // 文案内联固定提示（本模块纯逻辑，直接断言，与 Task 7 的 i18n 无关）
+        deps.showWarning(`无法打开文件：${r.path}（${errSummary(err)}）`);
+      }
     } else {
       // 路径无法解析（危险协议或缺少基准目录）：仅弹提示，不打断面板与桥接流程
-      void vscode.window.showWarningMessage(`无法解析路径：${msg.path}`);
+      deps.showWarning(`无法解析路径：${msg.path}`);
     }
     return;
   }
