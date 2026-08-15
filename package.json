@@ -1,5 +1,5 @@
 {
-  "name": "dsh-for-vscode",
+  "name": "dsh-vscode-panel",
   "displayName": "DSH",
   "description": "在 VS Code 侧边栏中使用 DeepSeek Harness（DSH）网页界面",
   "version": "0.1.0",
