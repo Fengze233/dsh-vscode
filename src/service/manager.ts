@@ -26,6 +26,8 @@ export interface ManagerOptions {
   port: number;
   extraArgs: string[];
   autoStart: boolean;
+  /** 子进程工作目录（兜底：让 dsh web 以 VS Code 工作区为 cwd，缺省则不指定） */
+  cwd?: string;
   /** 单次探测超时（毫秒） */
   timeoutMs: number;
   /** 等待就绪的轮询间隔（毫秒） */
@@ -183,6 +185,7 @@ export class ServiceManager {
         host: this.opts.host,
         port: this.opts.port,
         extraArgs: this.opts.extraArgs,
+        cwd: this.opts.cwd,
       });
     } catch (err) {
       this.deps.log(`[process] 启动失败: ${String(err)}`);

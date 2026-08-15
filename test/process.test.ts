@@ -1,6 +1,7 @@
 // test/process.test.ts — 子进程封装的单元测试（注入假 spawn）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import type { SpawnOptions } from 'node:child_process';
 import { createProcessRunner, type ChildProcessLike, type SpawnFn } from '../src/service/process';
 
 /** 假子进程：记录 kill 调用、可手动触发 exit/error 事件 */
@@ -61,4 +62,15 @@ test('lastChild 记录最近一次启动的子进程（测试钩子）', () => {
   const runner = createProcessRunner(() => new FakeChild(), 'linux');
   const child = runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
   assert.equal(runner.lastChild, child);
+});
+
+test('startDsh 透传 cwd 到 spawn 选项', () => {
+  const calls: { cmd: string; args: string[]; opts: SpawnOptions }[] = [];
+  const spawnImpl: SpawnFn = (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    return new FakeChild();
+  };
+  const runner = createProcessRunner(spawnImpl, 'linux');
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], cwd: '/proj' });
+  assert.equal(calls[0].opts.cwd, '/proj');
 });

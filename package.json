@@ -172,6 +172,22 @@
           },
           "default": [],
           "markdownDescription": "%dsh.config.extraArgs%"
+        },
+        "dsh.bridge.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%dsh.config.bridgeEnabled%"
+        },
+        "dsh.workspaceRootIndex": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "%dsh.config.workspaceRootIndex%"
+        },
+        "dsh.bridge.silenceWarning": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%dsh.config.bridgeSilenceWarning%"
         }
       }
     }

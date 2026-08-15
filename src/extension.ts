@@ -22,6 +22,8 @@ function toManagerOptions(config: DshConfig): ManagerOptions {
     port: config.port,
     extraArgs: config.extraArgs,
     autoStart: config.autoStart,
+    // 子进程工作目录兜底：按 dsh.workspaceRootIndex 解析工作区根目录，让 dsh web 以工作区为 cwd
+    cwd: resolveWorkspaceRoot(vscode.workspace.workspaceFolders ?? [], config.workspaceRootIndex),
     timeoutMs: 3000,
     pollMs: 500,
   };
@@ -44,10 +46,9 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   manager.setExitBehavior(!config.stopOnExit);
 
-  // 工作区根目录解析：多根工作区默认取第一个根（索引 0）。
-  // Task 6 引入 dsh.workspaceRootIndex 设置项后，把这里的硬编码 0 替换为 readConfig().config.workspaceRootIndex。
+  // 工作区根目录解析：多根工作区按 dsh.workspaceRootIndex 取根（越界回退第一个）。
   const workspaceRootGetter = (): string | undefined =>
-    resolveWorkspaceRoot(vscode.workspace.workspaceFolders ?? [], 0);
+    resolveWorkspaceRoot(vscode.workspace.workspaceFolders ?? [], readConfig().config.workspaceRootIndex);
   // 待补发路径 getter：syncOnce 成功后更新 lastSyncedRoot，面板晚于服务就绪创建时据此补发下行同步
   const pendingSyncPath = (): string | undefined => lastSyncedRoot;
 

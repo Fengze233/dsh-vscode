@@ -10,6 +10,12 @@ export interface RawDshConfig {
   autoStart?: boolean;
   stopOnExit?: boolean;
   extraArgs?: string[];
+  /** 是否启用桥接（dsh.bridge.enabled） */
+  bridgeEnabled?: boolean;
+  /** 多根工作区取第几个根目录（dsh.workspaceRootIndex） */
+  workspaceRootIndex?: number;
+  /** 是否抑制桥接警告（dsh.bridge.silenceWarning） */
+  silenceWarning?: boolean;
 }
 
 /** 规范化后的配置（均有合法默认值） */
@@ -19,6 +25,12 @@ export interface DshConfig {
   autoStart: boolean;
   stopOnExit: boolean;
   extraArgs: string[];
+  /** 是否启用桥接（dsh.bridge.enabled） */
+  bridgeEnabled: boolean;
+  /** 多根工作区取第几个根目录（dsh.workspaceRootIndex） */
+  workspaceRootIndex: number;
+  /** 是否抑制桥接警告（dsh.bridge.silenceWarning） */
+  silenceWarning: boolean;
 }
 
 /** 默认配置 */
@@ -28,6 +40,9 @@ export const DEFAULTS: DshConfig = {
   autoStart: true,
   stopOnExit: true,
   extraArgs: [],
+  bridgeEnabled: true,
+  workspaceRootIndex: 0,
+  silenceWarning: false,
 };
 
 /** 安全边界：仅允许回环地址 */
@@ -72,7 +87,29 @@ export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors:
     ? raw.extraArgs.filter((a): a is string => typeof a === 'string')
     : DEFAULTS.extraArgs;
 
-  return { config: { host, port, autoStart, stopOnExit, extraArgs }, errors };
+  // 布尔设置沿用 autoStart 的缺省处理模式：仅接受布尔值，否则回退默认（不记错误）
+  const bridgeEnabled = typeof raw.bridgeEnabled === 'boolean' ? raw.bridgeEnabled : DEFAULTS.bridgeEnabled;
+  const silenceWarning = typeof raw.silenceWarning === 'boolean' ? raw.silenceWarning : DEFAULTS.silenceWarning;
+
+  // workspaceRootIndex：必须为非负整数，非法值回退默认并记录错误
+  let workspaceRootIndex: number;
+  if (raw.workspaceRootIndex === undefined) {
+    workspaceRootIndex = DEFAULTS.workspaceRootIndex;
+  } else if (
+    typeof raw.workspaceRootIndex !== 'number' ||
+    !Number.isInteger(raw.workspaceRootIndex) ||
+    raw.workspaceRootIndex < 0
+  ) {
+    errors.push(`dsh.workspaceRootIndex must be a non-negative integer, got ${JSON.stringify(raw.workspaceRootIndex)}`);
+    workspaceRootIndex = DEFAULTS.workspaceRootIndex;
+  } else {
+    workspaceRootIndex = raw.workspaceRootIndex;
+  }
+
+  return {
+    config: { host, port, autoStart, stopOnExit, extraArgs, bridgeEnabled, workspaceRootIndex, silenceWarning },
+    errors,
+  };
 }
 
 /** 从 VS Code 设置读取（薄封装，供 extension.ts 使用） */
@@ -84,5 +121,8 @@ export function readConfig(): { config: DshConfig; errors: string[] } {
     autoStart: ws.get<boolean>('autoStart'),
     stopOnExit: ws.get<boolean>('stopOnExit'),
     extraArgs: ws.get<string[]>('extraArgs'),
+    bridgeEnabled: ws.get<boolean>('bridge.enabled'),
+    workspaceRootIndex: ws.get<number>('workspaceRootIndex'),
+    silenceWarning: ws.get<boolean>('bridge.silenceWarning'),
   });
 }
