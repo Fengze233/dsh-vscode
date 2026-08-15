@@ -16,8 +16,8 @@ import {
 } from '../../src/bridge/installer';
 
 // 内存 fs：files 是路径→内容，dirs 是目录集合。
-// copyDir 只象征性落一个 package.json，用于让 exists(dest) 为真；
-// 真实递归复制由生产侧的 createNodeFs（fs.cpSync recursive）负责，此处不模拟。
+// copyDir 落一个含 `"name"` 的 package.json，满足幂等分支「读 package.json 验证」的要求，
+// 同时让 exists(dest) 为真；真实递归复制由生产侧的 createNodeFs（fs.cpSync recursive）负责，此处不模拟。
 function makeMemFs(init: Record<string, string> = {}): InstallerFs {
   const files = new Map(Object.entries(init));
   const dirs = new Set<string>();
@@ -26,7 +26,7 @@ function makeMemFs(init: Record<string, string> = {}): InstallerFs {
     readFile: (p) => { const v = files.get(p); if (v === undefined) throw new Error(`no such file: ${p}`); return v; },
     writeFile: (p, c) => { files.set(p, c); },
     mkdir: (p) => { dirs.add(p); },
-    copyDir: (src, dest) => { dirs.add(dest); files.set(`${dest}/package.json`, `{"copied":"${src}"}`); },
+    copyDir: (src, dest) => { dirs.add(dest); files.set(`${dest}/package.json`, `{"name":"dsh-vscode-bridge","copied":"${src}"}`); },
     rmDir: (p) => { dirs.delete(p); },
     readdir: () => [],
   };
@@ -142,4 +142,105 @@ test('createNodeFs 返回 InstallerFs 的 7 个方法', () => {
   for (const m of ['exists', 'readFile', 'writeFile', 'mkdir', 'copyDir', 'rmDir', 'readdir'] as const) {
     assert.equal(typeof fs[m], 'function', `${m} 应为函数`);
   }
+});
+
+// 可注入单路径失败的 fs：在原 makeMemFs 之上按路径覆盖某方法的实现。
+// 用于模拟 chmod 000（package.json 读抛错，rmDir 操作抛错）等坏包场景，
+// 不影响其余路径的正常读写。
+interface FailPathFs extends InstallerFs {
+  failReadPaths: Set<string>;
+  failRmPaths: Set<string>;
+  failCopy: boolean;
+}
+function makeFailableFs(init: Record<string, string> = {}): FailPathFs {
+  const base = makeMemFs(init);
+  const failReadPaths = new Set<string>();
+  const failRmPaths = new Set<string>();
+  let failCopy = false;
+  return {
+    ...base,
+    failReadPaths,
+    failRmPaths,
+    get failCopy() { return failCopy; },
+    set failCopy(v: boolean) { failCopy = v; },
+    readFile: (p) => {
+      if (failReadPaths.has(p)) throw new Error(`EACCES: permission denied: ${p}`);
+      const v = base.readFile(p);
+      return v;
+    },
+    rmDir: (p) => {
+      if (failRmPaths.has(p)) throw new Error(`EBUSY: cannot remove: ${p}`);
+      base.rmDir(p);
+    },
+    copyDir: (src, dest) => {
+      if (failCopy) throw new Error(`EACCES: copy failed: ${src}`);
+      base.copyDir(src, dest);
+    },
+  };
+}
+
+test('首次安装 copyDir 抛错 → degraded、patch 字节级还原、无桥接目录', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const original = '# 用户自己的内容\n- id: user-plugin\n  name: user-plugin\n';
+  const fs = makeFailableFs({ [patchPath]: original });
+  fs.mkdir(profile);
+  fs.failCopy = true;
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs };
+  const r = installBridge(opts);
+  assert.equal(r.status, 'degraded');
+  assert.ok(r.reason && /copy/i.test(r.reason), 'reason 应包含失败原因');
+  // patch 必须回滚为安装前字节（绝不残留「有条目但包不可用」）
+  assert.equal(fs.readFile(patchPath), original);
+  // 无桥接目录
+  assert.equal(fs.exists(`${profile}/node_modules/dsh-vscode-bridge`), false);
+});
+
+test('幂等分支 package.json 不可读且 rmDir 抛错 → degraded、patch 回滚为无条目', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  // 注释头 + []（空数组形态），安装→卸载应字节级还原为原始内容
+  const original = '# Your patch layer for this dsh profile\n[]\n';
+  const fs = makeFailableFs({ [patchPath]: original });
+  fs.mkdir(profile);
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs };
+  installBridge(opts); // 正常完成一次安装
+
+  // 模拟 chmod 000：package.json 读取抛错 → 进入强制重装；rmDir 也抛错 → 回滚条目
+  const bridgeDir = `${profile}/node_modules/dsh-vscode-bridge`;
+  const pkgPath = `${bridgeDir}/package.json`;
+  fs.failReadPaths.add(pkgPath);
+  fs.failRmPaths.add(bridgeDir);
+
+  const r = installBridge(opts);
+  assert.equal(r.status, 'degraded');
+  assert.ok(r.reason);
+  // patch 回滚为「无桥接条目」的原始内容（注释头 + []，与 uninstallBridge 的 was-empty-array 还原一致）
+  assert.equal(fs.readFile(patchPath), original);
+});
+
+test('幂等分支 package.json 不可读、rmDir+copyDir 成功 → ok、patch 保留、目录为 source 副本', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const original = '# 用户自己的内容\n';
+  const fs = makeFailableFs({ [patchPath]: original });
+  fs.mkdir(profile);
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs };
+  installBridge(opts);
+  const after = fs.readFile(patchPath);
+
+  // 坏包（package.json 读抛错），但 rmDir/copyDir 正常 → 强制重装成功
+  const bridgeDir = `${profile}/node_modules/dsh-vscode-bridge`;
+  const pkgPath = `${bridgeDir}/package.json`;
+  fs.failReadPaths.add(pkgPath);
+
+  const r = installBridge(opts);
+  assert.equal(r.status, 'ok');
+  // patch 保留条目（不删除、不追加）
+  assert.equal(fs.readFile(patchPath), after);
+  // 强装成功后坏包标记清除，目录内容应为 source 副本（含 name）
+  fs.failReadPaths.delete(pkgPath);
+  const pkg = fs.readFile(`${bridgeDir}/package.json`);
+  assert.ok(pkg.includes('"name"'));
+  assert.ok(pkg.includes(opts.bridgeSourceDir));
 });

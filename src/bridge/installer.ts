@@ -104,7 +104,9 @@ function findEmptyArrayHead(content: string): string {
 /**
  * 幂等安装桥接包：
  * - profile 缺失 → degraded；
- * - 条目已存在 → ok（目录若被 pnpm 清理则补回）；
+ * - 条目已存在 → 可用性验证（读 package.json），完好则 ok，
+ *   坏包（权限/损坏）则强制重装，重装失败则回滚条目为 degraded；
+ * - 首次安装 → 写条目 + 复制目录，copyDir 失败回滚条目为 degraded；
  * - 顶层空数组 → 整文件改写为块序列（含 insert: 条目）；
  * - 已有用户内容 → 去尾随空白后追加 insert: 条目。
  */
@@ -120,15 +122,40 @@ export function installBridge(opts: BridgeInstallOptions): BridgeInstallResult {
   const existing = opts.fs.exists(patchPath) ? opts.fs.readFile(patchPath) : '';
 
   if (existing.includes(BRIDGE_BEGIN_MARK)) {
-    // 已安装：幂等返回；桥接目录可能被 pnpm 清理，顺手补回
-    ensureBridgeDir(opts, profileDir, bridgeDir);
-    return { status: 'ok', profileDir, bridgeDir };
+    // 已存在条目：仅 exists(bridgeDir) 会漏掉「目录在但 package.json 不可读」的坏包（chmod 000 事故），
+    // 必须做可用性验证——能读到含 `"name"` 的 package.json 才算已安装完好。
+    if (isBridgeUsable(bridgeDir, opts.fs)) {
+      return { status: 'ok', profileDir, bridgeDir };
+    }
+    // 坏包：强制重装（删掉坏目录后重新复制）。
+    try {
+      opts.fs.rmDir(bridgeDir);
+      copyBridgeDir(opts, profileDir, bridgeDir);
+      return { status: 'ok', profileDir, bridgeDir };
+    } catch (e) {
+      // 删除或复制失败（权限锁死等）：回滚 patch 条目，避免「有条目但包不可用」导致 DSH 启动失败。
+      // 回滚后 DSH 至少能干净启动，用户可手工修权限后再重试安装。
+      uninstallBridge(opts);
+      return { status: 'degraded', reason: `reinstall failed: ${errMsg(e)}`, profileDir, bridgeDir };
+    }
   }
 
-  // 写入 insert: 条目（含 begin/end 标记，供卸载时精确删除）
+  // 首次安装：写条目前保存原文，供 copyDir 失败时回滚，绝不残留「有条目但包不可用」。
+  const originalPatch = existing;
   writePatchEntry(opts.fs, patchPath, existing);
-  ensureBridgeDir(opts, profileDir, bridgeDir);
+  try {
+    copyBridgeDir(opts, profileDir, bridgeDir);
+  } catch (e) {
+    // 复制失败：还原 patch 原文，返回 degraded（自愈不成功时至少不破坏 DSH）。
+    opts.fs.writeFile(patchPath, originalPatch);
+    return { status: 'degraded', reason: `copy failed: ${errMsg(e)}`, profileDir, bridgeDir };
+  }
   return { status: 'ok', profileDir, bridgeDir };
+}
+
+/** 提取 Error 的 message（未知抛出物兜底为字符串化） */
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 /** 卸载：删除带标记的 insert: 条目段（其余内容原样保留）+ 删除桥接目录 */
@@ -161,7 +188,15 @@ export function uninstallBridge(opts: BridgeInstallOptions): void {
     }
   }
   const bridgeDir = join(profileDir, 'node_modules', BRIDGE_PACKAGE_NAME);
-  if (opts.fs.exists(bridgeDir)) opts.fs.rmDir(bridgeDir);
+  // 目录删除为尽力而为：权限锁死等场景下 rmDir 可能抛错，
+  // 卸载的核心是回滚 patch 条目（保证 DSH 可干净启动），目录删除失败不应中断卸载。
+  if (opts.fs.exists(bridgeDir)) {
+    try {
+      opts.fs.rmDir(bridgeDir);
+    } catch {
+      // 忽略：目录残留不影响 DSH 启动，用户可后续手工清理
+    }
+  }
 }
 
 /**
@@ -219,11 +254,25 @@ function buildPatchEntry(beginMark: string): string {
 }
 
 /**
- * 确保桥接目录存在：node_modules 缺失则创建，桥接目录缺失则从 bridgeSourceDir 复制。
- * 生产侧 copyDir 用 fs.cpSync recursive，会同时创建目标目录与其父级。
+ * 可用性验证：桥接目录完好与否，取决于能否读到含 `"name"` 字段的 package.json。
+ * 读取抛错（权限不可读/chmod 000）或内容不含 `"name"` 均视为坏包 → 需要强制重装。
+ * 仅 exist 判定会漏掉「目录在但包不可读」的坏场景（生产事故根因之一）。
  */
-function ensureBridgeDir(opts: BridgeInstallOptions, profileDir: string, bridgeDir: string): void {
-  if (opts.fs.exists(bridgeDir)) return;
+function isBridgeUsable(bridgeDir: string, fs: InstallerFs): boolean {
+  const pkgPath = join(bridgeDir, 'package.json');
+  try {
+    return fs.readFile(pkgPath).includes('"name"');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 复制桥接目录：node_modules 缺失则先创建，再递归复制 source → bridgeDir。
+ * 生产侧 copyDir 用 fs.cpSync recursive，会同时创建目标目录与其父级。
+ * 复制可能抛错（磁盘满/权限），由调用方负责回滚 patch。
+ */
+function copyBridgeDir(opts: BridgeInstallOptions, profileDir: string, bridgeDir: string): void {
   const nmDir = join(profileDir, 'node_modules');
   if (!opts.fs.exists(nmDir)) opts.fs.mkdir(nmDir);
   opts.fs.copyDir(opts.bridgeSourceDir, bridgeDir);
