@@ -9,6 +9,8 @@
   "dsh.cmd.stop.title": "Stop Service",
   "dsh.cmd.copyUrl.title": "Copy URL",
   "dsh.cmd.showLogs.title": "Show Logs",
+  "dsh.cmd.bridgeRetry.title": "DSH: Retry Bridge Install",
+  "dsh.cmd.bridgeUninstall.title": "DSH: Uninstall Bridge",
   "dsh.config.host": "Service host. Only loopback values (`127.0.0.1` / `localhost` / `[::1]`) are allowed; invalid values fall back to the default.",
   "dsh.config.port": "Expected port for the DSH web service (used for both detection and startup).",
   "dsh.config.autoStart": "Automatically start `dsh web` when the service is not running.",

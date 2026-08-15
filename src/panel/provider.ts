@@ -28,6 +28,8 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
    * @param onBridgeAck 桥接握手回执回调（Task 7 评估桥接状态时注入；可选）
    * @param workspaceRoot 工作区根目录注入函数（Task 5 工作区同步使用；可选，默认无根）
    * @param pendingSyncPath 待补发的工作区同步路径 getter（服务就绪先于面板创建时补发；可选）
+   * @param bridgeEnabled 桥接是否启用的 getter（Task 7 由 dsh.bridge.enabled 配置驱动；默认启用，
+   *   disabled 时不注入握手脚本，避免向未安装桥接的 DSH 页面发送无意义的握手）
    */
   constructor(
     private manager: ServiceManager,
@@ -35,6 +37,7 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
     private onBridgeAck?: (ok: boolean) => void,
     private workspaceRoot: () => string | undefined = () => undefined,
     private pendingSyncPath?: () => string | undefined,
+    private bridgeEnabled: () => boolean = () => true,
   ) {
     // 订阅状态变化，重绘面板（iframe 与占位页由状态驱动，无白屏路径）
     manager.onChange(() => this.render());
@@ -133,7 +136,7 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
         this.wasConnected = true;
         html = readyPage(s.url ?? `http://${host}:${port}/`, ctx, {
           token: this.bridgeToken,
-          enabled: true, // Task 6 引入 bridgeEnabled 设置后改由配置驱动
+          enabled: this.bridgeEnabled(), // 由 dsh.bridge.enabled 配置驱动（Task 7 接入）
         });
         break;
       case 'failed':

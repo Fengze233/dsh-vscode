@@ -104,6 +104,14 @@
         "command": "dsh.showLogs",
         "title": "%dsh.cmd.showLogs.title%",
         "icon": "$(output)"
+      },
+      {
+        "command": "dsh.bridge.retry",
+        "title": "%dsh.cmd.bridgeRetry.title%"
+      },
+      {
+        "command": "dsh.bridge.uninstall",
+        "title": "%dsh.cmd.bridgeUninstall.title%"
       }
     ],
     "menus": {
