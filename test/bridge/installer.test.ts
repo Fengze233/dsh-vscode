@@ -10,6 +10,7 @@ import {
   createNodeFs,
   BRIDGE_BEGIN_MARK,
   BRIDGE_END_MARK,
+  BRIDGE_BEGIN_MARK_WAS_EMPTY,
   BRIDGE_PACKAGE_NAME,
   type InstallerFs,
 } from '../../src/bridge/installer';
@@ -98,19 +99,42 @@ test('默认模板（注释 + []）改写为块序列，而非在 [] 后追加',
   const profile = '/home/u/.dsh/profiles/web';
   const patchPath = `${profile}/cordis.patch.yml`;
   // 模拟 DSH 初始化的真实默认文件：说明注释 + 顶层流式空数组 []
-  const fs = makeMemFs({ [patchPath]: '# Your patch layer for this dsh profile\n# a top-level YAML array of loader patch entries\n[]\n' });
+  const original = '# Your patch layer for this dsh profile\n# a top-level YAML array of loader patch entries\n[]\n';
+  const fs = makeMemFs({ [patchPath]: original });
   fs.mkdir(profile);
   const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs };
   installBridge(opts);
   const after = fs.readFile(patchPath);
   assert.ok(after.includes(BRIDGE_BEGIN_MARK));
+  assert.ok(after.includes(BRIDGE_BEGIN_MARK_WAS_EMPTY)); // 空数组改写分支需带元数据
   assert.ok(after.includes('- insert:'));
   assert.ok(after.includes(`- id: ${BRIDGE_PACKAGE_NAME}`));
   // 关键：不得出现「[] 后直接跟块序列」的非法形状（Task 0 实测会导致整个 YAML 解析失败 fail-loud）
   assert.ok(!/\[\]\s*\n# dsh-vscode-bridge: begin/.test(after));
-  // 卸载还原为 []
+  // 卸载按字节级还原安装前内容（注释头 + []，而非仅剩 []）
   uninstallBridge(opts);
-  assert.equal(fs.readFile(patchPath), '[]\n');
+  assert.equal(fs.readFile(patchPath), original);
+});
+
+test('注释头 + [] 空数组：安装→卸载后字节级还原（不丢注释头）', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  // 模拟默认 profile 原始文件：3 行注释头 + []（实测 217 字节的形态）
+  const init = '# Your patch layer for this dsh profile, applied after every bundle layer:\n# a top-level YAML array of loader patch entries (id-targeted config\n# overrides, disables, and insert lists; `!!js` expressions allowed).\n[]\n';
+  const fs = makeMemFs({ [patchPath]: init });
+  fs.mkdir(profile);
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs };
+  const r = installBridge(opts);
+  assert.equal(r.status, 'ok');
+  const after = fs.readFile(patchPath);
+  // 安装后应保留注释头，并用带元数据的 begin 标记包裹条目
+  assert.ok(after.startsWith(init.slice(0, init.indexOf('[]'))));
+  assert.ok(after.includes(BRIDGE_BEGIN_MARK_WAS_EMPTY));
+  assert.ok(after.includes('- insert:'));
+  uninstallBridge(opts);
+  // 断言最终内容与 init 字节一致（逐字节还原）
+  assert.equal(fs.readFile(patchPath), init);
+  assert.equal(fs.exists(`${profile}/node_modules/dsh-vscode-bridge`), false);
 });
 
 test('createNodeFs 返回 InstallerFs 的 7 个方法', () => {

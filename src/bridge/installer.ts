@@ -15,6 +15,10 @@ import * as nodeFs from 'node:fs';
 /** 桥接条目在 cordis.patch.yml 中的包裹标记（卸载时按标记精确删除） */
 export const BRIDGE_BEGIN_MARK = '# dsh-vscode-bridge: begin';
 export const BRIDGE_END_MARK = '# dsh-vscode-bridge: end';
+/** 空数组改写分支的元数据标记：begin 标记行携带它，卸载时据此字节级还原「注释头 + []」 */
+export const BRIDGE_WAS_EMPTY_ARRAY_FLAG = 'was-empty-array';
+/** 空数组改写分支专用 begin 标记（= base begin 标记 + was-empty-array 元数据） */
+export const BRIDGE_BEGIN_MARK_WAS_EMPTY = `${BRIDGE_BEGIN_MARK} ${BRIDGE_WAS_EMPTY_ARRAY_FLAG}`;
 
 /** 桥接包在 profile node_modules 下的目录名（无 scope） */
 export const BRIDGE_PACKAGE_NAME = 'dsh-vscode-bridge';
@@ -81,6 +85,23 @@ function isTopLevelEmptyArray(content: string): boolean {
 }
 
 /**
+ * 提取「顶层空数组」文件中 `[]` 这一行之前的注释头（含全部注释行与空行），原样保留。
+ * 仅在 isTopLevelEmptyArray 判定为真时调用；逐行定位顶层 `[]` 所在行，
+ * 返回其之前的原始子串（不 trim、不改写），供卸载时字节级还原。
+ */
+function findEmptyArrayHead(content: string): string {
+  let pos = 0;
+  for (const line of content.split('\n')) {
+    if (line.trim() === '[]') {
+      // 找到顶层 [] 行：其之前的内容（注释头 + 空行）即 head
+      return content.slice(0, pos);
+    }
+    pos += line.length + 1; // +1 为换行符
+  }
+  return ''; // 防御分支：调用前已用 isTopLevelEmptyArray 判定，不会走到这里
+}
+
+/**
  * 幂等安装桥接包：
  * - profile 缺失 → degraded；
  * - 条目已存在 → ok（目录若被 pnpm 清理则补回）；
@@ -120,16 +141,24 @@ export function uninstallBridge(opts: BridgeInstallOptions): void {
   const begin = patch.indexOf(BRIDGE_BEGIN_MARK);
   const end = patch.indexOf(BRIDGE_END_MARK);
   if (begin === -1 || end === -1) return;
-  // 删除 begin 标记到 end 标记（含）之间的整段，剩余前后内容拼接
-  const restored = patch.slice(0, begin) + patch.slice(end + BRIDGE_END_MARK.length);
-  // 归一化：去掉因追加/删除引入的多余空行与尾随空白
-  const normalized = restored.trim();
-  if (normalized === '') {
-    // 删除后仅剩空白：原为空数组/空文件，还原为 []
-    opts.fs.writeFile(patchPath, '[]\n');
+  // 判断是否为空数组改写分支：begin 标记行携带 was-empty-array 元数据。
+  // 只扫描 begin~end 之间的条目段，避免误判用户自身内容里的同名文本。
+  const wasEmptyArray = patch.slice(begin, end).includes(BRIDGE_WAS_EMPTY_ARRAY_FLAG);
+  // 删除 begin 标记行到 end 标记行（含两行及其后随换行），剩余前后内容拼接
+  const restored = patch.slice(0, begin) + patch.slice(end + BRIDGE_END_MARK.length + 1);
+  if (wasEmptyArray) {
+    // 空数组改写分支：restored 即安装前的注释头，补回 []\n 实现字节级还原
+    opts.fs.writeFile(patchPath, `${restored}[]\n`);
   } else {
-    // 用户内容：去尾随空白后补单个换行，与安装前一致
-    opts.fs.writeFile(patchPath, `${normalized}\n`);
+    // 用户内容分支：归一化（去掉因追加/删除引入的多余空行与尾随空白）
+    const normalized = restored.trim();
+    if (normalized === '') {
+      // 删除后仅剩空白：原为空数组/空文件，还原为 []
+      opts.fs.writeFile(patchPath, '[]\n');
+    } else {
+      // 用户内容：去尾随空白后补单个换行，与安装前一致
+      opts.fs.writeFile(patchPath, `${normalized}\n`);
+    }
   }
   const bridgeDir = join(profileDir, 'node_modules', BRIDGE_PACKAGE_NAME);
   if (opts.fs.exists(bridgeDir)) opts.fs.rmDir(bridgeDir);
@@ -154,25 +183,39 @@ export function createNodeFs(): InstallerFs {
 
 /**
  * 写入 cordis.patch.yml 的桥接条目（含 begin/end 标记）。
- * 顶层空数组 → 整文件改写为块序列；已有内容 → 追加。
+ * 顶层空数组 → 保留 [] 之前的注释头，改写为块序列；已有内容 → 追加。
  */
 function writePatchEntry(fs: InstallerFs, patchPath: string, existing: string): void {
-  // 条目段：insert: 包裹 + begin/end 标记（顶层块序列，可合法存在）
-  const entry = [
-    BRIDGE_BEGIN_MARK,
+  if (isTopLevelEmptyArray(existing)) {
+    // 顶层空数组（[] / 空文件 / 注释+[] 的默认模板）：
+    // 1) 提取 [] 之前的注释头 head（原样保留全部注释行与空行）；
+    // 2) 写入 head + 块序列条目，begin 标记携带 was-empty-array 元数据，
+    //    供卸载时字节级还原为「head + []\n」。
+    // 直接改写为块序列，避免在 [] 之后追加块序列导致 YAML 解析失败（fail-loud）。
+    const head = findEmptyArrayHead(existing);
+    const entry = buildPatchEntry(BRIDGE_BEGIN_MARK_WAS_EMPTY);
+    fs.writeFile(patchPath, `${head}${entry}\n`);
+  } else {
+    // 已有用户内容：去尾随空白后追加，中间留一空行，绝不覆盖用户内容；
+    // begin 标记不带 was-empty-array 元数据（安装行为与修复前一致）。
+    const entry = buildPatchEntry(BRIDGE_BEGIN_MARK);
+    fs.writeFile(patchPath, `${existing.trimEnd()}\n\n${entry}\n`);
+  }
+}
+
+/**
+ * 组装桥接条目段：begin 标记行 + insert: 包裹 + end 标记行（顶层块序列，可合法存在）。
+ * beginMark 由调用方决定——空数组改写分支用带 was-empty-array 元数据的变体，
+ * 用户内容追加分支用普通 BRIDGE_BEGIN_MARK。
+ */
+function buildPatchEntry(beginMark: string): string {
+  return [
+    beginMark,
     '- insert:',
     `    - id: ${BRIDGE_PACKAGE_NAME}`,
     `      name: ${BRIDGE_PACKAGE_NAME}`,
     BRIDGE_END_MARK,
   ].join('\n');
-  if (isTopLevelEmptyArray(existing)) {
-    // 顶层空数组（[] / 空文件 / 注释+[] 的默认模板）：直接改写为块序列，
-    // 避免在 [] 之后追加块序列导致 YAML 解析失败（fail-loud）。
-    fs.writeFile(patchPath, `${entry}\n`);
-  } else {
-    // 已有用户内容：去尾随空白后追加，中间留一空行，绝不覆盖用户内容
-    fs.writeFile(patchPath, `${existing.trimEnd()}\n\n${entry}\n`);
-  }
 }
 
 /**
