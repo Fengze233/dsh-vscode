@@ -3,7 +3,7 @@
   "displayName": "DSH",
   "description": "在 VS Code 侧边栏中使用 DeepSeek Harness（DSH）网页界面",
   "version": "0.1.0",
-  "publisher": "fengze233",
+  "publisher": "Fengze233",
   "icon": "assets/icon.png",
   "license": "MIT",
   "engines": {
