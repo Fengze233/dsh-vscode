@@ -7,6 +7,10 @@
 
 在 VS Code 中直接使用 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 的网页界面：点击侧边栏图标即可内嵌打开 DSH，自动启动/复用 `dsh web` 服务，代码与 AI 界面同屏，无需再切换终端和浏览器。
 
+## 📸 界面截图
+
+![DSH for VS Code 界面截图](docs/screenshots/overview.png)
+
 ---
 
 ## ✨ 特性
