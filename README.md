@@ -1,6 +1,7 @@
 # DSH for VS Code 🐳
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Marketplace](https://img.shields.io/visual-studio-marketplace/v/Fengze233.dsh-vscode-panel?label=Marketplace&color=4D6BFE)](https://marketplace.visualstudio.com/items?itemName=Fengze233.dsh-vscode-panel)
 [![GitHub stars](https://img.shields.io/github/stars/Fengze233/dsh-vscode?style=social)](https://github.com/Fengze233/dsh-vscode)
 [![DSH 社区插件](https://img.shields.io/badge/DSH%20Plugin-dsh--plugin-4D6BFE)](https://github.com/topics/dsh-plugin)
 [![VS Code](https://img.shields.io/badge/VS%20Code-%E2%89%A51.91-blue)](https://code.visualstudio.com/)
@@ -25,19 +26,29 @@
 
 ## 📥 安装
 
-**方式一：下载 .vsix 安装包**（推荐）
+**方式一：商店安装（推荐）**
+
+VS Code 扩展面板搜索 `DSH`（发布者 Fengze233），或命令行执行：
+
+```bash
+code --install-extension Fengze233.dsh-vscode-panel
+```
+
+商店页面：<https://marketplace.visualstudio.com/items?itemName=Fengze233.dsh-vscode-panel>
+
+**方式二：下载 .vsix 安装包**
 
 1. 前往 [Releases](https://github.com/Fengze233/dsh-vscode/releases) 下载最新 `dsh-vscode.vsix`；
 2. VS Code 中按 `Ctrl+Shift+P` → 执行 `Extensions: Install from VSIX...` → 选择下载的文件；
 3. 重载窗口（`Developer: Reload Window`）。
 
-**方式二：从源码构建**
+**方式三：从源码构建**
 
 ```bash
 git clone https://github.com/Fengze233/dsh-vscode.git
 cd dsh-vscode
 npm install
-npm run package        # 产出 dsh-vscode.vsix，再按方式一安装
+npm run package        # 产出 dsh-vscode.vsix，再按方式二安装
 ```
 
 **前置要求**：已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的 `dsh` 命令并位于 PATH 中（插件会自动检测；未安装时会给出提示）。
@@ -131,7 +142,7 @@ A VS Code extension that embeds the [DeepSeek Harness (DSH)](https://github.com/
 
 **Features**: dual sidebar entrances (activity bar + secondary side bar), automatic service lifecycle management, live status bar indicator, graceful error/reconnect pages, bilingual UI (Chinese for `zh-*`, English otherwise), loopback-only security boundary.
 
-**Install**: download `dsh-vscode.vsix` from [Releases](https://github.com/Fengze233/dsh-vscode/releases), then run `Extensions: Install from VSIX...` — or build from source (`npm install && npm run package`).
+**Install**: from the Marketplace (`code --install-extension Fengze233.dsh-vscode-panel`) or download `dsh-vscode.vsix` from [Releases](https://github.com/Fengze233/dsh-vscode/releases) and run `Extensions: Install from VSIX...` — or build from source (`npm install && npm run package`).
 
 **Requirements**: Node.js ≥ 22 to build; VS Code ≥ 1.91; the `dsh` CLI from [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) on your PATH.
 
