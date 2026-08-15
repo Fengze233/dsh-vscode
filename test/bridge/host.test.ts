@@ -41,6 +41,19 @@ test('handleBridgeMessage 拒绝危险协议的 openExternal', async () => {
   assert.equal(called, false);
 });
 
+test('handleBridgeMessage openExternal 抛错时提示用户', async () => {
+  // 假 openExternal 抛错 → 应调用 showWarning（文案含 URL 与错误摘要），且不抛未处理异常
+  const warnings: string[] = [];
+  await handleBridgeMessage({ type: 'bridgeOpenExternal', url: 'https://a.b/c' }, {
+    openExternal: async () => { throw new Error('no default browser'); },
+    openTextDocument: async () => {},
+    showWarning: (m) => { warnings.push(m); },
+  });
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0].includes('https://a.b/c'), `提示应含链接，实际：${warnings[0]}`);
+  assert.ok(warnings[0].includes('no default browser'), `提示应含错误摘要，实际：${warnings[0]}`);
+});
+
 test('handleBridgeMessage openFile 调用打开文档', async () => {
   // 相对路径 + cwd → 解析为绝对路径后交给 openTextDocument
   const opened: string[] = [];

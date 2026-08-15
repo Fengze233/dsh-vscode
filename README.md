@@ -77,7 +77,7 @@ npm run package        # 产出 dsh-vscode.vsix，再按方式二安装
 
 ## 🔗 桥接与工作区联动
 
-安装后，插件会在你的 DSH 用户目录安装一个官方扩展点桥接包，让面板与 VS Code 联动。启用后获得三项能力：
+安装后，插件会在你的 DSH 用户目录安装本扩展的桥接包（经 DSH 官方客户端插件扩展点安装），让面板与 VS Code 联动。启用后获得三项能力：
 
 - 🔗 **外链跳转**：面板内点击外链，在系统默认浏览器中打开（而非被困在 iframe 内）；
 - 📂 **文件跳转**：点击面板内的文件路径，在 VS Code 中打开对应文件；
@@ -87,7 +87,7 @@ npm run package        # 产出 dsh-vscode.vsix，再按方式二安装
 
 为让 DSH 网页能与 VS Code 通信，插件会：
 
-1. 在你的 DSH 用户目录（`$DSH_HOME/profiles/web`，默认 `~/.dsh/profiles/web`）安装官方扩展点桥接包 `dsh-vscode-bridge`；
+1. 在你的 DSH 用户目录（`$DSH_HOME/profiles/web`，默认 `~/.dsh/profiles/web`）安装本扩展的桥接包 `dsh-vscode-bridge`（经 DSH 官方客户端插件扩展点安装）；
 2. 在 `cordis.patch.yml` 中写入一段带 `# dsh-vscode-bridge: begin` / `# dsh-vscode-bridge: end` 标记的 `insert:` 条目，把桥接包注册为 DSH 的官方 client 插件（只写用户目录，绝不触碰 DSH 安装目录）。
 
 如需移除：执行命令 `DSH: 卸载桥接`，插件会按标记精确删除写入的条目并删除桥接目录，自动还原 `cordis.patch.yml` 原文件（你原有的内容不受影响）。
@@ -173,7 +173,7 @@ A VS Code extension that embeds the [DeepSeek Harness (DSH)](https://github.com/
 
 **Features**: dual sidebar entrances (activity bar + secondary side bar), automatic service lifecycle management, live status bar indicator, graceful error/reconnect pages, bilingual UI (Chinese for `zh-*`, English otherwise), loopback-only security boundary.
 
-**Bridge & workspace integration**: the extension installs an official extension-point bridge package `dsh-vscode-bridge` into your DSH user directory (`$DSH_HOME/profiles/web`, default `~/.dsh/profiles/web`) and writes a marked entry into `cordis.patch.yml`, enabling three capabilities: clicking external links opens them in your system browser, clicking file paths opens the file in VS Code, and opening the panel auto-syncs the VS Code workspace into DSH. Remove it any time with `DSH: Uninstall Bridge` (the original file is restored automatically). New settings: `dsh.bridge.enabled` (default `true`), `dsh.workspaceRootIndex` (default `0`, for multi-root workspaces), `dsh.bridge.silenceWarning` (default `false`). If the bridge is inactive, the panel remains fully usable — only the three integrations are unavailable, and a one-time startup warning (with "Don't Show Again") is shown.
+**Bridge & workspace integration**: the extension installs its own bridge package `dsh-vscode-bridge` into DSH's official client-plugin extension point under your DSH user directory (`$DSH_HOME/profiles/web`, default `~/.dsh/profiles/web`) — writing only to the user directory and never touching the DSH installation directory — and writes a marked entry into `cordis.patch.yml`, enabling three capabilities: clicking external links opens them in your system browser, clicking file paths opens the file in VS Code, and opening the panel auto-syncs the VS Code workspace into DSH. Remove it any time with `DSH: Uninstall Bridge` (the original file is restored automatically). New settings: `dsh.bridge.enabled` (default `true`), `dsh.workspaceRootIndex` (default `0`, for multi-root workspaces), `dsh.bridge.silenceWarning` (default `false`). If the bridge is inactive, the panel remains fully usable — only the three integrations are unavailable, and a one-time startup warning (with "Don't Show Again") is shown.
 
 **Install**: from the Marketplace (`code --install-extension Fengze233.dsh-vscode-panel`) or download `dsh-vscode.vsix` from [Releases](https://github.com/Fengze233/dsh-vscode/releases) and run `Extensions: Install from VSIX...` — or build from source (`npm install && npm run package`).
 

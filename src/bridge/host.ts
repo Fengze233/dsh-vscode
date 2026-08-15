@@ -55,7 +55,14 @@ export function resolveBridgePath(raw: string, sessionCwd: string | undefined, w
 export async function handleBridgeMessage(msg: PanelMessage, deps: BridgeMessageDeps): Promise<void> {
   if (msg.type === 'bridgeOpenExternal') {
     // 协议白名单：仅 http/https（与桥接侧白名单双重校验，纵深防御）
-    if (/^https?:\/\//i.test(msg.url)) await deps.openExternal(msg.url);
+    if (/^https?:\/\//i.test(msg.url)) {
+      try {
+        await deps.openExternal(msg.url);
+      } catch (err) {
+        // 打开外链可能失败（如无默认浏览器），捕获后给用户可见反馈而非未处理拒绝
+        deps.showWarning(`无法打开链接：${msg.url}（${errSummary(err)}）`);
+      }
+    }
     return;
   }
   if (msg.type === 'bridgeOpenFile') {

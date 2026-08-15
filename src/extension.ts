@@ -244,6 +244,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
   /** 工作区同步主流程：解析根目录 → 幂等 syncWorkspace → 通知两个面板下发 */
   async function syncOnce(): Promise<void> {
+    // 桥接禁用时不同步：dsh.bridge.enabled=false 表示用户关闭桥接，
+    // 不应再向 DSH 发 workspace.list/workspace.create 写请求（避免用户未请求的持久化副作用）。
+    // 必须读实时配置（而非激活时的 install 状态），保证运行中关闭设置后立即停用。
+    if (!readConfig().config.bridgeEnabled) return;
     const root = workspaceRootGetter();
     if (root === undefined) return; // 无工作区（空窗口）不同步
     try {
