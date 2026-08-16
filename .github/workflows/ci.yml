@@ -1,0 +1,30 @@
+# CI：类型检查 + 单元/集成测试 + 打包 vsix
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # 安装依赖：npm ci 要求 package-lock.json 与 package.json 严格一致
+      - run: npm ci
+      # 类型检查
+      - run: npm run typecheck
+      # 单元/集成测试（集成测试在无 dsh 的 runner 上自动跳过）
+      - run: npm test
+      # 打包 vsix（产物用于后续发布/手工安装）
+      - run: npx vsce package -o dsh-vscode.vsix
+      # 上传打包产物
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-vscode-vsix
+          path: '*.vsix'
