@@ -269,6 +269,64 @@ test('复用外部服务失联：健康探测发现后回到 idle（面板显示
   h.manager.dispose();
 });
 
+test('Windows spawn 带 cwd 同步抛 EINVAL 时自动去掉 cwd 重试一次并成功', async () => {
+  const logs: string[] = [];
+  const receivedCwds: (string | undefined)[] = []; // 记录每次 startDsh 收到的 cwd
+  const h = makeHarness({ cwd: 'D:\\work\\项目' }, {
+    processRunner: {
+      startDsh: (opts) => {
+        h.spawnCount += 1;
+        receivedCwds.push(opts.cwd);
+        if (opts.cwd !== undefined) {
+          // 第一次（带 cwd）同步抛 EINVAL，模拟 Windows 上 .cmd 带 cwd 的已知问题
+          throw Object.assign(new Error('spawn dsh.cmd EINVAL'), { code: 'EINVAL' });
+        }
+        // 第二次（去掉 cwd）成功返回子进程
+        h.child = new FakeChild();
+        return h.child;
+      },
+      stopChild: async (c) => {
+        c.kill('SIGTERM');
+        c.kill('SIGKILL');
+      },
+      lastChild: null,
+    },
+    log: (line) => logs.push(line),
+  });
+  h.probeQueue = ['down', 'dsh'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'ready');
+  assert.equal(s.owned, true);
+  assert.equal(h.spawnCount, 2); // 第一次抛、第二次成功
+  assert.deepEqual(receivedCwds, ['D:\\work\\项目', undefined]); // 第二次 cwd 为 undefined
+  assert.ok(logs.some((l) => l.includes('回退'))); // 日志应含「回退」相关字样
+  h.manager.dispose();
+});
+
+test('去掉 cwd 重试仍抛 EINVAL 时置 err.spawnEinval', async () => {
+  const logs: string[] = [];
+  const receivedCwds: (string | undefined)[] = [];
+  const h = makeHarness({ cwd: '\\\\wsl.localhost\\Ubuntu\\home' }, {
+    processRunner: {
+      startDsh: (opts) => {
+        receivedCwds.push(opts.cwd);
+        // 无论是否带 cwd 都抛 EINVAL → 降级重试后仍然失败，最终 err.spawnEinval
+        throw Object.assign(new Error('spawn dsh.cmd EINVAL'), { code: 'EINVAL' });
+      },
+      stopChild: async () => {},
+      lastChild: null,
+    },
+    log: (line) => logs.push(line),
+  });
+  h.probeQueue = ['down'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.spawnEinval');
+  assert.equal(s.errorVars?.cwd, '\\\\wsl.localhost\\Ubuntu\\home');
+  assert.deepEqual(receivedCwds, ['\\\\wsl.localhost\\Ubuntu\\home', undefined]); // 重试时 cwd 为 undefined
+  h.manager.dispose();
+});
+
 test('复用外部服务 stop()：清理健康定时器并回到 idle', async () => {
   const h = makeHarness({}, { healthIntervalMs: 30 });
   h.probeQueue = ['dsh'];

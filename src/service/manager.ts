@@ -181,30 +181,47 @@ export class ServiceManager {
     // 启动子进程
     if (this.stopRequested) return this.getSnapshot(); // 启动前被叫停
     this.set({ state: 'starting' });
+    // Node 在 Windows 上对 .cmd 批处理文件带 cwd 参数 spawn 存在已知的同步抛 EINVAL
+    // （参数无效）问题：只要传入 cwd（无论英文/中文路径）就会抛 EINVAL，与路径内容无关。
+    // 因此这里做一次「去掉 cwd 重试」的降级：第一次失败若为 EINVAL 且带了 cwd，
+    // 则以 cwd=undefined 再 spawn 一次（args/主机/端口/可执行路径照旧）；重试仍失败才报错。
     let child: ChildProcessLike;
-    try {
-      child = this.deps.processRunner.startDsh({
-        host: this.opts.host,
-        port: this.opts.port,
-        extraArgs: this.opts.extraArgs,
-        cwd: this.opts.cwd,
-        executablePath: this.opts.executablePath,
-      });
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      this.deps.log(`[process] 启动失败: ${String(err)} (code=${code}, cwd=${this.opts.cwd ?? ''})`);
-      // 区分错误类型：EINVAL 是 spawn 参数无效（Windows 上 cwd 非法等），
-      // ENOENT 才是命令缺失；其余保守地归为「未找到命令」。
-      if (code === 'EINVAL') {
-        this.set({
-          state: 'failed',
-          error: 'err.spawnEinval',
-          errorVars: { cwd: String(this.opts.cwd ?? '') },
+    let cwdForSpawn: string | undefined = this.opts.cwd;
+    let retried = false; // 是否已执行过去掉 cwd 的降级重试（最多重试一次）
+    for (;;) {
+      try {
+        child = this.deps.processRunner.startDsh({
+          host: this.opts.host,
+          port: this.opts.port,
+          extraArgs: this.opts.extraArgs,
+          cwd: cwdForSpawn,
+          executablePath: this.opts.executablePath,
         });
-      } else {
-        this.set({ state: 'failed', error: 'err.dshNotFound' });
+        break; // spawn 成功（未同步抛异常），跳出重试循环继续等待就绪
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        this.deps.log(`[process] 启动失败: ${String(err)} (code=${code}, cwd=${cwdForSpawn ?? ''})`);
+        // EINVAL + 带 cwd 且尚未重试过：这是 Node/Windows 上 .cmd 带 cwd 的已知兼容问题，
+        // 去掉 cwd 重试一次，而不是直接报失败（直接报错会把参数问题误报成启动失败）。
+        if (code === 'EINVAL' && cwdForSpawn !== undefined && !retried) {
+          this.deps.log(`[process] spawn EINVAL（工作目录参数在 Windows 上不可用），已自动回退为不带 cwd 重试: ${String(err)}`);
+          cwdForSpawn = undefined; // 去掉 cwd 降级重试
+          retried = true;
+          continue;
+        }
+        // 区分错误类型：EINVAL 是 spawn 参数无效（Windows 上 cwd 非法等，重试后仍无效），
+        // ENOENT 才是命令缺失；其余保守地归为「未找到命令」。
+        if (code === 'EINVAL') {
+          this.set({
+            state: 'failed',
+            error: 'err.spawnEinval',
+            errorVars: { cwd: String(this.opts.cwd ?? '') },
+          });
+        } else {
+          this.set({ state: 'failed', error: 'err.dshNotFound' });
+        }
+        return this.getSnapshot();
       }
-      return this.getSnapshot();
     }
     this.child = child;
 
