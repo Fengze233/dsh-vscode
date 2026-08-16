@@ -1,0 +1,37 @@
+name: Bug 报告
+description: 反馈插件缺陷
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 插件版本
+      placeholder: 例如 0.2.1（VS Code 扩展面板中查看）
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 环境
+      placeholder: 例如 Windows 11 + WSL Ubuntu；VS Code 1.96；DSH 0.1.0-rc.6
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 发生了什么？期望是什么？
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      placeholder: 1. 打开面板 2. …
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: "命令面板执行 `DSH: 查看日志` 后复制相关输出"
