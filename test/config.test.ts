@@ -8,7 +8,10 @@ test('合法配置原样通过', () => {
     host: 'localhost', port: 4000, autoStart: false, stopOnExit: false, extraArgs: ['--trusted-host', 'x:1'],
   });
   assert.deepEqual(errors, []);
-  assert.deepEqual(config, { host: 'localhost', port: 4000, autoStart: false, stopOnExit: false, extraArgs: ['--trusted-host', 'x:1'] });
+  assert.deepEqual(config, {
+    host: 'localhost', port: 4000, autoStart: false, stopOnExit: false, extraArgs: ['--trusted-host', 'x:1'],
+    bridgeEnabled: true, workspaceRootIndex: 0, silenceWarning: false,
+  });
 });
 
 test('缺省值回退默认', () => {
@@ -41,4 +44,21 @@ test('回环地址识别', () => {
   assert.equal(isLoopbackHost('[::1]'), true);
   assert.equal(isLoopbackHost('192.168.0.1'), false);
   assert.equal(isLoopbackHost('example.com'), false);
+});
+
+test('normalizeConfig 处理桥接新设置项的缺省与非法值', () => {
+  // 缺省值：bridgeEnabled 默认 true、workspaceRootIndex 默认 0、silenceWarning 默认 false
+  const r1 = normalizeConfig({});
+  assert.equal(r1.config.bridgeEnabled, true);
+  assert.equal(r1.config.workspaceRootIndex, 0);
+  assert.equal(r1.config.silenceWarning, false);
+  // 合法值原样通过
+  const r2 = normalizeConfig({ bridgeEnabled: false, workspaceRootIndex: 2, silenceWarning: true });
+  assert.equal(r2.config.bridgeEnabled, false);
+  assert.equal(r2.config.workspaceRootIndex, 2);
+  assert.equal(r2.config.silenceWarning, true);
+  // 非法值回退默认并记录错误
+  const r3 = normalizeConfig({ workspaceRootIndex: -1 });
+  assert.equal(r3.config.workspaceRootIndex, 0); // 非法回退默认
+  assert.equal(r3.errors.length, 1);
 });

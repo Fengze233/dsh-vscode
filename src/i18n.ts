@@ -36,6 +36,13 @@ const messages = {
     'info.urlCopied': 'URL copied: {url}',
     'info.notReady': 'DSH service is not ready yet.',
     'info.stopped': 'DSH service stopped.',
+    // 桥接状态与警告
+    'bridge.warnDegraded':
+      'DSH bridge is not active. These features are unavailable: 1) click links to open in browser 2) click file paths to open in VS Code. You can retry installing the bridge or silence this warning.',
+    'bridge.retryNow': 'Retry Install',
+    'bridge.neverAgain': "Don't Show Again",
+    'bridge.uninstalled': 'DSH bridge uninstalled. Restart the DSH service for the change to take effect.',
+    'bridge.uninstallFailed': 'Failed to uninstall DSH bridge: {message}',
   },
   zh: {
     'panel.loading': '正在启动 DSH 服务…',
@@ -65,6 +72,12 @@ const messages = {
     'info.urlCopied': '已复制网址：{url}',
     'info.notReady': 'DSH 服务尚未就绪。',
     'info.stopped': 'DSH 服务已停止。',
+    'bridge.warnDegraded':
+      'DSH 桥接未生效，以下功能不可用：①点击链接跳转浏览器 ②点击文件路径在 VS Code 打开。可重试安装桥接，或不再显示本警告。',
+    'bridge.retryNow': '重试安装',
+    'bridge.neverAgain': '不再提示',
+    'bridge.uninstalled': 'DSH 桥接已卸载，重启 DSH 服务后生效。',
+    'bridge.uninstallFailed': '卸载 DSH 桥接失败：{message}',
   },
 } as const;
 

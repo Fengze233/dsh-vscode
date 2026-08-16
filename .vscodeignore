@@ -5,5 +5,7 @@ test/**
 scripts/**
 docs/**
 out/test/**
+# 桥接客户端源码为模板（client.js 含占位符），打包只发构建产物 out/bridge-client/
+bridge-client/**
 **/*.map
 tsconfig.json

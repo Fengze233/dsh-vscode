@@ -1,10 +1,11 @@
 // scripts/build.mjs — esbuild 构建脚本
-// 用法：node scripts/build.mjs            # 构建扩展 + 测试
+// 用法：node scripts/build.mjs            # 构建扩展 + 桥接客户端 + 测试
 //       node scripts/build.mjs --test     # 只构建测试
 //       node scripts/build.mjs --watch    # 监听模式
 import { build, context } from 'esbuild';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { buildBridgeClient } from './bridge-build.mjs';
 
 const watch = process.argv.includes('--watch');
 const testOnly = process.argv.includes('--test');
@@ -39,11 +40,22 @@ const tests = {
   ...common,
 };
 
+// 桥接客户端构建：把 core.js 的纯逻辑内联进 client.js 工厂注册 bundle（逻辑见 scripts/bridge-build.mjs）。
+// 无论完整构建还是 --test 模式都会刷新 out/bridge-client/，保证 npm test 之后产物与源码一致。
+const bridgeBuildOpts = {
+  coreSource: join('bridge-client', 'lib', 'core.js'),
+  clientTemplate: join('bridge-client', 'lib', 'client.js'),
+  outDir: join('out', 'bridge-client'),
+};
+
 const configs = testOnly ? [tests] : [ext, tests];
 if (watch) {
   await Promise.all(configs.map((c) => context(c).then((ctx) => ctx.watch())));
+  // 监听模式下桥接客户端仅构建一次（未对 core.js/client.js 挂 watcher，改动需重启 watch）
+  buildBridgeClient(bridgeBuildOpts);
   console.log('watch 模式已启动');
 } else {
   await Promise.all(configs.map((c) => build(c)));
+  buildBridgeClient(bridgeBuildOpts);
   console.log('构建完成');
 }

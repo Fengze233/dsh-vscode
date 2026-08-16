@@ -20,6 +20,8 @@ export interface StartOptions {
   host: string;
   port: number;
   extraArgs: string[];
+  /** 子进程工作目录（兜底：让 dsh web 以 VS Code 工作区为 cwd，缺省则不指定） */
+  cwd?: string;
 }
 
 /** 进程管理接口 */
@@ -46,7 +48,7 @@ export function createProcessRunner(
   let lastChild: ChildProcessLike | null = null;
 
   return {
-    startDsh({ host, port, extraArgs }) {
+    startDsh({ host, port, extraArgs, cwd }) {
       // Windows 的可执行命令是 dsh.cmd；其他平台直接 dsh
       const command = platform === 'win32' ? 'dsh.cmd' : 'dsh';
       const args = ['web', '--host', host, '--port', String(port), ...extraArgs];
@@ -55,6 +57,8 @@ export function createProcessRunner(
         detached: platform !== 'win32',
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
+        // cwd 仅在显式传入时指定，避免覆盖 spawn 自身对缺省 cwd 的处理
+        ...(cwd === undefined ? {} : { cwd }),
       });
       lastChild = child;
       return child;

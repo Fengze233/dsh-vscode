@@ -2,7 +2,7 @@
   "name": "dsh-vscode-panel",
   "displayName": "DSH",
   "description": "在 VS Code 侧边栏中使用 DeepSeek Harness（DSH）网页界面",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "Fengze233",
   "icon": "assets/icon.png",
   "license": "MIT",
@@ -104,6 +104,14 @@
         "command": "dsh.showLogs",
         "title": "%dsh.cmd.showLogs.title%",
         "icon": "$(output)"
+      },
+      {
+        "command": "dsh.bridge.retry",
+        "title": "%dsh.cmd.bridgeRetry.title%"
+      },
+      {
+        "command": "dsh.bridge.uninstall",
+        "title": "%dsh.cmd.bridgeUninstall.title%"
       }
     ],
     "menus": {
@@ -172,6 +180,22 @@
           },
           "default": [],
           "markdownDescription": "%dsh.config.extraArgs%"
+        },
+        "dsh.bridge.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%dsh.config.bridgeEnabled%"
+        },
+        "dsh.workspaceRootIndex": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "%dsh.config.workspaceRootIndex%"
+        },
+        "dsh.bridge.silenceWarning": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%dsh.config.bridgeSilenceWarning%"
         }
       }
     }
