@@ -14,7 +14,17 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onStartupFinished"
+    "onView:dsh.panel",
+    "onView:dsh.panel.secondary",
+    "onCommand:dsh.openPanel",
+    "onCommand:dsh.openSecondary",
+    "onCommand:dsh.openExternal",
+    "onCommand:dsh.restart",
+    "onCommand:dsh.stop",
+    "onCommand:dsh.copyUrl",
+    "onCommand:dsh.showLogs",
+    "onCommand:dsh.bridge.retry",
+    "onCommand:dsh.bridge.uninstall"
   ],
   "contributes": {
     "viewsContainers": {
