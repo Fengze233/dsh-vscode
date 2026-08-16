@@ -52,7 +52,11 @@ async function call(baseUrl: string, fetchImpl: typeof fetch, method: string, pa
   // 生成一个尽量不重复的 rpcId，便于日志与响应对应
   const rpcId = `dsh-vscode-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const body = JSON.stringify(buildRequest(rpcId, method, payload));
-  const res = await fetchImpl(`${baseUrl}/api/${method}`, {
+  // 规范化 baseUrl：去除末尾多余斜杠，避免生产调用方传入带尾斜杠的地址
+  // （如 http://127.0.0.1:3080/）时拼出 //api/... 双斜杠路径，
+  // 实测 DSH 服务端对该双斜杠路径返回 405，导致工作区同步 API 全部失败。
+  const base = baseUrl.replace(/\/+$/, '');
+  const res = await fetchImpl(`${base}/api/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body,

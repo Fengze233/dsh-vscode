@@ -93,3 +93,36 @@ test('workspaceList 请求 URL 以 /api/workspace.list 结尾', async () => {
   await api.workspaceList();
   assert.ok(capturedUrl.endsWith('/api/workspace.list'), `期望 URL 以 /api/workspace.list 结尾，实际：${capturedUrl}`);
 });
+
+test('baseUrl 带单个尾斜杠时规范化 URL 为单斜杠', async () => {
+  // 生产调用方传入的 baseUrl 带结尾斜杠（如 http://127.0.0.1:3080/），
+  // 若直接拼 `${baseUrl}/api/${method}` 会产生 `//api/...` 双斜杠，
+  // 实测 DSH 服务端对该双斜杠路径返回 405。此处断言拼接结果恰好为单斜杠、无重复斜杠。
+  let capturedUrl = '';
+  const fetchImpl = async (url: string) => {
+    capturedUrl = url;
+    return new Response(JSON.stringify({
+      type: 'server-response', rpcId: 'r1',
+      result: { ok: true, value: { items: [] } },
+    }), { status: 200 });
+  };
+  const api = createDshApiClient('http://127.0.0.1:3080/', fetchImpl as unknown as typeof fetch);
+  await api.workspaceList();
+  assert.equal(capturedUrl, 'http://127.0.0.1:3080/api/workspace.list');
+});
+
+test('baseUrl 带多个尾斜杠时同样规范化 URL', async () => {
+  // baseUrl 末尾出现多个斜杠时（如 http://127.0.0.1:3080///），应全部去除，
+  // 归一化为同样的单斜杠形式，避免生成更夸张的多斜杠路径。
+  let capturedUrl = '';
+  const fetchImpl = async (url: string) => {
+    capturedUrl = url;
+    return new Response(JSON.stringify({
+      type: 'server-response', rpcId: 'r1',
+      result: { ok: true, value: { items: [] } },
+    }), { status: 200 });
+  };
+  const api = createDshApiClient('http://127.0.0.1:3080///', fetchImpl as unknown as typeof fetch);
+  await api.workspaceList();
+  assert.equal(capturedUrl, 'http://127.0.0.1:3080/api/workspace.list');
+});
