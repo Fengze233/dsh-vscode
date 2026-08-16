@@ -3,7 +3,7 @@
 //       node scripts/build.mjs --test     # 只构建测试
 //       node scripts/build.mjs --watch    # 监听模式
 import { build, context } from 'esbuild';
-import { readdirSync } from 'node:fs';
+import { readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildBridgeClient } from './bridge-build.mjs';
 
@@ -47,6 +47,10 @@ const bridgeBuildOpts = {
   clientTemplate: join('bridge-client', 'lib', 'client.js'),
   outDir: join('out', 'bridge-client'),
 };
+
+// 构建前清空 out/：删除的源文件（如已移除的测试）不会以旧产物残留，
+// 避免 node --test 收集到失效产物导致测试数虚高（历史教训：88 vs 75）。
+rmSync(join(process.cwd(), 'out'), { recursive: true, force: true });
 
 const configs = testOnly ? [tests] : [ext, tests];
 if (watch) {
