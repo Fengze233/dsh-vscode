@@ -5,3 +5,13 @@ out/
 
 # git worktree 工作区（本计划隔离开发用）
 .worktrees/
+
+# 敏感文件（防误提交密钥/凭据）
+.env
+.env.*
+*.pem
+*.key
+*.p12
+credentials.yml
+credentials.yaml
+

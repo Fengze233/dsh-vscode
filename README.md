@@ -3,179 +3,167 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Marketplace](https://img.shields.io/visual-studio-marketplace/v/Fengze233.dsh-vscode-panel?label=Marketplace&color=4D6BFE)](https://marketplace.visualstudio.com/items?itemName=Fengze233.dsh-vscode-panel)
 [![GitHub stars](https://img.shields.io/github/stars/Fengze233/dsh-vscode?style=social)](https://github.com/Fengze233/dsh-vscode)
-[![DSH 社区插件](https://img.shields.io/badge/DSH%20Plugin-dsh--plugin-4D6BFE)](https://github.com/topics/dsh-plugin)
+[![DSH Plugin](https://img.shields.io/badge/DSH%20Plugin-dsh--plugin-4D6BFE)](https://github.com/topics/dsh-plugin)
 [![VS Code](https://img.shields.io/badge/VS%20Code-%E2%89%A51.91-blue)](https://code.visualstudio.com/)
 
-在 VS Code 中直接使用 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 的网页界面：点击侧边栏图标即可内嵌打开 DSH，自动启动/复用 `dsh web` 服务，代码与 AI 界面同屏，无需再切换终端和浏览器。
+**English** | [中文](README.zh.md)
 
-## 📸 界面截图
+Use the [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) web UI right inside VS Code: click a sidebar icon to embed DSH, which auto-starts (or reuses) the `dsh web` service — code and AI interface side by side, no more switching between terminal, browser, and IDE.
 
-![DSH for VS Code 界面截图](docs/screenshots/overview.png)
+## 📸 Screenshot
+
+![DSH for VS Code screenshot](docs/screenshots/overview.png)
 
 ---
 
-## ✨ 特性
+## ✨ Features
 
-- 🖱️ **一键打开**：左右侧边栏各有一个 DSH 鲸鱼图标，点击即在对应侧栏内嵌显示 DSH 网页；
-- 🚀 **服务自动管理**：自动探测端口——已有 `dsh web` 直接复用，没有则后台静默启动，就绪后自动加载；
-- 🔄 **状态实时同步**：状态栏四态指示（运行中绿 / 启动中黄 / 失败红 / 已停止灰），点击状态栏可开关面板；
-- 🛟 **异常兜底**：端口被占、`dsh` 未安装、启动超时、服务崩溃/失联均有对应提示页与一键重连，绝不白屏；
-- 🌐 **双语界面**：文案跟随 VS Code 显示语言——中文环境显示中文，其余语言一律英文；
-- 🧹 **退出清理**：关闭窗口自动停止插件自启的服务，不留僵尸进程；手动启动的服务永不干预；
-- 🔒 **安全边界**：只连接回环地址（127.0.0.1 / localhost / [::1]），不读取凭据、不向 DSH 网页注入任何脚本。
+- 🖱️ **One-click open**: a DSH whale icon in both the left Activity Bar and the right Secondary Side Bar — click either to embed the DSH page in that sidebar;
+- 🚀 **Automatic service management**: auto-detects the port — reuses an already-running `dsh web`, otherwise starts one silently in the background and loads it once ready;
+- 🔄 **Live status sync**: four-state status bar indicator (running green / starting yellow / failed red / stopped gray); click it to toggle the panel;
+- 🛟 **Error fallbacks**: port occupied, `dsh` missing, start timeout, crash/disconnect — each has a dedicated page with one-click reconnect, never a blank screen;
+- 🌐 **Bilingual UI**: copy follows the VS Code display language — Chinese for `zh-*`, English otherwise;
+- 🧹 **Clean exit**: closing the window stops the auto-started service, no zombie processes; manually started services are never touched;
+- 🔒 **Security boundary**: loopback addresses only (127.0.0.1 / localhost / [::1]); no credentials are read.
 
-## 📥 安装
+## 📥 Installation
 
-**方式一：商店安装（推荐）**
+**Option 1: Marketplace (recommended)**
 
-VS Code 扩展面板搜索 `DSH`（发布者 Fengze233），或命令行执行：
+Search for `DSH` (publisher Fengze233) in the VS Code Extensions view, or run:
 
 ```bash
 code --install-extension Fengze233.dsh-vscode-panel
 ```
 
-商店页面：<https://marketplace.visualstudio.com/items?itemName=Fengze233.dsh-vscode-panel>
+Marketplace page: <https://marketplace.visualstudio.com/items?itemName=Fengze233.dsh-vscode-panel>
 
-**方式二：下载 .vsix 安装包**
+**Option 2: .vsix package**
 
-1. 前往 [Releases](https://github.com/Fengze233/dsh-vscode/releases) 下载最新 `dsh-vscode.vsix`；
-2. VS Code 中按 `Ctrl+Shift+P` → 执行 `Extensions: Install from VSIX...` → 选择下载的文件；
-3. 重载窗口（`Developer: Reload Window`）。
+1. Download the latest `dsh-vscode.vsix` from [Releases](https://github.com/Fengze233/dsh-vscode/releases);
+2. In VS Code press `Ctrl+Shift+P` → run `Extensions: Install from VSIX...` → select the file;
+3. Reload the window (`Developer: Reload Window`).
 
-**方式三：从源码构建**
+**Option 3: Build from source**
 
 ```bash
 git clone https://github.com/Fengze233/dsh-vscode.git
 cd dsh-vscode
 npm install
-npm run package        # 产出 dsh-vscode.vsix，再按方式二安装
+npm run package        # produces dsh-vscode.vsix, then install as in Option 2
 ```
 
-**前置要求**：已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的 `dsh` 命令并位于 PATH 中（插件会自动检测；未安装时会给出提示）。
+**Prerequisite**: the `dsh` CLI from [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) must be installed and on your PATH (the extension detects it and shows a hint if missing).
 
-## 🚀 使用
+## 🚀 Usage
 
-1. 安装后，**左侧活动栏**与**右侧辅助侧边栏**各出现一个 DSH 鲸鱼图标；
-2. 点击任意一个图标：插件自动启动（或复用）`dsh web`，并在该侧边栏内嵌显示 DSH 网页；
-   - 点**右侧**图标 → 面板开在右侧，左侧文件目录不受影响；
-3. 面板标题栏按钮：`在浏览器中打开` `重启服务` `停止服务` `复制网址` `查看日志`；
-4. 底部状态栏显示服务状态，点击可开关面板。
+1. After installation, a DSH whale icon appears in both the left Activity Bar and the right Secondary Side Bar;
+2. Click either icon: the extension auto-starts (or reuses) `dsh web` and embeds the DSH page in that sidebar;
+   - Click the **right** icon → the panel opens on the right, leaving the file explorer untouched;
+3. Panel title bar buttons: `Open in Browser` `Restart Service` `Stop Service` `Copy URL` `Show Logs`;
+4. The bottom status bar shows the service status; click it to toggle the panel.
 
-### 命令面板（`DSH:` 开头）
+### Command palette (prefixed `DSH:`)
 
-| 命令 | 说明 |
+| Command | Description |
 |---|---|
-| `DSH: 打开面板` | 打开左侧面板 |
-| `DSH: 在辅助侧边栏打开` | 打开右侧面板 |
-| `DSH: 在浏览器中打开` | 在系统浏览器打开 DSH 页面 |
-| `DSH: 重启服务` | 重启插件管理的服务 |
-| `DSH: 停止服务` | 停止插件启动的服务 |
-| `DSH: 复制网址` | 复制 DSH 页面地址 |
-| `DSH: 查看日志` | 打开插件日志输出通道 |
-| `DSH: 重试桥接安装` | 重新安装桥接并重启服务 |
-| `DSH: 卸载桥接` | 移除桥接包并还原 `cordis.patch.yml` |
+| `DSH: Open Panel` | Open the left panel |
+| `DSH: Open in Secondary Side Bar` | Open the right panel |
+| `DSH: Open in Browser` | Open the DSH page in the system browser |
+| `DSH: Restart Service` | Restart the extension-managed service |
+| `DSH: Stop Service` | Stop the extension-started service |
+| `DSH: Copy URL` | Copy the DSH page URL |
+| `DSH: Show Logs` | Open the extension log output channel |
+| `DSH: Retry Bridge Install` | Reinstall the bridge and restart the service |
+| `DSH: Uninstall Bridge` | Remove the bridge package and restore `cordis.patch.yml` |
 
-## 🔗 桥接与工作区联动
+## 🔗 Bridge integration
 
-安装后，插件会在你的 DSH 用户目录安装本扩展的桥接包（经 DSH 官方客户端插件扩展点安装），让面板与 VS Code 联动。启用后获得两项能力：
+After installation, the extension installs its own bridge package `dsh-vscode-bridge` into DSH's official client-plugin extension point under your DSH user directory, enabling two integrations:
 
-- 🔗 **外链跳转**：面板内点击外链，在系统默认浏览器中打开（而非被困在 iframe 内）；
-- 📂 **文件跳转**：点击面板内的文件路径，在 VS Code 中打开对应文件。
+- 🔗 **External links**: clicking a link in the panel opens it in your system browser (instead of being trapped inside the iframe);
+- 📂 **File jumps**: clicking a file path in the panel opens the file in VS Code.
 
-### 安装与卸载机制（透明披露）
+### Install / uninstall mechanism (transparency disclosure)
 
-为让 DSH 网页能与 VS Code 通信，插件会：
+To let the DSH page communicate with VS Code, the extension will:
 
-1. 在你的 DSH 用户目录（`$DSH_HOME/profiles/web`，默认 `~/.dsh/profiles/web`）安装本扩展的桥接包 `dsh-vscode-bridge`（经 DSH 官方客户端插件扩展点安装）；
-2. 在 `cordis.patch.yml` 中写入一段带 `# dsh-vscode-bridge: begin` / `# dsh-vscode-bridge: end` 标记的 `insert:` 条目，把桥接包注册为 DSH 的官方 client 插件（只写用户目录，绝不触碰 DSH 安装目录）。
+1. Install its bridge package `dsh-vscode-bridge` into your DSH user directory (`$DSH_HOME/profiles/web`, default `~/.dsh/profiles/web`) via DSH's official client-plugin extension point;
+2. Write a marked `insert:` entry (wrapped in `# dsh-vscode-bridge: begin` / `# dsh-vscode-bridge: end`) into `cordis.patch.yml`, registering the bridge as a DSH client plugin — writing only to the user directory and never touching the DSH installation directory.
 
-如需移除：执行命令 `DSH: 卸载桥接`，插件会按标记精确删除写入的条目并删除桥接目录，自动还原 `cordis.patch.yml` 原文件（你原有的内容不受影响）。
+To remove: run `DSH: Uninstall Bridge` — the extension deletes the marked entry and the bridge directory, restoring the original `cordis.patch.yml` (your own content is untouched).
 
-### 桥接相关设置（`dsh.*`）
+### Bridge-related settings (`dsh.*`)
 
-| 设置项 | 默认值 | 说明 |
+| Setting | Default | Description |
 |---|---|---|
-| `dsh.bridge.enabled` | `true` | 是否启用桥接（关闭后不安装、不注入、不弹警告，两项联动不可用） |
-| `dsh.workspaceRootIndex` | `0` | 多根工作区时，用第几个根目录作为 `dsh web` 进程工作目录（越界回退第一个） |
-| `dsh.bridge.silenceWarning` | `false` | 抑制桥接降级警告（例如在面板之外打开 DSH 页面时） |
+| `dsh.bridge.enabled` | `true` | Enable the bridge (when off: no install, no injection, no warning; the two integrations are unavailable) |
+| `dsh.workspaceRootIndex` | `0` | For multi-root workspaces: which root to use as the `dsh web` process working directory (out-of-range falls back to the first) |
+| `dsh.bridge.silenceWarning` | `false` | Suppress the bridge degradation warning |
 
-### 降级行为
+### Degradation behavior
 
-桥接仅在面板内生效。若桥接未生效（例如你在浏览器里单独打开 DSH 页面、或安装失败），面板**完全可用**，只有上述两项联动不可用；插件启动时会弹一次警告，可选择「重试安装」或「不再提示」。
+The bridge only works inside the panel. If it is inactive (e.g. you open the DSH page in a browser, or the install failed), the panel remains **fully usable** — only the two integrations above are unavailable; a one-time startup warning (with "Retry Install" / "Don't Show Again") is shown.
 
-## ⚙️ 设置（`dsh.*`）
+## ⚙️ Settings (`dsh.*`)
 
-| 设置项 | 默认值 | 说明 |
+| Setting | Default | Description |
 |---|---|---|
-| `dsh.port` | `3080` | 期望端口（探测与启动共用） |
-| `dsh.host` | `127.0.0.1` | 服务地址（仅允许回环地址） |
-| `dsh.autoStart` | `true` | 服务未运行时自动启动 |
-| `dsh.stopOnExit` | `true` | 关闭最后一个窗口时停止插件自启的服务 |
-| `dsh.extraArgs` | `[]` | 启动 `dsh web` 时附加的参数 |
+| `dsh.port` | `3080` | Desired port (used for both detection and startup) |
+| `dsh.host` | `127.0.0.1` | Service address (loopback only) |
+| `dsh.autoStart` | `true` | Auto-start the service when it is not running |
+| `dsh.stopOnExit` | `true` | Stop the extension-started service when the last window closes |
+| `dsh.extraArgs` | `[]` | Extra arguments appended when starting `dsh web` |
 
-## 🌍 多语言
+## 🌍 Localization
 
-界面文案跟随 VS Code 显示语言（`Configure Display Language`）：`zh-*` → 简体中文，其余语言 → 英文。
+UI copy follows the VS Code display language (`Configure Display Language`): `zh-*` → Simplified Chinese, anything else → English.
 
-## 🧑‍💻 开发
+## 🧑‍💻 Development
 
-环境要求：Node.js ≥ 22、VS Code ≥ 1.91。
+Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 88 个单元/集成测试（含真实 dsh web 全流程）
-npm run compile       # 构建 out/extension.js
-npm run watch         # 监听构建
-npm run typecheck     # 类型检查
-npm run package       # 打包 .vsix
+npm run test          # 75 unit/integration tests (including a full real dsh web flow)
+npm run compile       # builds out/extension.js
+npm run watch         # watch build
+npm run typecheck     # type check
+npm run package       # package .vsix
 ```
 
-调试：VS Code 打开本目录，按 `F5` 启动 Extension Development Host。
+Debugging: open this folder in VS Code and press `F5` to launch the Extension Development Host.
 
 ```
 src/
-├── extension.ts          # 入口：装配与命令注册
-├── i18n.ts               # 动态文案字典（zh-* 中文 / 其余英文）
-├── config.ts             # 设置读取与规范化（loopback 白名单校验）
+├── extension.ts          # entry: assembly and command registration
+├── i18n.ts               # runtime copy dictionary (zh-* Chinese / otherwise English)
+├── config.ts             # settings normalization (loopback whitelist)
 ├── service/
-│   ├── detect.ts         # 端口探测（识别 DSH 标记）
-│   ├── process.ts        # 跨平台子进程封装（dsh / dsh.cmd）
-│   └── manager.ts        # 服务管理器状态机（核心）
+│   ├── detect.ts         # port probing (DSH marker detection)
+│   ├── process.ts        # cross-platform subprocess wrapper (dsh / dsh.cmd)
+│   └── manager.ts        # service manager state machine (core)
+├── bridge/               # bridge: installer, handshake host, message handling, status
 ├── panel/
-│   ├── html.ts           # 面板占位页模板（CSP 最小权限）
-│   └── provider.ts       # WebviewViewProvider（iframe + 占位页）
-└── statusbar.ts          # 状态栏控制器
+│   ├── html.ts           # panel page templates (minimal CSP)
+│   └── provider.ts       # WebviewViewProvider (iframe + placeholder pages)
+├── workspaceRoot.ts      # multi-root workspace resolution
+└── statusbar.ts          # status bar controller
 ```
 
-## 🧭 已知限制
+## 🧭 Known limitations
 
-- 欢迎页"DSH 入门"卡片的彩色图标来自 Marketplace 画廊数据，仅在商店上架后显示（卡片功能本身不受影响）；
-- VS Code 平台规则：左侧图标打开左侧面板、右侧图标打开右侧面板，无法让左侧图标打开右侧面板。
+- The colored icon on the "Get Started with DSH" walkthrough card comes from Marketplace gallery data and only appears after the extension is published (the card itself works regardless);
+- VS Code platform rule: the left icon opens the left panel, the right icon opens the right panel — the left icon cannot open the right panel.
 
-## 🌐 社区
+## 🌐 Community
 
-本项目是 DeepSeek Harness 社区插件（话题：[`dsh-plugin`](https://github.com/topics/dsh-plugin)）。
+This is a DeepSeek Harness community plugin (topic: [`dsh-plugin`](https://github.com/topics/dsh-plugin)).
 
-- DSH 官方仓库：<https://github.com/deepseek-ai/deepseek-harness>
-- 问题反馈：<https://github.com/Fengze233/dsh-vscode/issues>
-- DSH 社区讨论：<https://github.com/deepseek-ai/deepseek-harness/discussions>
+- DSH official repo: <https://github.com/deepseek-ai/deepseek-harness>
+- Issue tracker: <https://github.com/Fengze233/dsh-vscode/issues>
+- DSH community discussions: <https://github.com/deepseek-ai/deepseek-harness/discussions>
 
 ## 📄 License
 
 [MIT](./LICENSE) © 2026 Fengze233
-
----
-
-## English
-
-A VS Code extension that embeds the [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) web UI right inside the sidebar. One click auto-starts (or reuses) `dsh web` and loads the page in an embedded panel — no more switching between terminal, browser, and IDE.
-
-**Features**: dual sidebar entrances (activity bar + secondary side bar), automatic service lifecycle management, live status bar indicator, graceful error/reconnect pages, bilingual UI (Chinese for `zh-*`, English otherwise), loopback-only security boundary.
-
-**Bridge & workspace integration**: the extension installs its own bridge package `dsh-vscode-bridge` into DSH's official client-plugin extension point under your DSH user directory (`$DSH_HOME/profiles/web`, default `~/.dsh/profiles/web`) — writing only to the user directory and never touching the DSH installation directory — and writes a marked entry into `cordis.patch.yml`, enabling two capabilities: clicking external links opens them in your system browser, and clicking file paths opens the file in VS Code. Remove it any time with `DSH: Uninstall Bridge` (the original file is restored automatically). New settings: `dsh.bridge.enabled` (default `true`), `dsh.workspaceRootIndex` (default `0`, for multi-root workspaces — the working directory of the auto-started `dsh web`), `dsh.bridge.silenceWarning` (default `false`). If the bridge is inactive, the panel remains fully usable — only the two integrations are unavailable, and a one-time startup warning (with "Don't Show Again") is shown.
-
-**Install**: from the Marketplace (`code --install-extension Fengze233.dsh-vscode-panel`) or download `dsh-vscode.vsix` from [Releases](https://github.com/Fengze233/dsh-vscode/releases) and run `Extensions: Install from VSIX...` — or build from source (`npm install && npm run package`).
-
-**Requirements**: Node.js ≥ 22 to build; VS Code ≥ 1.91; the `dsh` CLI from [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) on your PATH.
-
-**Community**: this is a DeepSeek Harness community plugin (topic: [`dsh-plugin`](https://github.com/topics/dsh-plugin)). Feedback welcome at <https://github.com/Fengze233/dsh-vscode/issues>.
