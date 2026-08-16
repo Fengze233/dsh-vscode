@@ -163,19 +163,24 @@ export function activate(context: vscode.ExtensionContext): void {
 
   /** 重试安装桥接（命令 dsh.bridge.retry 与警告「重试安装」按钮共用） */
   async function retryBridge(): Promise<void> {
-    if (!readConfig().config.bridgeEnabled) return; // 桥接被禁用：不重试
-    // 重新安装（异常降级并记日志，不中断重试流程）
-    install = safeInstallBridge();
-    // 重置握手状态：重启后 iframe 重载会重新握手，onBridgeAck 会写入新结果
-    handshakeOk = undefined;
-    clearHandshakeTimer();
-    // 清警告静默（globalState 标志），允许后续再次弹出降级警告
-    await context.globalState.update(BRIDGE_SILENCE_KEY, false);
-    warningShown = false;
-    // 重启服务，触发面板 iframe 重载与重新握手
-    await manager?.restart();
-    // 重启后重新评估一次（留出握手回执时间）
-    scheduleEvaluation();
+    try {
+      if (!readConfig().config.bridgeEnabled) return; // 桥接被禁用：不重试
+      // 重新安装（异常降级并记日志，不中断重试流程）
+      install = safeInstallBridge();
+      // 重置握手状态：重启后 iframe 重载会重新握手，onBridgeAck 会写入新结果
+      handshakeOk = undefined;
+      clearHandshakeTimer();
+      // 清警告静默（globalState 标志），允许后续再次弹出降级警告
+      await context.globalState.update(BRIDGE_SILENCE_KEY, false);
+      warningShown = false;
+      // 重启服务，触发面板 iframe 重载与重新握手
+      await manager?.restart();
+      // 重启后重新评估一次（留出握手回执时间）
+      scheduleEvaluation();
+    } catch (err) {
+      // 重试失败只记日志：命令入口是 void 调用，异常不能成为未处理拒绝
+      output?.appendLine(`[bridge] retry failed: ${String(err)}`);
+    }
   }
 
   /** 卸载桥接（命令 dsh.bridge.uninstall）：删除 profile 条目与目录，提示需重启 DSH 服务生效 */

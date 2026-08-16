@@ -1,5 +1,6 @@
 // src/panel/provider.ts — 侧边栏面板：iframe 与占位页切换
 import * as vscode from 'vscode';
+import { randomUUID } from 'node:crypto';
 import { ServiceManager } from '../service/manager';
 import { handleBridgeMessage } from '../bridge/host';
 import { t } from '../i18n';
@@ -19,8 +20,8 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   private wasConnected = false;
   /** 面板是否已首次打开过（用于一次性回调） */
   private openedOnce = false;
-  /** 握手 token：面板与 iframe 之间的防伪凭据（每实例随机，握手下发时使用） */
-  private readonly bridgeToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  /** 桥接握手 token：一次性防伪凭据，用密码学随机数（不可预测） */
+  private readonly bridgeToken = randomUUID();
 
   /**
    * @param manager 服务管理器（面板与服务状态联动）
