@@ -21,6 +21,8 @@ jobs:
       - run: npm run typecheck
       # 单元/集成测试（集成测试在无 dsh 的 runner 上自动跳过）
       - run: npm test
+      # 构建扩展入口（npm test 只构建测试，不打 out/extension.js）
+      - run: npm run compile
       # 打包 vsix（产物用于后续发布/手工安装）
       - run: npx vsce package -o dsh-vscode.vsix
       # 上传打包产物
