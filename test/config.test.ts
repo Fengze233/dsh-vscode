@@ -62,3 +62,16 @@ test('normalizeConfig 处理桥接新设置项的缺省与非法值', () => {
   assert.equal(r3.config.workspaceRootIndex, 0); // 非法回退默认
   assert.equal(r3.errors.length, 1);
 });
+
+test('workspaceRootIndex 非法分支逐类回退并记录错误', () => {
+  // 非整数（1.5 / NaN）与类型错误（字符串）都必须回退 0 并记录 error
+  const r1 = normalizeConfig({ workspaceRootIndex: 1.5 });
+  assert.equal(r1.config.workspaceRootIndex, 0);
+  assert.equal(r1.errors.length, 1);
+  const r2 = normalizeConfig({ workspaceRootIndex: Number.NaN });
+  assert.equal(r2.config.workspaceRootIndex, 0);
+  assert.equal(r2.errors.length, 1);
+  const r3 = normalizeConfig({ workspaceRootIndex: '2' as unknown as number });
+  assert.equal(r3.config.workspaceRootIndex, 0);
+  assert.equal(r3.errors.length, 1);
+});

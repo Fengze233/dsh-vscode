@@ -74,3 +74,11 @@ test('startDsh 透传 cwd 到 spawn 选项', () => {
   runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], cwd: '/proj' });
   assert.equal(calls[0].opts.cwd, '/proj');
 });
+
+test('startDsh 未传 cwd 时 spawn 选项不含 cwd 键', () => {
+  const calls: unknown[] = [];
+  const runner = createProcessRunner(((cmd, args, opts) => { calls.push(opts); return new FakeChild(); }) as SpawnFn, 'linux');
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
+  const opts = calls[0] as Record<string, unknown>;
+  assert.equal('cwd' in opts, false);
+});
