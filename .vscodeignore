@@ -1,5 +1,6 @@
 .vscode/**
 .superpowers/**
+.github/**
 src/**
 test/**
 scripts/**
@@ -9,3 +10,7 @@ out/test/**
 bridge-client/**
 **/*.map
 tsconfig.json
+# 仓库元数据与中文镜像：不随扩展分发（GitHub 上可读）
+.gitignore
+README.zh.md
+CONTRIBUTING.md
