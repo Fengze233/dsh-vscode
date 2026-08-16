@@ -2,6 +2,19 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.1] - 2026-08-16
+
+### 修复
+- 构建前清空 out 目录，消除删除文件后的产物残留（测试数统计失真）
+- 握手 token 改用 crypto 随机数（不可预测）
+- retryBridge 失败路径兜底，消除未处理异常
+
+### 改进
+- 扩展改为按需激活，减少 VS Code 启动负担
+- 新增 GitHub Actions CI（typecheck + 测试 + 打包）
+- 新增 Issue/PR 模板与贡献指南
+- README 英文主版 + 中文版（README.zh.md，顶部语言互链）
+
 ## [0.2.0] - 2026-08-15
 
 ### 新增
