@@ -64,53 +64,23 @@ document.addEventListener('click', (e) => {
 /**
  * 桥接握手脚本（内联，nonce 放行，紧随 BUTTON_SCRIPT 之后、共用其声明的 vscode）。
  * 职责：
- *  - 下行：接收扩展发来的 { kind:'syncWorkspace', path }（无 token），补上 token 后转发给 iframe，
- *    让桥接侧把 VS Code 工作区落地为会话 cwd（fetch 拦截注入兜底）；
- *    因晚开/重建面板时扩展可能在 iframe 加载完成前就下发 syncWorkspace（桥接监听器尚未注册、
- *    消息会被静默丢弃），故先缓冲到 pendingPath，待 iframe load 后再补发；iframe 已加载则立即转发。
  *  - 上行：向 iframe 下发 { kind:'bridgeHello', token } 握手消息，接收其 bridgeAck 回执，
  *    并把 iframe 上行消息（openExternal / openFile）转发给扩展侧处理。
- * 安全约束：上行仅接收「目标 origin」且「source 为 iframe 内容窗口」的消息，防止其它站点伪造；
- * 下行与上行按 source 区分（下行 source 收紧为 window.parent——VS Code 把扩展消息经 bootstrap
- * （pre/index.html）以 postMessage 转发进承载扩展 HTML 的嵌套 iframe，到达时 source 即 bootstrap 窗口，
- * 而非本 webview 内容自身的 window；data 无 token 字段，
- * 避免误把非 iframe 来源——含 DSH 页面内嵌套 iframe——当成扩展消息携带 token 转发）。
+ * 安全约束：上行仅接收「目标 origin」且「source 为 iframe 内容窗口」的消息，防止其它站点伪造。
  * @param token 握手防伪凭据（与桥接侧 isBridgeMessage 校验的一致）
  * @param allowedOrigin 允许的消息来源 origin（由 DSH 页面地址推导，如 http://127.0.0.1:3080）
  */
 function bridgeHandshakeScript(token: string, allowedOrigin: string): string {
   return `
-// dsh-bridge-handshake：DSH 页面桥接握手与消息路由（上行转发 + 下行同步）
+// dsh-bridge-handshake：DSH 页面桥接握手与消息路由（上行转发）
 const iframeEl = document.getElementById('dsh-frame');
 if (iframeEl) {
   const iframeSrc = iframeEl.src;
-  // 握手 token 与允许的 DSH 页面 origin（下行转发时给桥接侧做来源校验）
+  // 握手 token 与允许的 DSH 页面 origin
   const TOKEN = ${JSON.stringify(token)};
   const ALLOWED_ORIGIN = ${JSON.stringify(allowedOrigin)};
-  // 下行工作区同步缓冲：晚开/重建面板时扩展可能在 iframe 加载完成前就下发 syncWorkspace，
-  // 此时桥接监听器尚未注册、消息会被静默丢弃，故先记录 pendingPath（可覆盖旧值，最后一次生效），
-  // 待 iframe load 后统一补发；iframe 已加载时立即转发。
-  let pendingPath = undefined;
-  // iframe 是否已加载完成：load 后下行同步可直接转发，无需再走缓冲
-  let iframeLoaded = false;
   window.addEventListener('message', (e) => {
     const d = e.data;
-    // —— 下行：扩展消息经 VS Code bootstrap（pre/index.html）以 postMessage 转发进承载扩展 HTML 的
-    // 嵌套 iframe，到达时 e.source === window.parent（bootstrap 窗口），而非本 webview 内容自身的 window ——
-    // 特征：data.kind === 'syncWorkspace' 且不带 token 字段；据此与上行消息区分，避免互相干扰。
-    // 注意：不能以 e.source === window 判定下行——扩展消息从 bootstrap 窗口转进，source 是 window.parent；
-    // 也不能以 e.source !== iframeEl.contentWindow 判定——那会把任何非 iframe 来源（含 DSH 页面内嵌套 iframe）
-    // 误判为扩展消息并携带 token 转发；必须收紧为 e.source === window.parent。
-    if (e.source === window.parent && d && d.kind === 'syncWorkspace' && typeof d.path === 'string') {
-      if (iframeLoaded) {
-        // iframe 已加载：桥接监听器已就绪，立即转发（补 token 供桥接侧校验来源）
-        iframeEl.contentWindow.postMessage({ kind: 'syncWorkspace', path: d.path, token: TOKEN }, ALLOWED_ORIGIN);
-      } else {
-        // iframe 未加载：仅记录待同步路径，待 load 事件后统一补发
-        pendingPath = d.path;
-      }
-      return;
-    }
     // —— 上行：iframe 发来的消息，origin + source 双重校验 ——
     if (e.origin !== ALLOWED_ORIGIN || e.source !== iframeEl.contentWindow) return;
     // 握手回执：统一形状 { kind:'bridgeAck', ok }（不带 token 字段），只读 ok
@@ -122,14 +92,9 @@ if (iframeEl) {
       vscode.postMessage({ type: 'bridgeOpenFile', path: d.path, cwd: typeof d.cwd === 'string' ? d.cwd : undefined });
     }
   });
-  // iframe 加载完成后：先下发握手消息（携带 token），再补发缓冲的待同步路径
+  // iframe 加载完成后下发握手消息（携带 token）
   iframeEl.addEventListener('load', () => {
-    iframeLoaded = true;
     iframeEl.contentWindow.postMessage({ kind: 'bridgeHello', token: TOKEN }, iframeSrc);
-    if (pendingPath !== undefined) {
-      iframeEl.contentWindow.postMessage({ kind: 'syncWorkspace', path: pendingPath, token: TOKEN }, ALLOWED_ORIGIN);
-      pendingPath = undefined;
-    }
   });
 }`;
 }

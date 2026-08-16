@@ -77,11 +77,10 @@ npm run package        # 产出 dsh-vscode.vsix，再按方式二安装
 
 ## 🔗 桥接与工作区联动
 
-安装后，插件会在你的 DSH 用户目录安装本扩展的桥接包（经 DSH 官方客户端插件扩展点安装），让面板与 VS Code 联动。启用后获得三项能力：
+安装后，插件会在你的 DSH 用户目录安装本扩展的桥接包（经 DSH 官方客户端插件扩展点安装），让面板与 VS Code 联动。启用后获得两项能力：
 
 - 🔗 **外链跳转**：面板内点击外链，在系统默认浏览器中打开（而非被困在 iframe 内）；
-- 📂 **文件跳转**：点击面板内的文件路径，在 VS Code 中打开对应文件；
-- 📁 **工作区同步**：打开面板时，自动把当前 VS Code 工作区同步为 DSH 的工作区，DSH 的文件操作直接落在你的项目目录。
+- 📂 **文件跳转**：点击面板内的文件路径，在 VS Code 中打开对应文件。
 
 ### 安装与卸载机制（透明披露）
 
@@ -96,13 +95,13 @@ npm run package        # 产出 dsh-vscode.vsix，再按方式二安装
 
 | 设置项 | 默认值 | 说明 |
 |---|---|---|
-| `dsh.bridge.enabled` | `true` | 是否启用桥接（关闭后不安装、不注入、不弹警告，三项联动不可用） |
-| `dsh.workspaceRootIndex` | `0` | 多根工作区时，用第几个根目录作为同步与 `dsh web` 工作目录（越界回退第一个） |
+| `dsh.bridge.enabled` | `true` | 是否启用桥接（关闭后不安装、不注入、不弹警告，两项联动不可用） |
+| `dsh.workspaceRootIndex` | `0` | 多根工作区时，用第几个根目录作为 `dsh web` 进程工作目录（越界回退第一个） |
 | `dsh.bridge.silenceWarning` | `false` | 抑制桥接降级警告（例如在面板之外打开 DSH 页面时） |
 
 ### 降级行为
 
-桥接仅在面板内生效。若桥接未生效（例如你在浏览器里单独打开 DSH 页面、或安装失败），面板**完全可用**，只有上述三项联动不可用；插件启动时会弹一次警告，可选择「重试安装」或「不再提示」。
+桥接仅在面板内生效。若桥接未生效（例如你在浏览器里单独打开 DSH 页面、或安装失败），面板**完全可用**，只有上述两项联动不可用；插件启动时会弹一次警告，可选择「重试安装」或「不再提示」。
 
 ## ⚙️ 设置（`dsh.*`）
 
@@ -124,7 +123,7 @@ npm run package        # 产出 dsh-vscode.vsix，再按方式二安装
 
 ```bash
 npm install
-npm run test          # 39 个单元/集成测试（含真实 dsh web 全流程）
+npm run test          # 88 个单元/集成测试（含真实 dsh web 全流程）
 npm run compile       # 构建 out/extension.js
 npm run watch         # 监听构建
 npm run typecheck     # 类型检查
@@ -173,7 +172,7 @@ A VS Code extension that embeds the [DeepSeek Harness (DSH)](https://github.com/
 
 **Features**: dual sidebar entrances (activity bar + secondary side bar), automatic service lifecycle management, live status bar indicator, graceful error/reconnect pages, bilingual UI (Chinese for `zh-*`, English otherwise), loopback-only security boundary.
 
-**Bridge & workspace integration**: the extension installs its own bridge package `dsh-vscode-bridge` into DSH's official client-plugin extension point under your DSH user directory (`$DSH_HOME/profiles/web`, default `~/.dsh/profiles/web`) — writing only to the user directory and never touching the DSH installation directory — and writes a marked entry into `cordis.patch.yml`, enabling three capabilities: clicking external links opens them in your system browser, clicking file paths opens the file in VS Code, and opening the panel auto-syncs the VS Code workspace into DSH. Remove it any time with `DSH: Uninstall Bridge` (the original file is restored automatically). New settings: `dsh.bridge.enabled` (default `true`), `dsh.workspaceRootIndex` (default `0`, for multi-root workspaces), `dsh.bridge.silenceWarning` (default `false`). If the bridge is inactive, the panel remains fully usable — only the three integrations are unavailable, and a one-time startup warning (with "Don't Show Again") is shown.
+**Bridge & workspace integration**: the extension installs its own bridge package `dsh-vscode-bridge` into DSH's official client-plugin extension point under your DSH user directory (`$DSH_HOME/profiles/web`, default `~/.dsh/profiles/web`) — writing only to the user directory and never touching the DSH installation directory — and writes a marked entry into `cordis.patch.yml`, enabling two capabilities: clicking external links opens them in your system browser, and clicking file paths opens the file in VS Code. Remove it any time with `DSH: Uninstall Bridge` (the original file is restored automatically). New settings: `dsh.bridge.enabled` (default `true`), `dsh.workspaceRootIndex` (default `0`, for multi-root workspaces — the working directory of the auto-started `dsh web`), `dsh.bridge.silenceWarning` (default `false`). If the bridge is inactive, the panel remains fully usable — only the two integrations are unavailable, and a one-time startup warning (with "Don't Show Again") is shown.
 
 **Install**: from the Marketplace (`code --install-extension Fengze233.dsh-vscode-panel`) or download `dsh-vscode.vsix` from [Releases](https://github.com/Fengze233/dsh-vscode/releases) and run `Extensions: Install from VSIX...` — or build from source (`npm install && npm run package`).
 

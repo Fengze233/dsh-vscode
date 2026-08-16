@@ -43,27 +43,13 @@ test('readyPage 启用桥接时注入握手脚本', () => {
   assert.ok(html.includes('tok123'));
 });
 
-test('readyPage 握手脚本包含下行 syncWorkspace 转发（补 token）', () => {
+test('readyPage 握手脚本包含上行 bridgeHello 发送', () => {
   const html = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
-  // 下行转发：收到扩展发来的 {kind:'syncWorkspace', path}（无 token）时，
-  // 向 iframe 补发携带 token 的 {kind:'syncWorkspace', path, token}，供桥接侧校验来源。
-  assert.ok(html.includes("kind: 'syncWorkspace'"), '脚本应包含 syncWorkspace 下行转发逻辑');
-  assert.ok(html.includes("token: TOKEN"), '下行转发应向 iframe 补发握手 token');
-});
-
-test('readyPage 握手脚本下行 syncWorkspace 走缓冲 + source 收紧为 window', () => {
-  const html = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
-  // 下行缓冲：iframe 加载完成前先记录 pendingPath，load 后统一补发（可覆盖旧值、最后一次生效）
-  assert.ok(html.includes('pendingPath'), '脚本应包含下行缓冲变量 pendingPath');
-  assert.ok(html.includes('iframeLoaded'), '脚本应包含 iframe 加载状态标志 iframeLoaded');
-  // 下行分支 source 判定收紧为 e.source === window.parent（扩展消息经 bootstrap 以 postMessage 转进嵌套 iframe，
-  // 到达时 source 即 bootstrap 窗口，而非本 webview 内容自身的 window；避免误认 DSH 页内嵌套 iframe）
-  assert.ok(html.includes('e.source === window.parent'), '下行分支 source 判定应为 e.source === window.parent');
-  // iframe load 后先发 bridgeHello，再补发缓冲的 syncWorkspace（带 token）
-  assert.ok(html.includes("kind: 'bridgeHello'"), 'load 后应先发 bridgeHello');
-  assert.ok(html.includes("kind: 'syncWorkspace'"), 'load 后应补发 syncWorkspace');
-  assert.ok(html.includes('path: pendingPath'), 'load 后应转发缓冲的 pendingPath');
-  assert.ok(html.includes('token: TOKEN'), '下行转发应补发握手 token');
+  // iframe load 后向 iframe 发送 bridgeHello 握手消息（携带 token）
+  assert.ok(html.includes("kind: 'bridgeHello'"), 'load 后应发送 bridgeHello');
+  assert.ok(html.includes('token: TOKEN'), '握手消息应携带 token');
+  // 不应再包含下行 syncWorkspace 转发逻辑（工作区同步已移除）
+  assert.ok(!html.includes('syncWorkspace'), '脚本不应包含 syncWorkspace 下行转发');
 });
 
 test('readyPage 未启用桥接时不注入握手脚本', () => {

@@ -7,8 +7,6 @@ import {
   buildOpenFileMessage,
   buildSyncWorkspaceAck,
   isBridgeMessage,
-  parseWorkspaceMessage,
-  WORKSPACE_MESSAGE_KIND,
   HANDSHAKE_TOKEN_KEY,
 } from '../../bridge-client/lib/core.js';
 
@@ -40,20 +38,6 @@ test('isBridgeMessage 校验 token', () => {
   assert.equal(isBridgeMessage(null, 't1'), false);
 });
 
-test('parseWorkspaceMessage 校验 token 与形状后提取路径', () => {
-  // 合法消息：token 匹配且 kind 为 syncWorkspace、path 为字符串 → 返回 path
-  assert.equal(parseWorkspaceMessage({ kind: 'syncWorkspace', path: '/proj', token: 't1' }, 't1'), '/proj');
-  // token 不匹配 → undefined
-  assert.equal(parseWorkspaceMessage({ kind: 'syncWorkspace', path: '/proj', token: 't2' }, 't1'), undefined);
-  // path 非字符串 → undefined
-  assert.equal(parseWorkspaceMessage({ kind: 'syncWorkspace', path: 123, token: 't1' }, 't1'), undefined);
-  // kind 不符 → undefined
-  assert.equal(parseWorkspaceMessage({ kind: 'other', path: '/proj', token: 't1' }, 't1'), undefined);
-  // 非对象 → undefined
-  assert.equal(parseWorkspaceMessage(null, 't1'), undefined);
-});
-
 test('常量取值正确', () => {
-  assert.equal(WORKSPACE_MESSAGE_KIND, 'syncWorkspace');
   assert.equal(HANDSHAKE_TOKEN_KEY, 'token');
 });

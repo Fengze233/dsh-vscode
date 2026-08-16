@@ -1,4 +1,4 @@
-// src/bridge/host.ts — 桥接消息处理：外链打开 / 文件跳转（工作区同步编排见 Task 5）
+// src/bridge/host.ts — 桥接消息处理：外链打开 / 文件跳转
 // 职责：把 webview 顶层转发来的桥接消息（bridgeOpenExternal / bridgeOpenFile）落地为
 // VS Code 动作（打开外部浏览器 / 打开文本文档），并做协议白名单与路径解析的纵深防御。
 // 依赖注入设计：生产侧接 vscode API（openExternal / showTextDocument），测试侧注入假实现，
@@ -14,7 +14,7 @@ export interface BridgeMessageDeps {
   openTextDocument(path: string): Thenable<void>;
   /** 弹用户可见提示（生产接 vscode.window.showWarningMessage，测试注入假实现以断言） */
   showWarning(msg: string): void;
-  /** 工作区根目录（相对路径解析的兜底基准，生产由 Task 5 注入） */
+  /** 工作区根目录（相对路径解析的兜底基准，生产由扩展入口注入） */
   workspaceRoot?: string;
 }
 
@@ -50,7 +50,6 @@ export function resolveBridgePath(raw: string, sessionCwd: string | undefined, w
 
 /**
  * 处理桥接消息：外链打开走协议白名单，文件跳转走路径解析。
- * 工作区同步（syncWorkspace）等其余消息类型由 Task 5 在此扩展，本任务只处理跳转两类。
  */
 export async function handleBridgeMessage(msg: PanelMessage, deps: BridgeMessageDeps): Promise<void> {
   if (msg.type === 'bridgeOpenExternal') {

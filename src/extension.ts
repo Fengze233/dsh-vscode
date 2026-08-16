@@ -9,8 +9,7 @@ import { createProcessRunner } from './service/process';
 import { ServiceManager, type ManagerOptions } from './service/manager';
 import { DshPanelProvider } from './panel/provider';
 import { StatusBarController } from './statusbar';
-import { createDshApiClient } from './bridge/api';
-import { resolveWorkspaceRoot, syncWorkspace } from './bridge/sync';
+import { resolveWorkspaceRoot } from './workspaceRoot';
 import {
   installBridge,
   uninstallBridge,
@@ -21,8 +20,6 @@ import { evaluateBridgeStatus, bridgeWarningText } from './bridge/status';
 
 let manager: ServiceManager | null = null;
 let output: vscode.OutputChannel | null = null;
-/** 最近一次工作区同步成功的根目录（供服务就绪先于面板创建时补发下行同步） */
-let lastSyncedRoot: string | undefined;
 
 /** globalState 键：用户点击「不再提示」后置 true，持久静默桥接降级警告 */
 const BRIDGE_SILENCE_KEY = 'dsh.bridgeWarningSilenced';
@@ -50,7 +47,6 @@ export function activate(context: vscode.ExtensionContext): void {
   // 语言规则：vscode.env.language 以 zh- 开头 → 中文，其余一律英文
   initI18n(vscode.env.language);
   output = vscode.window.createOutputChannel('DSH');
-  lastSyncedRoot = undefined; // 重置上次同步记录（activate 理论上只调用一次，此处防御性初始化）
 
   const { config, errors } = readConfig();
   for (const err of errors) output?.appendLine(`[config] ${err}`);
@@ -201,33 +197,11 @@ export function activate(context: vscode.ExtensionContext): void {
   manager.setExitBehavior(!config.stopOnExit);
 
   // 工作区根目录解析：多根工作区按 dsh.workspaceRootIndex 取根（越界回退第一个）。
+  // 该 getter 仅用于 provider 的文件相对路径解析（openFile 的 workspaceRoot 兜底基准）。
   const workspaceRootGetter = (): string | undefined =>
     resolveWorkspaceRoot(vscode.workspace.workspaceFolders ?? [], readConfig().config.workspaceRootIndex);
-  // 待补发路径 getter：syncOnce 成功后更新 lastSyncedRoot，面板晚于服务就绪创建时据此补发下行同步
-  const pendingSyncPath = (): string | undefined => lastSyncedRoot;
   // 桥接启用 getter：随时读取最新配置，供 readyPage 决定是否注入握手脚本
   const bridgeEnabledGetter = (): boolean => readConfig().config.bridgeEnabled;
-
-  /**
-   * 工作区同步的触发入口（由两个面板的 onReady 回调注入）。
-   * 此前同步挂在 manager.onChange 的「state 变 ready」上，但新 VS Code 窗口复用已就绪服务时
-   * （ensureRunning 探测到 3080 已就绪、直接复用，manager 激活时即 ready、无任何 onChange），
-   * syncOnce 永不执行，新目录的 workspace 从未创建。现将触发点平移到 provider 的 onReady：
-   * resolveWebviewView → ensureRunning().then(onReady)，无论复用还是新启动，resolve 时服务
-   * 必为 ready 或 failed，故此处先判状态，避免 failed 时误触发。
-   * syncedOnce 防止同窗口重复开面板时重复 create（syncWorkspace 本身幂等，重复调用无害，
-   * 但保留标志更干净；「新窗口」是新的扩展激活，syncedOnce 天然重置，不影响修复目标）。
-   */
-  let syncedOnce = false;
-  function onSyncReady(): void {
-    if (syncedOnce) return; // 本次扩展激活已同步过，不再重复触发
-    if (manager?.getSnapshot().state !== 'ready') return; // failed 时不误触发
-    const root = workspaceRootGetter();
-    if (root === undefined) return; // 空窗口无工作区，不同步
-    if (root === lastSyncedRoot) return; // 根目录未变化（已同步过同一路径），跳过
-    syncedOnce = true;
-    void syncOnce();
-  }
 
   // 左右两侧各一个 provider 实例，共享同一 manager（服务状态一致）
   const panelPrimary = new DshPanelProvider(
@@ -238,51 +212,23 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     onBridgeAck, // onBridgeAck：桥接握手回执 → handshakeOk（Task 7 状态评估）
     workspaceRootGetter, // workspaceRoot：文件相对路径解析的兜底基准
-    pendingSyncPath, // pendingSyncPath：服务就绪先于面板创建时补发同步
     bridgeEnabledGetter, // bridgeEnabled：dsh.bridge.enabled 驱动握手脚本注入
-    onSyncReady, // onReady：服务运行流程完成后触发工作区同步（复用/新启动都覆盖）
   );
   const panelSecondary = new DshPanelProvider(
     manager,
     onPanelFirstOpen, // 辅助侧边栏首次打开同样触发握手超时
     onBridgeAck,
     workspaceRootGetter,
-    pendingSyncPath,
     bridgeEnabledGetter,
-    onSyncReady, // 辅助面板同样注入 onReady，保证左右任一先开都能触发同步
   );
   new StatusBarController(manager);
 
-  // 服务就绪后启动握手超时（若面板已打开）。工作区同步已移至 provider 的 onReady 触发，
-  // 此处不再注册 syncOnce——避免「新窗口复用已就绪服务时无 onChange 导致同步永不执行」。
+  // 服务就绪后启动握手超时（若面板已打开）
   manager.onChange((s) => {
     if (s.state === 'ready') {
       startHandshakeTimeout(); // 服务就绪：若面板已打开，启动握手超时
     }
   });
-
-  /** 工作区同步主流程：解析根目录 → 幂等 syncWorkspace → 通知两个面板下发 */
-  async function syncOnce(): Promise<void> {
-    // 桥接禁用时不同步：dsh.bridge.enabled=false 表示用户关闭桥接，
-    // 不应再向 DSH 发 workspace.list/workspace.create 写请求（避免用户未请求的持久化副作用）。
-    // 必须读实时配置（而非激活时的 install 状态），保证运行中关闭设置后立即停用。
-    if (!readConfig().config.bridgeEnabled) return;
-    const root = workspaceRootGetter();
-    if (root === undefined) return; // 无工作区（空窗口）不同步
-    try {
-      const snap = manager?.getSnapshot();
-      if (!snap?.url) return; // ready 状态必有 url，此处防御性兜底
-      // 幂等同步：list 命中复用，否则 create（Task 3 的 DSH API 信封客户端）
-      await syncWorkspace(createDshApiClient(snap.url), root);
-      lastSyncedRoot = root; // 成功后记录，供后续创建的面板补发
-      // 通知两个面板下发 syncWorkspace（view 未创建时 postMessage 静默忽略，由 resolveWebviewView 补发）
-      panelPrimary.notifySyncWorkspace(root);
-      panelSecondary.notifySyncWorkspace(root);
-    } catch (err) {
-      // 同步失败只记日志，不打断面板与桥接其余功能
-      output?.appendLine(`[bridge] ${t('bridge.syncFailed', { message: String(err) })}`);
-    }
-  }
 
   context.subscriptions.push(
     // 第三参数：隐藏面板时保留 webview（iframe 不销毁、DSH 页面会话不丢）
