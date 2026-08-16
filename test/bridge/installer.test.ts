@@ -8,6 +8,7 @@ import {
   uninstallBridge,
   detectProfileDir,
   createNodeFs,
+  bridgeTargetDirs,
   BRIDGE_BEGIN_MARK,
   BRIDGE_END_MARK,
   BRIDGE_BEGIN_MARK_WAS_EMPTY,
@@ -27,7 +28,7 @@ function makeMemFs(init: Record<string, string> = {}): InstallerFs {
     writeFile: (p, c) => { files.set(p, c); },
     mkdir: (p) => { dirs.add(p); },
     copyDir: (src, dest) => { dirs.add(dest); files.set(`${dest}/package.json`, `{"name":"dsh-vscode-bridge","copied":"${src}"}`); },
-    rmDir: (p) => { dirs.delete(p); },
+    rmDir: (p) => { dirs.delete(p); for (const k of [...files.keys()]) { if (k.startsWith(`${p}/`)) files.delete(k); } },
     readdir: () => [],
   };
 }
@@ -243,4 +244,97 @@ test('幂等分支 package.json 不可读、rmDir+copyDir 成功 → ok、patch 
   const pkg = fs.readFile(`${bridgeDir}/package.json`);
   assert.ok(pkg.includes('"name"'));
   assert.ok(pkg.includes(opts.bridgeSourceDir));
+});
+
+// —— 双位置安装（Windows/WSL 兼容）：primary=profiles/web/node_modules，secondary=profiles/node_modules ——
+
+test('bridgeTargetDirs 返回 primary 与 secondary 两个目标目录', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const dirs = bridgeTargetDirs(profile);
+  assert.equal(dirs.primary, '/home/u/.dsh/profiles/web/node_modules/dsh-vscode-bridge');
+  assert.equal(dirs.secondary, '/home/u/.dsh/profiles/node_modules/dsh-vscode-bridge');
+});
+
+test('首次安装：primary 与 secondary 两处目录均被创建', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const original = '# 用户自己的内容\n';
+  const fs = makeMemFs({ [patchPath]: original });
+  fs.mkdir(profile);
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs };
+  const r = installBridge(opts);
+  assert.equal(r.status, 'ok');
+  const dirs = bridgeTargetDirs(profile);
+  assert.equal(fs.exists(dirs.primary), true);
+  assert.equal(fs.exists(dirs.secondary), true);
+  // bridgeDir 语义保持为 primary 路径（兼容既有）。
+  assert.equal(r.bridgeDir, dirs.primary);
+});
+
+test('首次安装 secondary copyDir 抛错 → degraded、patch 字节还原、primary 也已清理', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const original = '# 用户自己的内容\n- id: user-plugin\n  name: user-plugin\n';
+  const fs = makeFailableFs({ [patchPath]: original });
+  fs.mkdir(profile);
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs };
+
+  // 仅让 secondary copyDir 失败：首次 primary 复制后，secondary 复制抛错。
+  const secondary = `${profile}/../node_modules/dsh-vscode-bridge`;
+  const realCopy = fs.copyDir.bind(fs);
+  let primaryCopied = false;
+  fs.copyDir = (src, dest) => {
+    // 第一次调用（primary）成功；第二次调用（secondary）抛错。
+    if (dest === secondary || primaryCopied) {
+      throw new Error(`EACCES: copy failed: ${src}`);
+    }
+    primaryCopied = true;
+    realCopy(src, dest);
+  };
+
+  const r = installBridge(opts);
+  assert.equal(r.status, 'degraded');
+  assert.ok(r.reason && /copy/i.test(r.reason), 'reason 应包含失败位置');
+  assert.equal(fs.readFile(patchPath), original); // patch 字节级还原
+  const dirs = bridgeTargetDirs(profile);
+  assert.equal(fs.exists(dirs.primary), false); // primary 已清理
+  assert.equal(fs.exists(dirs.secondary), false);
+});
+
+test('幂等分支 secondary 缺失（dsh 升级清理 fallback）→ 自愈补回 secondary 且 primary 不动', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const original = '# 用户自己的内容\n';
+  const fs = makeFailableFs({ [patchPath]: original });
+  fs.mkdir(profile);
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs };
+  installBridge(opts); // 正常完成首次安装，两处均存在
+
+  // 记录 primary 副本内容，再模拟 dsh 升级清理 secondary。
+  const dirs = bridgeTargetDirs(profile);
+  const primaryPkg = fs.readFile(`${dirs.primary}/package.json`);
+  fs.rmDir(dirs.secondary);
+  assert.equal(fs.exists(dirs.secondary), false);
+
+  const r = installBridge(opts); // 幂等分支：secondary 缺失 → 自愈补回
+  assert.equal(r.status, 'ok');
+  assert.equal(fs.exists(dirs.secondary), true);
+  // primary 保持原样（未被重装覆盖）。
+  assert.equal(fs.readFile(`${dirs.primary}/package.json`), primaryPkg);
+});
+
+test('uninstallBridge：两处目录均删除', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const original = '# 用户自己的内容\n';
+  const fs = makeMemFs({ [patchPath]: original });
+  fs.mkdir(profile);
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs };
+  installBridge(opts);
+  const dirs = bridgeTargetDirs(profile);
+  assert.equal(fs.exists(dirs.primary), true);
+  assert.equal(fs.exists(dirs.secondary), true);
+  uninstallBridge(opts);
+  assert.equal(fs.exists(dirs.primary), false);
+  assert.equal(fs.exists(dirs.secondary), false);
 });
