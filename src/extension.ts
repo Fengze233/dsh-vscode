@@ -37,6 +37,7 @@ function toManagerOptions(config: DshConfig): ManagerOptions {
     autoStart: config.autoStart,
     // 子进程工作目录兜底：按 dsh.workspaceRootIndex 解析工作区根目录，让 dsh web 以工作区为 cwd
     cwd: resolveWorkspaceRoot(vscode.workspace.workspaceFolders ?? [], config.workspaceRootIndex),
+    executablePath: config.executablePath,
     timeoutMs: 3000,
     pollMs: 500,
   };

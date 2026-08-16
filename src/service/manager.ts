@@ -32,6 +32,8 @@ export interface ManagerOptions {
   timeoutMs: number;
   /** 等待就绪的轮询间隔（毫秒） */
   pollMs: number;
+  /** dsh 可执行文件绝对路径（非空时优先于平台默认命令名使用） */
+  executablePath?: string;
 }
 
 /** 注入依赖 */
@@ -186,10 +188,22 @@ export class ServiceManager {
         port: this.opts.port,
         extraArgs: this.opts.extraArgs,
         cwd: this.opts.cwd,
+        executablePath: this.opts.executablePath,
       });
     } catch (err) {
-      this.deps.log(`[process] 启动失败: ${String(err)}`);
-      this.set({ state: 'failed', error: 'err.dshNotFound' });
+      const code = (err as NodeJS.ErrnoException).code;
+      this.deps.log(`[process] 启动失败: ${String(err)} (code=${code}, cwd=${this.opts.cwd ?? ''})`);
+      // 区分错误类型：EINVAL 是 spawn 参数无效（Windows 上 cwd 非法等），
+      // ENOENT 才是命令缺失；其余保守地归为「未找到命令」。
+      if (code === 'EINVAL') {
+        this.set({
+          state: 'failed',
+          error: 'err.spawnEinval',
+          errorVars: { cwd: String(this.opts.cwd ?? '') },
+        });
+      } else {
+        this.set({ state: 'failed', error: 'err.dshNotFound' });
+      }
       return this.getSnapshot();
     }
     this.child = child;
@@ -199,8 +213,18 @@ export class ServiceManager {
     // 等待阶段子进程退出的标志（等待循环据此判定 err.startCrashed）
     let childExited = false;
     child.on('error', (err) => {
-      this.deps.log(`[process] ${err.message}`);
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      const code = (err as NodeJS.ErrnoException).code;
+      this.deps.log(`[process] ${err.message} (code=${code}, cwd=${this.opts.cwd ?? ''})`);
+      // EINVAL（Windows 上非法的 spawn 参数，如 UNC/无效 cwd）与 ENOENT（命令缺失）
+      // 同等对待：立即置为 failed，避免走「等待超时」路径误导用户。
+      if (code === 'EINVAL') {
+        spawnFailed = true;
+        this.set({
+          state: 'failed',
+          error: 'err.spawnEinval',
+          errorVars: { cwd: String(this.opts.cwd ?? '') },
+        });
+      } else if (code === 'ENOENT') {
         spawnFailed = true;
         this.set({ state: 'failed', error: 'err.dshNotFound' });
       }

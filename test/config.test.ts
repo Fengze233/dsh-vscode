@@ -10,7 +10,7 @@ test('合法配置原样通过', () => {
   assert.deepEqual(errors, []);
   assert.deepEqual(config, {
     host: 'localhost', port: 4000, autoStart: false, stopOnExit: false, extraArgs: ['--trusted-host', 'x:1'],
-    bridgeEnabled: true, workspaceRootIndex: 0, silenceWarning: false,
+    bridgeEnabled: true, workspaceRootIndex: 0, silenceWarning: false, executablePath: '',
   });
 });
 
@@ -74,4 +74,22 @@ test('workspaceRootIndex 非法分支逐类回退并记录错误', () => {
   const r3 = normalizeConfig({ workspaceRootIndex: '2' as unknown as number });
   assert.equal(r3.config.workspaceRootIndex, 0);
   assert.equal(r3.errors.length, 1);
+});
+
+test('executablePath：缺省回退空串', () => {
+  const { config } = normalizeConfig({});
+  assert.equal(config.executablePath, '');
+});
+
+test('executablePath：非字符串静默回退空串', () => {
+  const r1 = normalizeConfig({ executablePath: 123 as unknown as string });
+  assert.equal(r1.config.executablePath, '');
+  assert.equal(r1.errors.length, 0); // 静默回退，不记录错误
+  const r2 = normalizeConfig({ executablePath: undefined });
+  assert.equal(r2.config.executablePath, '');
+});
+
+test('executablePath：合法值原样通过（含空串）', () => {
+  assert.equal(normalizeConfig({ executablePath: 'C:\\tools\\dsh.cmd' }).config.executablePath, 'C:\\tools\\dsh.cmd');
+  assert.equal(normalizeConfig({ executablePath: '' }).config.executablePath, '');
 });

@@ -19,6 +19,7 @@
   "dsh.config.bridgeEnabled": "启用 DSH 页面桥接（面板与 DSH 之间的外链与文件跳转）。",
   "dsh.config.workspaceRootIndex": "自启 `dsh web` 进程的工作目录使用第几个工作区根目录（从 0 起；越界时回退第一个）。",
   "dsh.config.bridgeSilenceWarning": "抑制桥接警告（例如在面板之外打开 DSH 页面时）。",
+  "dsh.config.executablePath": "dsh 可执行文件的绝对路径（Windows 为 dsh.cmd）。留空表示在 PATH 中查找。",
   "dsh.walkthrough.title": "DSH 入门",
   "dsh.walkthrough.description": "在 VS Code 内直接使用 DeepSeek Harness 网页界面。",
   "dsh.walkthrough.step.title": "打开 DSH 面板",

@@ -162,6 +162,43 @@ test('spawn 报 ENOENT：failed + err.dshNotFound（不空等超时）', async (
   h.manager.dispose();
 });
 
+test('error 事件报 EINVAL：failed + err.spawnEinval 且带 cwd（不空等超时）', async () => {
+  const h = makeHarness({ cwd: '\\\\wsl.localhost\\Ubuntu\\home' });
+  h.probeQueue = ['down', 'down', 'down'];
+  const p = h.manager.ensureRunning();
+  await new Promise((r) => setTimeout(r, 1));
+  // 模拟 Windows 上非法 spawn 参数（EINVAL 同步异常经 error 事件异步到达）
+  const err = Object.assign(new Error('spawn dsh.cmd EINVAL'), { code: 'EINVAL' });
+  for (const cb of h.child!.errorCbs) cb(err);
+  const s = await p;
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.spawnEinval');
+  assert.equal(s.errorVars?.cwd, '\\\\wsl.localhost\\Ubuntu\\home');
+  h.manager.dispose();
+});
+
+test('startDsh 同步抛 EINVAL：failed + err.spawnEinval（doStart catch 分支）', async () => {
+  const logs: string[] = [];
+  const h = makeHarness({ cwd: '\\\\wsl.localhost\\Ubuntu\\home' }, {
+    processRunner: {
+      startDsh: () => {
+        throw Object.assign(new Error('spawn dsh.cmd EINVAL'), { code: 'EINVAL' });
+      },
+      stopChild: async () => {},
+      lastChild: null,
+    },
+    log: (line) => logs.push(line),
+  });
+  h.probeQueue = ['down'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.spawnEinval');
+  assert.equal(s.errorVars?.cwd, '\\\\wsl.localhost\\Ubuntu\\home');
+  // 日志应记录 code 与 cwd，且不再误报「未找到命令」
+  assert.ok(logs.some((l) => l.includes('code=EINVAL') && l.includes('cwd=\\\\wsl.localhost\\Ubuntu\\home')));
+  h.manager.dispose();
+});
+
 test('stop() 只停插件自启的子进程', async () => {
   const h = makeHarness();
   h.probeQueue = ['down', 'dsh'];

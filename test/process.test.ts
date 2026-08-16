@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { SpawnOptions } from 'node:child_process';
-import { createProcessRunner, type ChildProcessLike, type SpawnFn } from '../src/service/process';
+import { createProcessRunner, sanitizeCwd, type ChildProcessLike, type SpawnFn } from '../src/service/process';
 
 /** 假子进程：记录 kill 调用、可手动触发 exit/error 事件 */
 class FakeChild implements ChildProcessLike {
@@ -64,13 +64,14 @@ test('lastChild 记录最近一次启动的子进程（测试钩子）', () => {
   assert.equal(runner.lastChild, child);
 });
 
-test('startDsh 透传 cwd 到 spawn 选项', () => {
+test('startDsh 透传 cwd 到 spawn 选项（注入 exists=true）', () => {
   const calls: { cmd: string; args: string[]; opts: SpawnOptions }[] = [];
   const spawnImpl: SpawnFn = (cmd, args, opts) => {
     calls.push({ cmd, args, opts });
     return new FakeChild();
   };
-  const runner = createProcessRunner(spawnImpl, 'linux');
+  // 注入 existsImpl 返回 true，避免真实文件系统上 /proj 不存在导致 cwd 被 sanitizeCwd 过滤
+  const runner = createProcessRunner(spawnImpl, 'linux', 3000, () => true);
   runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], cwd: '/proj' });
   assert.equal(calls[0].opts.cwd, '/proj');
 });
@@ -81,4 +82,74 @@ test('startDsh 未传 cwd 时 spawn 选项不含 cwd 键', () => {
   runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
   const opts = calls[0] as Record<string, unknown>;
   assert.equal('cwd' in opts, false);
+});
+
+test('startDsh：win32 + UNC cwd 被 sanitize 过滤为不传 cwd 键（不抛 EINVAL）', () => {
+  // 模拟 Windows 上 VS Code 工作区为 UNC 网络路径的场景
+  const calls: unknown[] = [];
+  const runner = createProcessRunner(((cmd, args, opts) => { calls.push(opts); return new FakeChild(); }) as SpawnFn, 'win32');
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], cwd: '\\\\wsl.localhost\\Ubuntu\\home' });
+  const opts = calls[0] as Record<string, unknown>;
+  assert.equal('cwd' in opts, false); // UNC 被剥除，spawn 走默认 cwd
+});
+
+test('startDsh 传 executablePath 时命令为该值（win32 平台）', () => {
+  const calls: { cmd: string; args: string[]; opts: SpawnOptions }[] = [];
+  const spawnImpl: SpawnFn = (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    return new FakeChild();
+  };
+  const runner = createProcessRunner(spawnImpl, 'win32');
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: 'C:\\tools\\dsh.cmd' });
+  assert.equal(calls[0].cmd, 'C:\\tools\\dsh.cmd');
+});
+
+test('startDsh 未传 executablePath 时 win32 沿用 dsh.cmd', () => {
+  const calls: { cmd: string }[] = [];
+  const spawnImpl: SpawnFn = (cmd) => {
+    calls.push({ cmd });
+    return new FakeChild();
+  };
+  const runner = createProcessRunner(spawnImpl, 'win32');
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
+  assert.equal(calls[0].cmd, 'dsh.cmd');
+});
+
+// —— sanitizeCwd 纯函数 ——
+
+test('sanitizeCwd(undefined) → undefined', () => {
+  assert.equal(sanitizeCwd(undefined, 'win32'), undefined);
+  assert.equal(sanitizeCwd(undefined, 'linux'), undefined);
+});
+
+test('sanitizeCwd：win32 + 合法路径（exists 注入 true）→ 原样返回', () => {
+  const cwd = 'C:\\Users\\me\\proj';
+  assert.equal(sanitizeCwd(cwd, 'win32', () => true), cwd);
+});
+
+test('sanitizeCwd：win32 + UNC 路径 → undefined（exists 不被调用）', () => {
+  let called = false;
+  const exists = () => { called = true; return true; };
+  assert.equal(sanitizeCwd('\\\\wsl.localhost\\Ubuntu\\home', 'win32', exists), undefined);
+  assert.equal(called, false); // UNC 在 exists 前即被否决
+});
+
+test('sanitizeCwd：win32 + 相对路径 → undefined', () => {
+  assert.equal(sanitizeCwd('proj\\sub', 'win32', () => true), undefined);
+  assert.equal(sanitizeCwd('proj', 'win32', () => true), undefined);
+});
+
+test('sanitizeCwd：win32 + 不存在路径（exists 注入 false）→ undefined', () => {
+  assert.equal(sanitizeCwd('C:\\nope', 'win32', () => false), undefined);
+});
+
+test('sanitizeCwd：linux + 任意路径（exists true）→ 原样返回（不查 UNC）', () => {
+  // Linux 上即使以反斜杠开头也原样返回（无 UNC 概念）
+  const unc = '\\\\server\\share';
+  assert.equal(sanitizeCwd(unc, 'linux', () => true), unc);
+  assert.equal(sanitizeCwd('/home/me', 'linux', () => true), '/home/me');
+});
+
+test('sanitizeCwd：linux + 不存在路径（exists false）→ undefined', () => {
+  assert.equal(sanitizeCwd('/nope', 'linux', () => false), undefined);
 });

@@ -206,6 +206,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "%dsh.config.bridgeSilenceWarning%"
+        },
+        "dsh.executablePath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%dsh.config.executablePath%"
         }
       }
     }

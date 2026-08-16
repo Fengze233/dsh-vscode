@@ -16,6 +16,8 @@ export interface RawDshConfig {
   workspaceRootIndex?: number;
   /** 是否抑制桥接警告（dsh.bridge.silenceWarning） */
   silenceWarning?: boolean;
+  /** dsh 可执行文件绝对路径（空串 = 用 PATH 里的 dsh） */
+  executablePath?: string;
 }
 
 /** 规范化后的配置（均有合法默认值） */
@@ -31,6 +33,8 @@ export interface DshConfig {
   workspaceRootIndex: number;
   /** 是否抑制桥接警告（dsh.bridge.silenceWarning） */
   silenceWarning: boolean;
+  /** dsh 可执行文件绝对路径（空串 = 用 PATH 里的 dsh） */
+  executablePath: string;
 }
 
 /** 默认配置 */
@@ -43,6 +47,7 @@ export const DEFAULTS: DshConfig = {
   bridgeEnabled: true,
   workspaceRootIndex: 0,
   silenceWarning: false,
+  executablePath: '',
 };
 
 /** 安全边界：仅允许回环地址 */
@@ -106,8 +111,14 @@ export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors:
     workspaceRootIndex = raw.workspaceRootIndex;
   }
 
+  // executablePath：非字符串静默回退默认 ''；空字符串合法（表示用 PATH 里的 dsh）
+  const executablePath = typeof raw.executablePath === 'string' ? raw.executablePath : DEFAULTS.executablePath;
+
   return {
-    config: { host, port, autoStart, stopOnExit, extraArgs, bridgeEnabled, workspaceRootIndex, silenceWarning },
+    config: {
+      host, port, autoStart, stopOnExit, extraArgs, bridgeEnabled, workspaceRootIndex,
+      silenceWarning, executablePath,
+    },
     errors,
   };
 }
@@ -124,5 +135,6 @@ export function readConfig(): { config: DshConfig; errors: string[] } {
     bridgeEnabled: ws.get<boolean>('bridge.enabled'),
     workspaceRootIndex: ws.get<number>('workspaceRootIndex'),
     silenceWarning: ws.get<boolean>('bridge.silenceWarning'),
+    executablePath: ws.get<string>('executablePath'),
   });
 }
