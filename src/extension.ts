@@ -1,11 +1,11 @@
 // src/extension.ts — 插件入口：装配各模块、注册命令、监听配置变更
 import * as vscode from 'vscode';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { initI18n, t } from './i18n';
 import { readConfig, type DshConfig } from './config';
 import { probeService } from './service/detect';
-import { createProcessRunner } from './service/process';
+import { createProcessRunner, findInPath } from './service/process';
 import { ServiceManager, type ManagerOptions } from './service/manager';
 import { DshPanelProvider } from './panel/provider';
 import { StatusBarController } from './statusbar';
@@ -43,6 +43,32 @@ function toManagerOptions(config: DshConfig): ManagerOptions {
   };
 }
 
+/**
+ * 计算 npm 全局 node_modules 目录（Windows 且 dsh 可定位时）。
+ *
+ * 背景：Windows 下 VS Code 扩展宿主 spawn 的 dsh 进程对 profile 插件的 ESM 解析与普通命令行
+ * 进程不同，profiles 双位置仍可能解析不到桥接包；而 npm 全局 node_modules
+ * （AppData\Roaming\npm\node_modules）是确定可达的位置。本函数据此返回该目录作为第三安装目标。
+ *
+ * 规则（仅 win32）：
+ * - 优先 config.executablePath（非空且不以 .js 结尾）→ dirname；
+ * - 否则 findInPath('dsh.cmd', process.env.PATH) → dirname；
+ * - 都找不到 → undefined（不传，保持双位置向后兼容）。
+ * - 非 win32 → undefined。
+ */
+function resolveNpmGlobalNodeModules(config: DshConfig): string | undefined {
+  if (process.platform !== 'win32') return undefined;
+  const exec = config.executablePath;
+  if (exec && !exec.endsWith('.js')) {
+    return dirname(exec);
+  }
+  const found = findInPath('dsh.cmd', process.env.PATH ?? '');
+  if (found) {
+    return dirname(found);
+  }
+  return undefined;
+}
+
 /** 插件激活：VS Code 启动完成后调用 */
 export function activate(context: vscode.ExtensionContext): void {
   // 语言规则：vscode.env.language 以 zh- 开头 → 中文，其余一律英文
@@ -62,11 +88,12 @@ export function activate(context: vscode.ExtensionContext): void {
   let panelOpened = false; // 是否已有面板打开过（触发握手超时的前提之一）
   let warningShown = false; // 本次会话是否已弹过降级警告（防止重复弹）
 
-  /** 桥接安装参数（dshHome / bridgeSourceDir 全插件共用，避免三处重复拼接） */
+  /** 桥接安装参数（dshHome / bridgeSourceDir 全插件共用，避免三处重复拼接；Windows 装配第三安装目标） */
   const installOpts = {
     dshHome: process.env.DSH_HOME ?? join(homedir(), '.dsh'),
     bridgeSourceDir: join(__dirname, 'bridge-client'),
     fs: createNodeFs(),
+    npmGlobalNodeModules: resolveNpmGlobalNodeModules(config),
   };
 
   /**

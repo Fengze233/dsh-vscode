@@ -9,7 +9,7 @@
 // 2. 新增条目必须用 `insert:` 包裹；裸 `- id:` 条目是「按 id 覆盖既有行」的 patch，
 //    目标行不存在时只会告警并跳过，不会真正新增条目。
 // 3. 卸载时按 begin/end 标记精确删除条目段；若删除后仅剩空白，还原为 `[]`。
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import * as nodeFs from 'node:fs';
 
 /** 桥接条目在 cordis.patch.yml 中的包裹标记（卸载时按标记精确删除） */
@@ -50,6 +50,8 @@ export interface BridgeInstallOptions {
   dshHome: string;            // $DSH_HOME 或 ~/.dsh
   bridgeSourceDir: string;    // 插件随附 bridge-client 目录绝对路径
   fs: InstallerFs;            // 注入的 fs 子集
+  /** npm 全局 node_modules 目录绝对路径（Windows 扩展宿主 ESM 解析可达位置，可选） */
+  npmGlobalNodeModules?: string;
 }
 
 /**
@@ -62,21 +64,30 @@ export function detectProfileDir(dshHome: string, fs: InstallerFs): string | nul
 }
 
 /**
- * 桥接包的两个安装目标目录。
+ * 桥接包的全部安装目标目录。
  *
  * 背景（Windows 实测，见 bridge-locations-fix-report.md）：
  * - primary：profiles/web/node_modules/dsh-vscode-bridge（WSL 模块解析锚点）；
- * - secondary：profiles/node_modules/dsh-vscode-bridge（Windows profile 插件解析 fallback 真实目录）。
- * 两类平台各解析其一，因此必须同时安装到双位置。
+ * - secondary：profiles/node_modules/dsh-vscode-bridge（Windows profile 插件解析 fallback 真实目录）；
+ * - npm 全局位置（可选）：Windows 下 VS Code 扩展宿主 spawn 的 dsh 进程对 profile 插件的 ESM
+ *   解析与普通命令行进程不同，profiles 双位置仍可能解析不到桥接包；而 npm 全局 node_modules
+ *   （AppData\Roaming\npm\node_modules）是确定可达的位置，因此额外安装到此处。
+ * 两类平台各解析其可及位置，因此需同时安装到全部位置。
  *
- * primary = join(profileDir, 'node_modules', BRIDGE_PACKAGE_NAME)
- * secondary = join(profileDir, '..', 'node_modules', BRIDGE_PACKAGE_NAME)  // profiles/node_modules
+ * 顺序固定：[primary, secondary, ...(npmGlobalNodeModules ? [join(npmGlobalNodeModules, NAME)] : [])]
+ *
+ * @param profileDir            web profile 目录绝对路径
+ * @param npmGlobalNodeModules  npm 全局 node_modules 目录绝对路径（可选，缺省仅双位置）
  */
-export function bridgeTargetDirs(profileDir: string): { primary: string; secondary: string } {
-  return {
-    primary: join(profileDir, 'node_modules', BRIDGE_PACKAGE_NAME),
-    secondary: join(profileDir, '..', 'node_modules', BRIDGE_PACKAGE_NAME),
-  };
+export function bridgeTargetDirs(profileDir: string, npmGlobalNodeModules?: string): string[] {
+  const dirs = [
+    join(profileDir, 'node_modules', BRIDGE_PACKAGE_NAME),
+    join(profileDir, '..', 'node_modules', BRIDGE_PACKAGE_NAME),
+  ];
+  if (npmGlobalNodeModules) {
+    dirs.push(join(npmGlobalNodeModules, BRIDGE_PACKAGE_NAME));
+  }
+  return dirs;
 }
 
 /**
@@ -120,11 +131,11 @@ function findEmptyArrayHead(content: string): string {
 }
 
 /**
- * 幂等安装桥接包（双位置：primary + secondary，Windows/WSL 兼容）：
+ * 幂等安装桥接包（全部目标目录：primary + secondary + 可选 npm 全局位置）：
  * - profile 缺失 → degraded；
- * - 条目已存在 → 可用性验证（两处均可读 package.json），完好则 ok，
+ * - 条目已存在 → 可用性验证（每处均可读 package.json），全部完好则 ok，
  *   任一处坏包（权限/损坏/缺失）则强制重装该处，重装失败则回滚条目为 degraded；
- * - 首次安装 → 写条目 + 复制目录到 primary 与 secondary 两处，
+ * - 首次安装 → 写条目 + 复制目录到全部目标位置，
  *   任一处 copyDir 失败则清理已复制的 → 还原 patch → degraded；
  * - 顶层空数组 → 整文件改写为块序列（含 insert: 条目）；
  * - 已有用户内容 → 去尾随空白后追加 insert: 条目。
@@ -135,29 +146,26 @@ export function installBridge(opts: BridgeInstallOptions): BridgeInstallResult {
     return { status: 'degraded', reason: 'web profile not found' };
   }
   const patchPath = join(profileDir, 'cordis.patch.yml');
-  const { primary: bridgeDir, secondary } = bridgeTargetDirs(profileDir);
+  const targets = bridgeTargetDirs(profileDir, opts.npmGlobalNodeModules);
+  // primary 路径保持兼容语义（BridgeInstallResult.bridgeDir）
+  const bridgeDir = targets[0];
 
   // 读取现有 patch（不存在视为空，避免真实环境首次运行时 readFile 抛错）
   const existing = opts.fs.exists(patchPath) ? opts.fs.readFile(patchPath) : '';
 
   if (existing.includes(BRIDGE_BEGIN_MARK)) {
-    // 已存在条目：两处目录都必须可用（能读到含 `"name"` 的 package.json）。
+    // 已存在条目：全部目标目录都必须可用（能读到含 `"name"` 的 package.json）。
     // 仅 exists 会漏掉「目录在但 package.json 不可读」的坏包（chmod 000 事故），
-    // 且 Windows 场景 secondary 缺失但 primary 完好时也需自愈补回。
-    const primaryUsable = isBridgeUsable(bridgeDir, opts.fs);
-    const secondaryUsable = isBridgeUsable(secondary, opts.fs);
-    if (primaryUsable && secondaryUsable) {
+    // 且 Windows 场景某目标缺失但其余完好时也需自愈补回。
+    const unusable = targets.filter((t) => !isBridgeUsable(t, opts.fs));
+    if (unusable.length === 0) {
       return { status: 'ok', profileDir, bridgeDir };
     }
-    // 有任一处不可用：强制重装该处（删掉坏目录后重新复制）。
+    // 有目标不可用：逐一强制重装（删掉坏目录后重新复制）。
     try {
-      if (!primaryUsable) {
-        opts.fs.rmDir(bridgeDir);
-        copyBridgeDir(opts, profileDir, bridgeDir);
-      }
-      if (!secondaryUsable) {
-        opts.fs.rmDir(secondary);
-        copyBridgeDir(opts, join(profileDir, '..'), secondary);
+      for (const t of unusable) {
+        opts.fs.rmDir(t);
+        copyBridgeDir(opts, t);
       }
       return { status: 'ok', profileDir, bridgeDir };
     } catch (e) {
@@ -171,17 +179,22 @@ export function installBridge(opts: BridgeInstallOptions): BridgeInstallResult {
   // 首次安装：写条目前保存原文，供 copyDir 失败时回滚，绝不残留「有条目但包不可用」。
   const originalPatch = existing;
   writePatchEntry(opts.fs, patchPath, existing);
+  let failedTarget = '';
   try {
-    // 双位置复制：primary 与 secondary 都成功才算安装成功。
-    copyBridgeDir(opts, profileDir, bridgeDir);
-    copyBridgeDir(opts, join(profileDir, '..'), secondary);
+    // 全部目标位置复制：每处都成功才算安装成功。
+    for (const t of targets) {
+      failedTarget = t;
+      copyBridgeDir(opts, t);
+    }
   } catch (e) {
     // 任一处复制失败：尽力清理已复制的目录 + 还原 patch 原文，返回 degraded。
     // 清理为尽力而为（rmDir 可能同样抛错），核心是还原 patch 绝不残留「有条目但包不可用」。
-    try { opts.fs.rmDir(bridgeDir); } catch { /* 忽略清理失败 */ }
-    try { opts.fs.rmDir(secondary); } catch { /* 忽略清理失败 */ }
+    for (const t of targets) {
+      try { opts.fs.rmDir(t); } catch { /* 忽略清理失败 */ }
+    }
     opts.fs.writeFile(patchPath, originalPatch);
-    return { status: 'degraded', reason: `copy failed: ${errMsg(e)}`, profileDir, bridgeDir };
+    // failedTarget 即失败时正在复制的目标路径，写入 reason 便于日志定位。
+    return { status: 'degraded', reason: `copy failed at ${failedTarget}: ${errMsg(e)}`, profileDir, bridgeDir };
   }
   return { status: 'ok', profileDir, bridgeDir };
 }
@@ -220,10 +233,10 @@ export function uninstallBridge(opts: BridgeInstallOptions): void {
       opts.fs.writeFile(patchPath, `${normalized}\n`);
     }
   }
-  const bridgeDir = bridgeTargetDirs(profileDir);
-  // 双位置目录删除尽为尽力而为：权限锁死等场景下 rmDir 可能抛错，
+  const targets = bridgeTargetDirs(profileDir, opts.npmGlobalNodeModules);
+  // 全部目标目录删除均为尽力而为：权限锁死等场景下 rmDir 可能抛错，
   // 卸载的核心是回滚 patch 条目（保证 DSH 可干净启动），目录删除失败不应中断卸载。
-  for (const dir of [bridgeDir.primary, bridgeDir.secondary]) {
+  for (const dir of targets) {
     if (opts.fs.exists(dir)) {
       try {
         opts.fs.rmDir(dir);
@@ -303,13 +316,15 @@ function isBridgeUsable(bridgeDir: string, fs: InstallerFs): boolean {
 }
 
 /**
- * 复制桥接目录：目标目录的父级 node_modules 缺失则先创建，再递归复制 source → bridgeDir。
- * parentName 指明父级 node_modules 的目录名（primary 为 'node_modules'，secondary 上级为 profiles）。
+ * 复制桥接目录：目标目录的父级（node_modules，primary/secondary）或 npm 全局目录缺失则先创建，
+ * 再递归复制 source → bridgeDir。
  * 生产侧 copyDir 用 fs.cpSync recursive，会同时创建目标目录与其父级。
  * 复制可能抛错（磁盘满/权限），由调用方负责回滚 patch。
+ *
+ * @param bridgeDir 目标目录绝对路径（父级由 dirname 推导后确保存在）
  */
-function copyBridgeDir(opts: BridgeInstallOptions, nmParentDir: string, bridgeDir: string): void {
-  const nmDir = join(nmParentDir, 'node_modules');
-  if (!opts.fs.exists(nmDir)) opts.fs.mkdir(nmDir);
+function copyBridgeDir(opts: BridgeInstallOptions, bridgeDir: string): void {
+  const parentDir = dirname(bridgeDir);
+  if (!opts.fs.exists(parentDir)) opts.fs.mkdir(parentDir);
   opts.fs.copyDir(opts.bridgeSourceDir, bridgeDir);
 }

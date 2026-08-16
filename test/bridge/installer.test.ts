@@ -248,11 +248,24 @@ test('幂等分支 package.json 不可读、rmDir+copyDir 成功 → ok、patch 
 
 // —— 双位置安装（Windows/WSL 兼容）：primary=profiles/web/node_modules，secondary=profiles/node_modules ——
 
-test('bridgeTargetDirs 返回 primary 与 secondary 两个目标目录', () => {
+test('bridgeTargetDirs 不传 npm 位置时返回 primary 与 secondary 两个目标目录', () => {
   const profile = '/home/u/.dsh/profiles/web';
   const dirs = bridgeTargetDirs(profile);
-  assert.equal(dirs.primary, '/home/u/.dsh/profiles/web/node_modules/dsh-vscode-bridge');
-  assert.equal(dirs.secondary, '/home/u/.dsh/profiles/node_modules/dsh-vscode-bridge');
+  assert.deepEqual(dirs, [
+    '/home/u/.dsh/profiles/web/node_modules/dsh-vscode-bridge',
+    '/home/u/.dsh/profiles/node_modules/dsh-vscode-bridge',
+  ]);
+});
+
+test('bridgeTargetDirs 传入 npm 位置时返回三个目标目录（顺序固定）', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const npmGlobal = '/c/Users/u/AppData/Roaming/npm/node_modules';
+  const dirs = bridgeTargetDirs(profile, npmGlobal);
+  assert.deepEqual(dirs, [
+    '/home/u/.dsh/profiles/web/node_modules/dsh-vscode-bridge',
+    '/home/u/.dsh/profiles/node_modules/dsh-vscode-bridge',
+    '/c/Users/u/AppData/Roaming/npm/node_modules/dsh-vscode-bridge',
+  ]);
 });
 
 test('首次安装：primary 与 secondary 两处目录均被创建', () => {
@@ -264,11 +277,11 @@ test('首次安装：primary 与 secondary 两处目录均被创建', () => {
   const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs };
   const r = installBridge(opts);
   assert.equal(r.status, 'ok');
-  const dirs = bridgeTargetDirs(profile);
-  assert.equal(fs.exists(dirs.primary), true);
-  assert.equal(fs.exists(dirs.secondary), true);
+  const [primary, secondary] = bridgeTargetDirs(profile);
+  assert.equal(fs.exists(primary), true);
+  assert.equal(fs.exists(secondary), true);
   // bridgeDir 语义保持为 primary 路径（兼容既有）。
-  assert.equal(r.bridgeDir, dirs.primary);
+  assert.equal(r.bridgeDir, primary);
 });
 
 test('首次安装 secondary copyDir 抛错 → degraded、patch 字节还原、primary 也已清理', () => {
@@ -296,9 +309,9 @@ test('首次安装 secondary copyDir 抛错 → degraded、patch 字节还原、
   assert.equal(r.status, 'degraded');
   assert.ok(r.reason && /copy/i.test(r.reason), 'reason 应包含失败位置');
   assert.equal(fs.readFile(patchPath), original); // patch 字节级还原
-  const dirs = bridgeTargetDirs(profile);
-  assert.equal(fs.exists(dirs.primary), false); // primary 已清理
-  assert.equal(fs.exists(dirs.secondary), false);
+  const [pDir, sDir] = bridgeTargetDirs(profile);
+  assert.equal(fs.exists(pDir), false); // primary 已清理
+  assert.equal(fs.exists(sDir), false);
 });
 
 test('幂等分支 secondary 缺失（dsh 升级清理 fallback）→ 自愈补回 secondary 且 primary 不动', () => {
@@ -311,16 +324,16 @@ test('幂等分支 secondary 缺失（dsh 升级清理 fallback）→ 自愈补�
   installBridge(opts); // 正常完成首次安装，两处均存在
 
   // 记录 primary 副本内容，再模拟 dsh 升级清理 secondary。
-  const dirs = bridgeTargetDirs(profile);
-  const primaryPkg = fs.readFile(`${dirs.primary}/package.json`);
-  fs.rmDir(dirs.secondary);
-  assert.equal(fs.exists(dirs.secondary), false);
+  const [primary, secondary] = bridgeTargetDirs(profile);
+  const primaryPkg = fs.readFile(`${primary}/package.json`);
+  fs.rmDir(secondary);
+  assert.equal(fs.exists(secondary), false);
 
   const r = installBridge(opts); // 幂等分支：secondary 缺失 → 自愈补回
   assert.equal(r.status, 'ok');
-  assert.equal(fs.exists(dirs.secondary), true);
+  assert.equal(fs.exists(secondary), true);
   // primary 保持原样（未被重装覆盖）。
-  assert.equal(fs.readFile(`${dirs.primary}/package.json`), primaryPkg);
+  assert.equal(fs.readFile(`${primary}/package.json`), primaryPkg);
 });
 
 test('uninstallBridge：两处目录均删除', () => {
@@ -331,10 +344,120 @@ test('uninstallBridge：两处目录均删除', () => {
   fs.mkdir(profile);
   const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs };
   installBridge(opts);
-  const dirs = bridgeTargetDirs(profile);
-  assert.equal(fs.exists(dirs.primary), true);
-  assert.equal(fs.exists(dirs.secondary), true);
+  const [primary, secondary] = bridgeTargetDirs(profile);
+  assert.equal(fs.exists(primary), true);
+  assert.equal(fs.exists(secondary), true);
   uninstallBridge(opts);
-  assert.equal(fs.exists(dirs.primary), false);
-  assert.equal(fs.exists(dirs.secondary), false);
+  assert.equal(fs.exists(primary), false);
+  assert.equal(fs.exists(secondary), false);
+});
+
+// —— 第三安装目标：npm 全局 node_modules（Windows 扩展宿主 ESM 解析可达位置）——
+
+test('传入 npmGlobalNodeModules：首次安装创建三个目标目录', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const original = '# 用户自己的内容\n';
+  const npmGlobal = '/c/Users/u/AppData/Roaming/npm/node_modules';
+  // 预创建 npm 全局目录，模拟真实环境 npm 全局 node_modules 已存在
+  const fs = makeMemFs({ [patchPath]: original });
+  fs.mkdir(profile);
+  fs.mkdir(npmGlobal);
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs, npmGlobalNodeModules: npmGlobal };
+  const r = installBridge(opts);
+  assert.equal(r.status, 'ok');
+  const targets = bridgeTargetDirs(profile, npmGlobal);
+  assert.equal(targets.length, 3);
+  for (const t of targets) {
+    assert.equal(fs.exists(t), true, `${t} 应被创建`);
+  }
+  // bridgeDir 仍指向 primary
+  assert.equal(r.bridgeDir, targets[0]);
+});
+
+test('npm 目标 copyDir 失败 → degraded + patch 字节还原 + primary/secondary 已清理', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const original = '# 用户自己的内容\n- id: user-plugin\n  name: user-plugin\n';
+  const npmGlobal = '/c/Users/u/AppData/Roaming/npm/node_modules';
+  const fs = makeFailableFs({ [patchPath]: original });
+  fs.mkdir(profile);
+  fs.mkdir(npmGlobal);
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs, npmGlobalNodeModules: npmGlobal };
+
+  // 仅让 npm 目标（第三个）copyDir 失败：前两个成功后，第三个复制抛错。
+  const npmTarget = `${npmGlobal}/dsh-vscode-bridge`;
+  const realCopy = fs.copyDir.bind(fs);
+  fs.copyDir = (src, dest) => {
+    if (dest === npmTarget) {
+      throw new Error(`EACCES: copy failed: ${src}`);
+    }
+    realCopy(src, dest);
+  };
+
+  const r = installBridge(opts);
+  assert.equal(r.status, 'degraded');
+  assert.ok(r.reason && r.reason.includes(npmTarget), 'reason 应包含失败目标路径');
+  // patch 字节级还原
+  assert.equal(fs.readFile(patchPath), original);
+  // 三个目标全部清理（primary/secondary 已复制也要回滚清除）
+  for (const t of bridgeTargetDirs(profile, npmGlobal)) {
+    assert.equal(fs.exists(t), false, `${t} 应被清理`);
+  }
+});
+
+test('幂等分支 npm 目标缺失 → 自愈补回该目标且其他不动', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const original = '# 用户自己的内容\n';
+  const npmGlobal = '/c/Users/u/AppData/Roaming/npm/node_modules';
+  const fs = makeMemFs({ [patchPath]: original });
+  fs.mkdir(profile);
+  fs.mkdir(npmGlobal);
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs, npmGlobalNodeModules: npmGlobal };
+  installBridge(opts); // 正常完成首次安装，三处均存在
+
+  // 记录 primary 副本内容，再模拟 npm 全局目标被清理。
+  const [primary, secondary, npmTarget] = bridgeTargetDirs(profile, npmGlobal);
+  const primaryPkg = fs.readFile(`${primary}/package.json`);
+  const secondaryPkg = fs.readFile(`${secondary}/package.json`);
+  fs.rmDir(npmTarget);
+  assert.equal(fs.exists(npmTarget), false);
+
+  const r = installBridge(opts); // 幂等分支：npm 目标缺失 → 自愈补回
+  assert.equal(r.status, 'ok');
+  assert.equal(fs.exists(npmTarget), true);
+  // primary / secondary 保持原样（未被重装覆盖）。
+  assert.equal(fs.readFile(`${primary}/package.json`), primaryPkg);
+  assert.equal(fs.readFile(`${secondary}/package.json`), secondaryPkg);
+});
+
+test('uninstall：三个目标目录全删', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const original = '# 用户自己的内容\n';
+  const npmGlobal = '/c/Users/u/AppData/Roaming/npm/node_modules';
+  const fs = makeMemFs({ [patchPath]: original });
+  fs.mkdir(profile);
+  fs.mkdir(npmGlobal);
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs, npmGlobalNodeModules: npmGlobal };
+  installBridge(opts);
+  const targets = bridgeTargetDirs(profile, npmGlobal);
+  for (const t of targets) {
+    assert.equal(fs.exists(t), true);
+  }
+  uninstallBridge(opts);
+  for (const t of targets) {
+    assert.equal(fs.exists(t), false, `${t} 应被删除`);
+  }
+});
+
+test('不传 npmGlobalNodeModules：目标数组仅两项，与旧双位置行为完全一致', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const dirs = bridgeTargetDirs(profile);
+  assert.equal(dirs.length, 2);
+  assert.deepEqual(dirs, [
+    '/home/u/.dsh/profiles/web/node_modules/dsh-vscode-bridge',
+    '/home/u/.dsh/profiles/node_modules/dsh-vscode-bridge',
+  ]);
 });
