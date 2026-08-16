@@ -208,6 +208,27 @@ export function activate(context: vscode.ExtensionContext): void {
   // 桥接启用 getter：随时读取最新配置，供 readyPage 决定是否注入握手脚本
   const bridgeEnabledGetter = (): boolean => readConfig().config.bridgeEnabled;
 
+  /**
+   * 工作区同步的触发入口（由两个面板的 onReady 回调注入）。
+   * 此前同步挂在 manager.onChange 的「state 变 ready」上，但新 VS Code 窗口复用已就绪服务时
+   * （ensureRunning 探测到 3080 已就绪、直接复用，manager 激活时即 ready、无任何 onChange），
+   * syncOnce 永不执行，新目录的 workspace 从未创建。现将触发点平移到 provider 的 onReady：
+   * resolveWebviewView → ensureRunning().then(onReady)，无论复用还是新启动，resolve 时服务
+   * 必为 ready 或 failed，故此处先判状态，避免 failed 时误触发。
+   * syncedOnce 防止同窗口重复开面板时重复 create（syncWorkspace 本身幂等，重复调用无害，
+   * 但保留标志更干净；「新窗口」是新的扩展激活，syncedOnce 天然重置，不影响修复目标）。
+   */
+  let syncedOnce = false;
+  function onSyncReady(): void {
+    if (syncedOnce) return; // 本次扩展激活已同步过，不再重复触发
+    if (manager?.getSnapshot().state !== 'ready') return; // failed 时不误触发
+    const root = workspaceRootGetter();
+    if (root === undefined) return; // 空窗口无工作区，不同步
+    if (root === lastSyncedRoot) return; // 根目录未变化（已同步过同一路径），跳过
+    syncedOnce = true;
+    void syncOnce();
+  }
+
   // 左右两侧各一个 provider 实例，共享同一 manager（服务状态一致）
   const panelPrimary = new DshPanelProvider(
     manager,
@@ -219,6 +240,7 @@ export function activate(context: vscode.ExtensionContext): void {
     workspaceRootGetter, // workspaceRoot：文件相对路径解析的兜底基准
     pendingSyncPath, // pendingSyncPath：服务就绪先于面板创建时补发同步
     bridgeEnabledGetter, // bridgeEnabled：dsh.bridge.enabled 驱动握手脚本注入
+    onSyncReady, // onReady：服务运行流程完成后触发工作区同步（复用/新启动都覆盖）
   );
   const panelSecondary = new DshPanelProvider(
     manager,
@@ -227,18 +249,15 @@ export function activate(context: vscode.ExtensionContext): void {
     workspaceRootGetter,
     pendingSyncPath,
     bridgeEnabledGetter,
+    onSyncReady, // 辅助面板同样注入 onReady，保证左右任一先开都能触发同步
   );
   new StatusBarController(manager);
 
-  // 服务就绪后首次触发一次工作区同步（幂等：list 命中复用，否则 create）
-  let syncedOnce = false;
+  // 服务就绪后启动握手超时（若面板已打开）。工作区同步已移至 provider 的 onReady 触发，
+  // 此处不再注册 syncOnce——避免「新窗口复用已就绪服务时无 onChange 导致同步永不执行」。
   manager.onChange((s) => {
     if (s.state === 'ready') {
       startHandshakeTimeout(); // 服务就绪：若面板已打开，启动握手超时
-      if (!syncedOnce) {
-        syncedOnce = true;
-        void syncOnce();
-      }
     }
   });
 

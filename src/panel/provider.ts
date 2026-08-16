@@ -30,6 +30,8 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
    * @param pendingSyncPath 待补发的工作区同步路径 getter（服务就绪先于面板创建时补发；可选）
    * @param bridgeEnabled 桥接是否启用的 getter（Task 7 由 dsh.bridge.enabled 配置驱动；默认启用，
    *   disabled 时不注入握手脚本，避免向未安装桥接的 DSH 页面发送无意义的握手）
+   * @param onReady 服务运行流程完成（复用或新启动）后的回调；resolve 时服务必为 ready 或 failed，
+   *   回调内部应自行判断状态，避免 failed 时误触发副作用（可选）
    */
   constructor(
     private manager: ServiceManager,
@@ -38,6 +40,7 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
     private workspaceRoot: () => string | undefined = () => undefined,
     private pendingSyncPath?: () => string | undefined,
     private bridgeEnabled: () => boolean = () => true,
+    private onReady?: () => void,
   ) {
     // 订阅状态变化，重绘面板（iframe 与占位页由状态驱动，无白屏路径）
     manager.onChange(() => this.render());
@@ -64,8 +67,11 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       const pending = this.pendingSyncPath?.();
       if (pending !== undefined) this.notifySyncWorkspace(pending);
     }
-    // 面板打开即确保服务运行：复用已有或自动启动
-    void this.manager.ensureRunning();
+    // 面板打开即确保服务运行：复用已有或自动启动。
+    // ensureRunning 无论复用（激活时已 ready）还是新启动，resolve 时服务必为 ready 或 failed，
+    // 故在此统一触发 onReady；回调内部再判断状态，避免 failed 时误触发副作用。
+    // 这修复了「新窗口复用已就绪服务时 manager 无任何 onChange 导致同步永不触发」的缺陷。
+    void this.manager.ensureRunning().then(() => this.onReady?.());
   }
 
   /**
