@@ -14,6 +14,12 @@
 
 ![DSH for VS Code 界面截图](docs/screenshots/overview.png)
 
+## 🎬 演示视频
+
+[![如何在 VSCode 中使用 DeepSeek Harness？用 DSH！！（Bilibili）](docs/screenshots/video-cover.jpg)](https://www.bilibili.com/video/BV1p8bD6dE18)
+
+*B 站 59 秒演示视频：[BV1p8bD6dE18](https://www.bilibili.com/video/BV1p8bD6dE18)*
+
 ---
 
 ## ✨ 特性

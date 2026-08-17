@@ -14,6 +14,12 @@ Use the [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness
 
 ![DSH for VS Code screenshot](docs/screenshots/overview.png)
 
+## 🎬 Demo video
+
+[![如何在 VSCode 中使用 DeepSeek Harness？用 DSH！！（Bilibili）](docs/screenshots/video-cover.jpg)](https://www.bilibili.com/video/BV1p8bD6dE18)
+
+*59-second demo on Bilibili (Chinese): [BV1p8bD6dE18](https://www.bilibili.com/video/BV1p8bD6dE18)*
+
 ---
 
 ## ✨ Features
