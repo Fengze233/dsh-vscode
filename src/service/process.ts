@@ -165,11 +165,14 @@ export function resolveWindowsNodeExecutable(
   env: RunnerEnv,
   existsImpl: (p: string) => boolean = existsSync,
 ): string {
-  // Electron 判定：注入值优先；未注入时读真实 process.versions（扩展宿主里是 Electron 版本号）
+  // Electron 判定：注入值优先；未注入时读真实 process.versions（扩展宿主里是 Electron 版本号）。
+  // 双保险：execPath 的文件名以 code 开头（Code.exe/code.exe，VS Code 主程序）也视为 Electron——
+  // 即使 versions.electron 检测意外失效，也绝不把 Code.exe 当 node 用。
   const isElectron =
     (typeof env.electronVersion === 'string' && env.electronVersion !== '') ||
     (typeof (process.versions as { electron?: string }).electron === 'string' &&
-      (process.versions as { electron?: string }).electron !== '');
+      (process.versions as { electron?: string }).electron !== '') ||
+    /^code(\.exe)?$/i.test(win32Path.basename(env.execPath ?? process.execPath ?? ''));
   const pathEnv = env.path ?? process.env.PATH ?? '';
 
   // 1) shim 目录旁的 node.exe（npm shim 的 %dp0%\node.exe 语义；仅绝对路径才有可靠 dirname）

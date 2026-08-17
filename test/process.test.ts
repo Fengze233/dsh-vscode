@@ -218,6 +218,22 @@ test('startDsh win32 + Electron 环境且 PATH 无 node.exe → 抛 code NODE_NO
   );
 });
 
+test('startDsh win32 + execPath 为 Code.exe（electronVersion 未注入）：文件名检测兜底，改用 PATH 里的 node.exe', () => {
+  const calls: { cmd: string }[] = [];
+  const spawnImpl: SpawnFn = (cmd) => {
+    calls.push({ cmd });
+    return new FakeChild();
+  };
+  const nodeExe = 'C:\\Program Files\\nodejs\\node.exe';
+  const runner = createProcessRunner(spawnImpl, 'win32', 3000, (p) => p === nodeExe, {
+    execPath: 'C:\\Users\\x\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe',
+    path: 'C:\\Program Files\\nodejs',
+    // 关键：不注入 electronVersion——模拟 versions.electron 检测意外失效，靠文件名兜底
+  });
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: 'C:\\npm\\dsh.cmd' });
+  assert.equal(calls[0].cmd, nodeExe);
+});
+
 // —— sanitizeCwd 纯函数 ——
 
 test('sanitizeCwd(undefined) → undefined', () => {
