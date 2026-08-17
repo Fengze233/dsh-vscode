@@ -154,10 +154,12 @@ export function installBridge(opts: BridgeInstallOptions): BridgeInstallResult {
   const existing = opts.fs.exists(patchPath) ? opts.fs.readFile(patchPath) : '';
 
   if (existing.includes(BRIDGE_BEGIN_MARK)) {
-    // 已存在条目：全部目标目录都必须可用（能读到含 `"name"` 的 package.json）。
+    // 已存在条目：全部目标目录都必须可用（能读到含 `"name"` 的 package.json，
+    // 且版本与插件随附版本一致——版本不一致说明是升级前的旧包，需强制重装刷新）。
     // 仅 exists 会漏掉「目录在但 package.json 不可读」的坏包（chmod 000 事故），
     // 且 Windows 场景某目标缺失但其余完好时也需自愈补回。
-    const unusable = targets.filter((t) => !isBridgeUsable(t, opts.fs));
+    const wantVersion = bridgeVersion(opts.bridgeSourceDir, opts.fs);
+    const unusable = targets.filter((t) => !isBridgeUsable(t, opts.fs, wantVersion));
     if (unusable.length === 0) {
       return { status: 'ok', profileDir, bridgeDir };
     }
@@ -302,16 +304,44 @@ function buildPatchEntry(beginMark: string): string {
 }
 
 /**
- * 可用性验证：桥接目录完好与否，取决于能否读到含 `"name"` 字段的 package.json。
+ * 可用性验证：桥接目录完好与否，取决于能否读到含 `"name"` 字段的 package.json，
+ * 且（插件随附版本已知时）version 与随附版本一致。
+ * 版本不一致视为「旧版残留」——升级插件后 installBridge 的幂等分支若不比对版本，
+ * 会跳过已装旧包、导致零依赖修复等包内变更永远无法触达用户（桥接包无独立升级通道），
+ * 因此比对版本并强制重装刷新。
  * 读取抛错（权限不可读/chmod 000）或内容不含 `"name"` 均视为坏包 → 需要强制重装。
  * 仅 exist 判定会漏掉「目录在但包不可读」的坏场景（生产事故根因之一）。
+ *
+ * @param wantVersion 插件随附桥接包的版本号；为空串表示源包版本未知（源不可读等），
+ *                    此时退回旧行为（只看 `"name"`，不比版本）
  */
-function isBridgeUsable(bridgeDir: string, fs: InstallerFs): boolean {
+function isBridgeUsable(bridgeDir: string, fs: InstallerFs, wantVersion: string): boolean {
   const pkgPath = join(bridgeDir, 'package.json');
   try {
-    return fs.readFile(pkgPath).includes('"name"');
+    const raw = fs.readFile(pkgPath);
+    if (!raw.includes('"name"')) return false;
+    if (wantVersion === '') return true;
+    try {
+      const installed = JSON.parse(raw).version;
+      return installed === wantVersion;
+    } catch {
+      return false;
+    }
   } catch {
     return false;
+  }
+}
+
+/**
+ * 读取插件随附桥接包的版本号（bridgeSourceDir/package.json 的 version 字段）。
+ * 读取或解析失败时返回空串（调用方据此退回「只看 name」的旧可用性判定，避免误重装）。
+ */
+function bridgeVersion(bridgeSourceDir: string, fs: InstallerFs): string {
+  try {
+    const pkg = JSON.parse(fs.readFile(join(bridgeSourceDir, 'package.json')));
+    return typeof pkg.version === 'string' ? pkg.version : '';
+  } catch {
+    return '';
   }
 }
 
