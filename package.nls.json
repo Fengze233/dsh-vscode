@@ -23,5 +23,6 @@
   "dsh.walkthrough.title": "Get Started with DSH",
   "dsh.walkthrough.description": "Use the DeepSeek Harness web UI right inside VS Code.",
   "dsh.walkthrough.step.title": "Open the DSH panel",
-  "dsh.walkthrough.step.description": "Click the DSH icon in the Activity Bar or the Secondary Side Bar, or run [DSH: Open Panel](command:dsh.openPanel). The panel starts (or reuses) the dsh web service and embeds the DSH page in the sidebar."
+  "dsh.walkthrough.step.description": "Click the DSH icon in the Activity Bar or the Secondary Side Bar, or run [DSH: Open Panel](command:dsh.openPanel). The panel starts (or reuses) the dsh web service and embeds the DSH page in the sidebar.",
+  "dsh.cmd.copyLogs.title": "DSH: Copy Logs"
 }

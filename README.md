@@ -60,6 +60,7 @@ npm run package        # produces dsh-vscode.vsix, then install as in Option 2
 1. After installation, a DSH whale icon appears in both the left Activity Bar and the right Secondary Side Bar;
 2. Click either icon: the extension auto-starts (or reuses) `dsh web` and embeds the DSH page in that sidebar;
    - Click the **right** icon → the panel opens on the right, leaving the file explorer untouched;
+   - If `dsh.port` is occupied by another program, the extension automatically switches to the first free port for this session only (your setting is unchanged; a notification tells you the temporary port);
 3. Panel title bar buttons: `Open in Browser` `Restart Service` `Stop Service` `Copy URL` `Show Logs`;
 4. The bottom status bar shows the service status; click it to toggle the panel.
 
@@ -74,6 +75,7 @@ npm run package        # produces dsh-vscode.vsix, then install as in Option 2
 | `DSH: Stop Service` | Stop the extension-started service |
 | `DSH: Copy URL` | Copy the DSH page URL |
 | `DSH: Show Logs` | Open the extension log output channel |
+| `DSH: Copy Logs` | Copy the full DSH log (environment info + service log) to the clipboard for bug reports |
 | `DSH: Retry Bridge Install` | Reinstall the bridge and restart the service |
 | `DSH: Uninstall Bridge` | Remove the bridge package and restore `cordis.patch.yml` |
 

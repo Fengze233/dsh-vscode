@@ -2,6 +2,7 @@
 import * as vscode from 'vscode';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { initI18n, t } from './i18n';
 import { readConfig, type DshConfig } from './config';
 import { probeService } from './service/detect';
@@ -20,6 +21,21 @@ import { evaluateBridgeStatus, bridgeWarningText } from './bridge/status';
 
 let manager: ServiceManager | null = null;
 let output: vscode.OutputChannel | null = null;
+
+/** 日志缓冲（供「复制日志」命令 dsh.copyLogs 使用；上限行数防内存膨胀） */
+const logBuffer: string[] = [];
+/** 日志缓冲最大行数（超出后丢弃最早的行） */
+const LOG_BUFFER_MAX = 5000;
+
+/** 统一日志出口：加 HH:MM:SS 时间戳 → 写入输出通道 + 日志缓冲（复制日志命令的数据源） */
+function appendLog(line: string): void {
+  const d = new Date();
+  const ts = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+  const full = `[${ts}] ${line}`;
+  logBuffer.push(full);
+  if (logBuffer.length > LOG_BUFFER_MAX) logBuffer.shift();
+  output?.appendLine(full);
+}
 
 /** globalState 键：用户点击「不再提示」后置 true，持久静默桥接降级警告 */
 const BRIDGE_SILENCE_KEY = 'dsh.bridgeWarningSilenced';
@@ -69,6 +85,39 @@ function resolveNpmGlobalNodeModules(config: DshConfig): string | undefined {
   return undefined;
 }
 
+/**
+ * 定位 dsh 可执行文件并读取其版本（Windows 由 dsh.cmd 推导 bin.js 后读包内 package.json）。
+ * 用于环境信息头：问题报告据此核对 dsh 安装位置与版本，无需再追问用户环境。
+ */
+function describeDshExecutable(config: DshConfig): { path: string | null; version: string | null } {
+  let shim: string | null = null;
+  let binJs: string | null = null;
+  if (process.platform === 'win32') {
+    // Windows：显式 executablePath 优先；否则 PATH 找 dsh.cmd → 推导 bin.js 绝对路径
+    shim = config.executablePath && !config.executablePath.endsWith('.js')
+      ? config.executablePath
+      : findInPath('dsh.cmd', process.env.PATH ?? '');
+    if (shim) {
+      binJs = shim.endsWith('.js')
+        ? shim
+        : join(dirname(shim), 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
+    }
+  } else {
+    // 非 Windows：显式路径记录路径；否则只记录命令名（版本读取依赖具体安装布局，跳过）
+    shim = config.executablePath && config.executablePath.length > 0 ? config.executablePath : 'dsh';
+  }
+  if (binJs) {
+    try {
+      // bin.js 上两级即 @deepseek-ai/dsh 包根，读其 package.json 的 version
+      const version = JSON.parse(readFileSync(join(dirname(dirname(binJs)), 'package.json'), 'utf8')).version;
+      return { path: shim, version };
+    } catch {
+      /* 读取失败按版本未知处理 */
+    }
+  }
+  return { path: shim, version: null };
+}
+
 /** 插件激活：VS Code 启动完成后调用 */
 export function activate(context: vscode.ExtensionContext): void {
   // 语言规则：vscode.env.language 以 zh- 开头 → 中文，其余一律英文
@@ -76,7 +125,25 @@ export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel('DSH');
 
   const { config, errors } = readConfig();
-  for (const err of errors) output?.appendLine(`[config] ${err}`);
+  for (const err of errors) appendLog(`[config] ${err}`);
+
+  // —— 环境信息头：版本/平台/可执行文件/关键配置，问题报告排查的第一手依据 ——
+  appendLog('=== DSH 扩展环境信息 ===');
+  appendLog(`扩展版本: ${context.extension.packageJSON.version}`);
+  appendLog(`VS Code 版本: ${vscode.version}`);
+  appendLog(`平台: ${process.platform} (${process.arch})`);
+  const electronVersion = (process.versions as { electron?: string }).electron;
+  appendLog(`宿主 Node: ${process.version}${electronVersion ? ` / Electron ${electronVersion}` : ''}`);
+  const dshInfo = describeDshExecutable(config);
+  appendLog(`dsh 可执行文件: ${dshInfo.path ?? '未定位'}`);
+  appendLog(`dsh 版本: ${dshInfo.version ?? '未知'}`);
+  appendLog(
+    `配置: host=${config.host} port=${config.port} autoStart=${config.autoStart} stopOnExit=${config.stopOnExit} ` +
+    `bridgeEnabled=${config.bridgeEnabled} extraArgs=${JSON.stringify(config.extraArgs)} ` +
+    `executablePath=${config.executablePath || '(空)'}`,
+  );
+  appendLog(`工作区: ${vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath).join(', ') || '(无)'}`);
+  appendLog('=============================');
 
   // —— 桥接状态（单一状态，两个面板共享，避免多个面板重复触发定时器）——
   // install：桥接安装结果；桥接禁用时为 null（不安装、不评估、不弹警告）。
@@ -104,7 +171,7 @@ export function activate(context: vscode.ExtensionContext): void {
     try {
       return installBridge(installOpts);
     } catch (err) {
-      output?.appendLine(`[bridge] install failed: ${String(err)}`);
+      appendLog(`[bridge] install failed: ${String(err)}`);
       return { status: 'degraded', reason: String(err) };
     }
   }
@@ -207,7 +274,7 @@ export function activate(context: vscode.ExtensionContext): void {
       scheduleEvaluation();
     } catch (err) {
       // 重试失败只记日志：命令入口是 void 调用，异常不能成为未处理拒绝
-      output?.appendLine(`[bridge] retry failed: ${String(err)}`);
+      appendLog(`[bridge] retry failed: ${String(err)}`);
     }
   }
 
@@ -217,7 +284,7 @@ export function activate(context: vscode.ExtensionContext): void {
       uninstallBridge(installOpts);
       void vscode.window.showInformationMessage(t('bridge.uninstalled'));
     } catch (err) {
-      output?.appendLine(`[bridge] uninstall failed: ${String(err)}`);
+      appendLog(`[bridge] uninstall failed: ${String(err)}`);
       void vscode.window.showWarningMessage(t('bridge.uninstallFailed', { message: String(err) }));
     }
   }
@@ -225,7 +292,11 @@ export function activate(context: vscode.ExtensionContext): void {
   manager = new ServiceManager(toManagerOptions(config), {
     probeService,
     processRunner: createProcessRunner(),
-    log: (line) => output?.appendLine(line),
+    log: (line) => appendLog(line),
+    // 端口被占用自动临时替换成功：弹窗告知用户新端口（仅本次会话，配置未变）
+    onPortFallback: (requested, fallback) => {
+      void vscode.window.showInformationMessage(t('msg.portFallback', { port: requested, fallback }));
+    },
   });
   manager.setExitBehavior(!config.stopOnExit);
 
@@ -278,6 +349,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('dsh.stop', () => void manager?.stop()),
     vscode.commands.registerCommand('dsh.copyUrl', () => copyUrl()),
     vscode.commands.registerCommand('dsh.showLogs', () => output?.show()),
+    vscode.commands.registerCommand('dsh.copyLogs', () => copyLogs()),
     vscode.commands.registerCommand('dsh.bridge.retry', () => void retryBridge()),
     vscode.commands.registerCommand('dsh.bridge.uninstall', () => void uninstallBridgeCmd()),
     vscode.workspace.onDidChangeConfiguration((e) => {
@@ -314,6 +386,12 @@ async function copyUrl(): Promise<void> {
   }
   await vscode.env.clipboard.writeText(s.url);
   void vscode.window.showInformationMessage(t('info.urlCopied', { url: s.url }));
+}
+
+/** 复制完整 DSH 日志（含环境信息头）到剪贴板：问题报告的提交内容 */
+async function copyLogs(): Promise<void> {
+  await vscode.env.clipboard.writeText(logBuffer.join('\n'));
+  void vscode.window.showInformationMessage(t('msg.logsCopied'));
 }
 
 /** 一次性引导：告知 DSH 面板可通过左侧活动栏与右侧辅助侧边栏的图标打开 */

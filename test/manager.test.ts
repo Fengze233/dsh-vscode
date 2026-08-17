@@ -59,6 +59,8 @@ function makeHarness(opts?: Partial<Parameters<ServiceManager['reconfigure']>[0]
       c.kill('SIGKILL');
     },
     lastChild: null,
+    // 模拟真实 runner 记录启动命令（manager 据此写「启动命令」日志）
+    lastStart: { command: 'node', args: ['bin.js', 'web', '--host', '127.0.0.1', '--port', '3080'] },
   };
   h.manager = new ServiceManager(
     {
@@ -90,6 +92,49 @@ test('探测到外来服务：failed + err.portOccupied', async () => {
   assert.equal(s.state, 'failed');
   assert.equal(s.error, 'err.portOccupied');
   assert.equal(h.spawnCount, 0);
+  h.manager.dispose();
+});
+
+test('端口被占用：自动临时替换端口、弹窗通知、用新端口启动就绪', async () => {
+  const logs: string[] = [];
+  const fallbackCalls: [number, number][] = [];
+  const h = makeHarness(undefined, {
+    log: (line) => logs.push(line),
+    onPortFallback: (a, b) => fallbackCalls.push([a, b]),
+  });
+  // 初始探测 foreign → 候选 3081 探测 down → spawn 后等待循环探测 dsh
+  h.probeQueue = ['foreign', 'down', 'dsh'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'ready');
+  assert.equal(s.error, null);
+  assert.equal(s.url, 'http://127.0.0.1:3081/'); // 运行时替换为临时端口
+  assert.deepEqual(fallbackCalls, [[3080, 3081]]); // 弹窗通知（requested, fallback）
+  assert.ok(logs.some((l) => l.includes('临时改用端口 3081')));
+  assert.ok(logs.some((l) => l.includes('启动命令'))); // 记录实际启动命令
+  h.manager.dispose();
+});
+
+test('端口被占用且候选端口全部被占用：failed + err.portOccupied，不弹窗', async () => {
+  const fallbackCalls: [number, number][] = [];
+  const h = makeHarness(undefined, { onPortFallback: (a, b) => fallbackCalls.push([a, b]) });
+  h.probeQueue = ['foreign']; // 全部候选（50 个）探测循环返回 foreign
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.portOccupied');
+  assert.equal(h.spawnCount, 0);
+  assert.equal(fallbackCalls.length, 0);
+  h.manager.dispose();
+});
+
+test('端口被占用且 autoStart=false：直接报占用，不替换端口', async () => {
+  const fallbackCalls: [number, number][] = [];
+  const h = makeHarness({ autoStart: false }, { onPortFallback: (a, b) => fallbackCalls.push([a, b]) });
+  h.probeQueue = ['foreign'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.portOccupied');
+  assert.equal(h.spawnCount, 0);
+  assert.equal(fallbackCalls.length, 0);
   h.manager.dispose();
 });
 

@@ -1,6 +1,6 @@
 // src/service/manager.ts — 服务管理器：状态机编排探测/启动/等待/停止
 // 纯模块：不依赖 vscode；探测与进程管理均通过依赖注入，便于单测。
-import type { ProbeResult } from './detect';
+import { findFreePort, PORT_FALLBACK_ATTEMPTS, type ProbeResult } from './detect';
 import type { ChildProcessLike, ProcessRunner } from './process';
 import type { MsgKey } from '../i18n';
 
@@ -42,6 +42,8 @@ export interface ManagerDeps {
   processRunner: ProcessRunner;
   /** 日志出口（扩展里接到 Output Channel） */
   log: (line: string) => void;
+  /** 端口被占用时自动临时替换成功后的通知回调（扩展里弹窗告知用户新端口） */
+  onPortFallback?: (requestedPort: number, fallbackPort: number) => void;
   /** 就绪后的健康探测间隔（毫秒，默认 30000；≤0 关闭探测） */
   healthIntervalMs?: number;
   /** 启动总超时（毫秒，默认 15000） */
@@ -169,9 +171,29 @@ export class ServiceManager {
       return this.getSnapshot();
     }
     if (probe === 'foreign') {
-      // 端口被其他程序占用：提示换端口，绝不杀他人进程
-      this.set({ state: 'failed', error: 'err.portOccupied', errorVars: { port: this.opts.port } });
-      return this.getSnapshot();
+      // 端口被其他程序占用：自动临时替换为第一个空闲端口（仅本次会话生效，不写配置）。
+      // 不自动启动时替换端口没有意义，保持原「端口被占用」提示。
+      if (this.opts.autoStart) {
+        const fallback = await findFreePort(
+          this.opts.host, this.opts.port, PORT_FALLBACK_ATTEMPTS, this.deps.probeService, this.opts.timeoutMs,
+        );
+        if (fallback !== null) {
+          if (this.stopRequested) return this.getSnapshot(); // 探测候选期间被叫停，不覆盖用户的停止意图
+          this.deps.log(`[process] 端口 ${this.opts.port} 被其他程序占用，本次会话临时改用端口 ${fallback}`);
+          this.deps.onPortFallback?.(this.opts.port, fallback);
+          // 运行时替换端口：本次会话内 URL/探测/重启均使用新端口；
+          // 不写回 VS Code 配置，重启 VS Code 后恢复用户配置的端口。
+          this.opts.port = fallback;
+          // 不 return：落入下方启动流程（autoStart 为 true）
+        } else {
+          // 连续 50 个候选端口都被占用：保持原「端口被占用」错误
+          this.set({ state: 'failed', error: 'err.portOccupied', errorVars: { port: this.opts.port } });
+          return this.getSnapshot();
+        }
+      } else {
+        this.set({ state: 'failed', error: 'err.portOccupied', errorVars: { port: this.opts.port } });
+        return this.getSnapshot();
+      }
     }
     if (!this.opts.autoStart) {
       this.set({ state: 'failed', error: 'err.notRunning' });
@@ -227,6 +249,11 @@ export class ServiceManager {
       }
     }
     this.child = child;
+    // 记录实际执行的启动命令（含解析出的 node 路径与全部参数），供问题排查对照环境差异
+    const lastStart = this.deps.processRunner.lastStart;
+    if (lastStart) {
+      this.deps.log(`[process] 启动命令: ${lastStart.command} ${lastStart.args.join(' ')}`);
+    }
 
     // spawn 的 ENOENT 通过 'error' 事件异步到达，用标志位让等待循环立即失败
     let spawnFailed = false;

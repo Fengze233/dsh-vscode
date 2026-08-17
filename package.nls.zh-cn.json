@@ -23,5 +23,6 @@
   "dsh.walkthrough.title": "DSH 入门",
   "dsh.walkthrough.description": "在 VS Code 内直接使用 DeepSeek Harness 网页界面。",
   "dsh.walkthrough.step.title": "打开 DSH 面板",
-  "dsh.walkthrough.step.description": "点击左侧活动栏或右侧辅助侧边栏的 DSH 图标，或运行 [DSH: 打开面板](command:dsh.openPanel)。面板会自动启动（或复用）dsh web 服务，并在侧边栏内嵌显示 DSH 网页。"
+  "dsh.walkthrough.step.description": "点击左侧活动栏或右侧辅助侧边栏的 DSH 图标，或运行 [DSH: 打开面板](command:dsh.openPanel)。面板会自动启动（或复用）dsh web 服务，并在侧边栏内嵌显示 DSH 网页。",
+  "dsh.cmd.copyLogs.title": "DSH: 复制日志"
 }

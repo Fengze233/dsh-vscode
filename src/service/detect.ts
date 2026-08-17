@@ -36,3 +36,32 @@ export async function probeService(
     clearTimeout(timer);
   }
 }
+
+/** 端口被占用时自动替换的候选尝试次数（从原端口 +1 起依次探测） */
+export const PORT_FALLBACK_ATTEMPTS = 50;
+
+/**
+ * 从 startPort+1 开始依次探测，返回第一个「未运行」的端口号（探测结果为 down 视为空闲）。
+ * 全部候选都被占用或超出 65535 时返回 null，由调用方保持原「端口被占用」错误。
+ *
+ * @param host       目标主机（与 probeService 一致）
+ * @param startPort  被占用端口（候选从其 +1 开始）
+ * @param attempts   最多尝试的候选数
+ * @param probeImpl  探测实现（默认 probeService；单测可注入假实现）
+ * @param timeoutMs  单次探测超时（透传给 probeImpl）
+ */
+export async function findFreePort(
+  host: string,
+  startPort: number,
+  attempts: number,
+  probeImpl: (host: string, port: number, timeoutMs?: number) => Promise<ProbeResult> = probeService,
+  timeoutMs?: number,
+): Promise<number | null> {
+  for (let offset = 1; offset <= attempts; offset++) {
+    const candidate = startPort + offset;
+    if (candidate > 65535) break; // 超出合法端口范围，停止
+    const result = await probeImpl(host, candidate, timeoutMs);
+    if (result === 'down') return candidate;
+  }
+  return null;
+}

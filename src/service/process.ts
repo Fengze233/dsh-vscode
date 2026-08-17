@@ -204,6 +204,8 @@ export interface ProcessRunner {
   stopChild(child: ChildProcessLike): Promise<void>;
   /** 最近一次启动的子进程（测试钩子；生产代码可忽略） */
   lastChild: ChildProcessLike | null;
+  /** 最近一次启动的实际命令与参数（供 manager 写「启动命令」日志，便于问题排查） */
+  lastStart?: { command: string; args: string[] } | null;
 }
 
 /**
@@ -222,6 +224,7 @@ export function createProcessRunner(
   env: RunnerEnv = { execPath: process.execPath, path: process.env.PATH ?? '' },
 ): ProcessRunner {
   let lastChild: ChildProcessLike | null = null;
+  let lastStart: { command: string; args: string[] } | null = null;
 
   return {
     startDsh({ host, port, extraArgs, cwd, executablePath }) {
@@ -239,6 +242,8 @@ export function createProcessRunner(
       };
 
       let child: ChildProcessLike;
+      let command: string;
+      let spawnArgs: string[];
       if (platform === 'win32') {
         // Windows：.cmd 是批处理 shim，Node v24 直接 spawn 会同步抛 EINVAL，
         // 故改为用 node 直接执行 shim 指向的真实入口 bin.js，绕过 .cmd shim。
@@ -267,14 +272,18 @@ export function createProcessRunner(
         const nodeExecutable = resolveWindowsNodeExecutable(shimPath, env, existsImpl);
 
         // 4) spawn(node, [binJs, 'web', --host, --port, ...extraArgs], options)
-        child = spawnImpl(nodeExecutable, [...argsPrefix, ...webArgs], spawnOptions);
+        command = nodeExecutable;
+        spawnArgs = [...argsPrefix, ...webArgs];
+        child = spawnImpl(command, spawnArgs, spawnOptions);
       } else {
         // 非 Windows 分支完全不变：仍 spawn 'dsh'（或显式 executablePath）
-        const command = executablePath && executablePath.length > 0 ? executablePath : 'dsh';
-        child = spawnImpl(command, webArgs, spawnOptions);
+        command = executablePath && executablePath.length > 0 ? executablePath : 'dsh';
+        spawnArgs = webArgs;
+        child = spawnImpl(command, spawnArgs, spawnOptions);
       }
 
       lastChild = child;
+      lastStart = { command, args: spawnArgs };
       return child;
     },
 
@@ -287,6 +296,10 @@ export function createProcessRunner(
 
     get lastChild() {
       return lastChild;
+    },
+
+    get lastStart() {
+      return lastStart;
     },
   };
 }

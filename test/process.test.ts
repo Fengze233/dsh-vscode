@@ -80,6 +80,21 @@ test('lastChild 记录最近一次启动的子进程（测试钩子）', () => {
   assert.equal(runner.lastChild, child);
 });
 
+test('lastStart 记录最近一次启动的实际命令与参数（供 manager 写启动命令日志）', () => {
+  const runner = createProcessRunner(() => new FakeChild(), 'win32', 3000, () => true, {
+    execPath: 'C:\\node\\node.exe',
+    path: 'C:\\npm-global',
+  });
+  runner.startDsh({ host: '127.0.0.1', port: 0, extraArgs: [] });
+  assert.ok(runner.lastStart);
+  // command 为解析出的 node 可执行文件（shim 目录旁优先），args 首位为 bin.js 路径
+  assert.equal(runner.lastStart.command, 'C:\\npm-global\\node.exe');
+  assert.deepEqual(runner.lastStart.args.slice(0, 2), [
+    'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
+    'web',
+  ]);
+});
+
 test('startDsh 透传 cwd 到 spawn 选项（注入 exists=true）', () => {
   const calls: { cmd: string; args: string[]; opts: SpawnOptions }[] = [];
   const spawnImpl: SpawnFn = (cmd, args, opts) => {

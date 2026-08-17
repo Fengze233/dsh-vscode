@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import net from 'node:net';
 import type { AddressInfo } from 'node:net';
-import { probeService } from '../src/service/detect';
+import { probeService, findFreePort } from '../src/service/detect';
 
 /** 启动本地 HTTP 服务器并返回 { server, port } */
 async function serve(
@@ -64,4 +64,31 @@ test('响应超时 → down', async () => {
   } finally {
     srv.close();
   }
+});
+
+test('findFreePort：从 startPort+1 起找到第一个空闲端口', async () => {
+  const calls: number[] = [];
+  const probe = async (_host: string, port: number): Promise<'dsh' | 'foreign' | 'down'> => {
+    calls.push(port);
+    // 模拟 3081/3082 被占用，3083 空闲
+    return port === 3083 ? 'down' : 'foreign';
+  };
+  const found = await findFreePort('127.0.0.1', 3080, 50, probe);
+  assert.equal(found, 3083);
+  assert.deepEqual(calls, [3081, 3082, 3083]); // 依序探测，找到即停
+});
+
+test('findFreePort：全部候选被占用返回 null', async () => {
+  const probe = async (): Promise<'dsh' | 'foreign' | 'down'> => 'foreign';
+  assert.equal(await findFreePort('127.0.0.1', 3080, 3, probe), null);
+});
+
+test('findFreePort：候选超出 65535 提前停止并返回 null', async () => {
+  let calls = 0;
+  const probe = async (): Promise<'dsh' | 'foreign' | 'down'> => {
+    calls += 1;
+    return 'foreign';
+  };
+  assert.equal(await findFreePort('127.0.0.1', 65535, 10, probe), null);
+  assert.equal(calls, 0); // 65536 超出合法范围，一次都不探测
 });

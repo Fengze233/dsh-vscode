@@ -24,7 +24,8 @@
     "onCommand:dsh.copyUrl",
     "onCommand:dsh.showLogs",
     "onCommand:dsh.bridge.retry",
-    "onCommand:dsh.bridge.uninstall"
+    "onCommand:dsh.bridge.uninstall",
+    "onCommand:dsh.copyLogs"
   ],
   "contributes": {
     "viewsContainers": {
@@ -114,6 +115,11 @@
         "command": "dsh.showLogs",
         "title": "%dsh.cmd.showLogs.title%",
         "icon": "$(output)"
+      },
+      {
+        "command": "dsh.copyLogs",
+        "title": "%dsh.cmd.copyLogs.title%",
+        "category": "DSH"
       },
       {
         "command": "dsh.bridge.retry",
