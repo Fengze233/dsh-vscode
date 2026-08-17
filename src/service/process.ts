@@ -37,6 +37,9 @@ export interface RunnerEnv {
   execPath?: string;
   /** 环境变量 PATH 字符串值（生产为 process.env.PATH） */
   path?: string;
+  /** Electron 运行时版本（仅 Electron 环境有值；真实 Node 下为 undefined）。
+   *  扩展宿主是 Electron，process.execPath 指向 Code.exe，绝不能当作 node 使用。 */
+  electronVersion?: string;
 }
 
 /**
@@ -134,6 +137,62 @@ export function windowsDshInvocation(dshCmdPath: string, execPath: string): Wind
   return { command: execPath, argsPrefix: [binJsFromShim(dshCmdPath)] };
 }
 
+/**
+ * 解析 Windows 下执行 bin.js 所用的 node 可执行文件绝对路径。
+ *
+ * 背景（Windows 实测根因，HMR 崩溃 `--expose-internals is required for HMR service`）：
+ * VS Code 扩展宿主是 Electron 进程，process.execPath 指向 Code.exe——用它 spawn 时
+ * bin.js 会跑在 Electron 运行时里：webserver 等纯 JS 部分能起来，但 dsh 的
+ * loader/HMR 依赖系统 Node 的内部特性（--expose-internals 或 node-addon-require-builtin
+ * 原生模块，其二进制按系统 Node ABI 编译），Electron 运行时里两者都不可用 →
+ * HMR 插件启动失败 → 整个 boot 崩溃 → 面板显示「服务已断开」。
+ * 因此 Electron 环境绝不使用 execPath，必须解析系统 PATH 里的 node.exe。
+ *
+ * 解析顺序（与 npm 生成的 dsh.cmd shim 语义对齐）：
+ * 1. shim 目录旁的 node.exe（部分安装布局把 node 放在 npm bin 目录旁边）；
+ * 2. 系统 PATH 里的 node.exe（常规安装：C:\Program Files\nodejs）；
+ * 3. 非 Electron 环境：execPath 本身就是真实 node（直接 node 运行/单测场景）兜底；
+ * 4. 全部失败：抛 code=NODE_NOT_FOUND（Electron 环境绝不能把 Code.exe 当 node 用）。
+ *
+ * @param shimPath   dsh.cmd（或用户配置的 bin.js）的绝对路径
+ * @param env        运行环境注入（execPath / path / electronVersion）
+ * @param existsImpl 存在性校验（默认 node:fs.existsSync；单测可注入假实现）
+ * @returns node.exe 绝对路径
+ * @throws code=NODE_NOT_FOUND 所有候选都不可用时
+ */
+export function resolveWindowsNodeExecutable(
+  shimPath: string,
+  env: RunnerEnv,
+  existsImpl: (p: string) => boolean = existsSync,
+): string {
+  // Electron 判定：注入值优先；未注入时读真实 process.versions（扩展宿主里是 Electron 版本号）
+  const isElectron =
+    (typeof env.electronVersion === 'string' && env.electronVersion !== '') ||
+    (typeof (process.versions as { electron?: string }).electron === 'string' &&
+      (process.versions as { electron?: string }).electron !== '');
+  const pathEnv = env.path ?? process.env.PATH ?? '';
+
+  // 1) shim 目录旁的 node.exe（npm shim 的 %dp0%\node.exe 语义；仅绝对路径才有可靠 dirname）
+  if (win32Path.isAbsolute(shimPath)) {
+    const besideShim = win32Path.join(win32Path.dirname(shimPath), 'node.exe');
+    if (existsImpl(besideShim)) return besideShim;
+  }
+
+  // 2) 系统 PATH 里的 node.exe（常规安装布局）
+  const inPath = findInPath('node.exe', pathEnv, existsImpl);
+  if (inPath) return inPath;
+
+  // 3) 非 Electron 环境：execPath 本身就是真实 node，兜底使用
+  const execPath = env.execPath ?? process.execPath;
+  if (!isElectron && execPath) return execPath;
+
+  // 4) 全部失败：明确报「未找到 node.exe」，绝不把 Electron 的 Code.exe 当 node 用
+  throw Object.assign(
+    new Error(`node.exe not found in PATH (dsh shim at ${shimPath})`),
+    { code: 'NODE_NOT_FOUND' },
+  );
+}
+
 /** 进程管理接口 */
 export interface ProcessRunner {
   /** 启动 dsh web 子进程（命令名按平台选择） */
@@ -180,7 +239,6 @@ export function createProcessRunner(
       if (platform === 'win32') {
         // Windows：.cmd 是批处理 shim，Node v24 直接 spawn 会同步抛 EINVAL，
         // 故改为用 node 直接执行 shim 指向的真实入口 bin.js，绕过 .cmd shim。
-        const execPath = env.execPath ?? process.execPath;
         const pathEnv = env.path ?? process.env.PATH ?? '';
 
         // 1) 确定 dsh.cmd 的绝对路径：显式 executablePath 优先；否则在 PATH 里找 dsh.cmd
@@ -201,8 +259,12 @@ export function createProcessRunner(
           ? [shimPath]
           : [binJsFromShim(shimPath)];
 
-        // 3) spawn(node, [binJs, 'web', --host, --port, ...extraArgs], options)
-        child = spawnImpl(execPath, [...argsPrefix, ...webArgs], spawnOptions);
+        // 3) 解析执行 bin.js 所用的 node.exe：Electron 环境下 execPath 是 Code.exe 不可用，
+        //    必须解析系统 PATH 里的 node.exe（详见 resolveWindowsNodeExecutable 注释）。
+        const nodeExecutable = resolveWindowsNodeExecutable(shimPath, env, existsImpl);
+
+        // 4) spawn(node, [binJs, 'web', --host, --port, ...extraArgs], options)
+        child = spawnImpl(nodeExecutable, [...argsPrefix, ...webArgs], spawnOptions);
       } else {
         // 非 Windows 分支完全不变：仍 spawn 'dsh'（或显式 executablePath）
         const command = executablePath && executablePath.length > 0 ? executablePath : 'dsh';

@@ -209,7 +209,8 @@ export class ServiceManager {
           retried = true;
           continue;
         }
-        // 区分错误类型：EINVAL 是 spawn 参数无效（Windows 上 cwd 非法等，重试后仍无效），
+        // 区分错误类型：EINVAL 是 spawn 参数无效（Windows 上 cwd 非法等，重试后仍无效）；
+        // NODE_NOT_FOUND 是 Windows 下找不到可用的 node.exe（Electron 环境不能把 Code.exe 当 node）；
         // ENOENT 才是命令缺失；其余保守地归为「未找到命令」。
         if (code === 'EINVAL') {
           this.set({
@@ -217,6 +218,8 @@ export class ServiceManager {
             error: 'err.spawnEinval',
             errorVars: { cwd: String(this.opts.cwd ?? '') },
           });
+        } else if (code === 'NODE_NOT_FOUND') {
+          this.set({ state: 'failed', error: 'err.nodeNotFound' });
         } else {
           this.set({ state: 'failed', error: 'err.dshNotFound' });
         }

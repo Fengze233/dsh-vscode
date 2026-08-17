@@ -213,6 +213,23 @@ test('startDsh 同步抛 EINVAL：failed + err.spawnEinval（doStart catch 分�
   h.manager.dispose();
 });
 
+test('startDsh 抛 NODE_NOT_FOUND（Windows 找不到 node.exe）：failed + err.nodeNotFound', async () => {
+  const h = makeHarness(undefined, {
+    processRunner: {
+      startDsh: () => {
+        throw Object.assign(new Error('node.exe not found in PATH (dsh shim at C:\\npm\\dsh.cmd)'), { code: 'NODE_NOT_FOUND' });
+      },
+      stopChild: async () => {},
+      lastChild: null,
+    },
+  });
+  h.probeQueue = ['down'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.nodeNotFound'); // 与「未找到 dsh」区分，提示安装/加 PATH Node.js
+  h.manager.dispose();
+});
+
 test('stop() 只停插件自启的子进程', async () => {
   const h = makeHarness();
   h.probeQueue = ['down', 'dsh'];

@@ -18,6 +18,7 @@ const messages = {
     // 错误原因（error 字段存的 i18n 键）
     'err.portOccupied': 'Port {port} is occupied by another program. Change dsh.port in settings, then retry.',
     'err.dshNotFound': 'The dsh command was not found. Install DeepSeek Harness first.',
+    'err.nodeNotFound': 'Node.js (node.exe) was not found in PATH. Install Node.js or add it to PATH, then restart VS Code.',
     'err.spawnEinval': 'Failed to start dsh: invalid spawn parameters (working directory: {cwd}). Try opening a local folder, or set dsh.executablePath in settings.',
     'err.startTimeout': 'Service did not become ready within {seconds}s. See the DSH log for details.',
     'err.startCrashed': 'The DSH service exited unexpectedly. See the DSH log for details.',
@@ -58,6 +59,7 @@ const messages = {
     'panel.showLogs': '查看日志',
     'err.portOccupied': '端口 {port} 被其他程序占用。请在设置中修改 dsh.port 后重试。',
     'err.dshNotFound': '未找到 dsh 命令，请先安装 DeepSeek Harness。',
+    'err.nodeNotFound': 'PATH 中未找到 Node.js（node.exe）。请安装 Node.js 或将其加入 PATH 后重启 VS Code。',
     'err.spawnEinval': 'dsh 启动失败：启动参数无效（工作目录：{cwd}）。请改用本地路径打开项目，或在设置中指定 dsh.executablePath。',
     'err.startTimeout': '服务在 {seconds} 秒内未就绪，详见 DSH 日志。',
     'err.startCrashed': 'DSH 服务异常退出，详见 DSH 日志。',

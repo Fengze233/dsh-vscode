@@ -58,7 +58,8 @@ test('Windows：注入 PATH 命中 dsh.cmd 后以 node 直跑 bin.js 启动，de
     path: 'C:\\npm-global',
   });
   runner.startDsh({ host: '127.0.0.1', port: 0, extraArgs: [] });
-  assert.equal(calls[0].cmd, 'C:\\node\\node.exe');
+  // node 解析顺序：shim 目录旁的 node.exe 优先（exists 注入全 true，命中 npm-global 目录旁）
+  assert.equal(calls[0].cmd, 'C:\\npm-global\\node.exe');
   assert.deepEqual(calls[0].args, [
     'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
     'web', '--host', '127.0.0.1', '--port', '0',
@@ -125,7 +126,8 @@ test('startDsh 传 executablePath 指向 dsh.cmd 时以 node 直跑其 bin.js（
     path: 'C:\\Windows\\System32',
   });
   runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: 'C:\\tools\\dsh.cmd' });
-  assert.equal(calls[0].cmd, 'C:\\node\\node.exe');
+  // node 解析顺序：shim 目录旁 node.exe 优先（exists 注入全 true → C:\tools\node.exe 命中）
+  assert.equal(calls[0].cmd, 'C:\\tools\\node.exe');
   assert.deepEqual(calls[0].args, [
     'C:\\tools\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
     'web', '--host', '127.0.0.1', '--port', '3080',
@@ -143,7 +145,8 @@ test('startDsh 传 executablePath 指向 .js 时直接将其作为 argsPrefix（
     path: 'C:\\Windows\\System32',
   });
   runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: 'C:\\repo\\dsh\\lib\\bin.js' });
-  assert.equal(calls[0].cmd, 'C:\\node\\node.exe');
+  // node 解析顺序：bin.js 目录旁 node.exe 优先（exists 注入全 true → lib 目录旁命中）
+  assert.equal(calls[0].cmd, 'C:\\repo\\dsh\\lib\\node.exe');
   assert.deepEqual(calls[0].args, [
     'C:\\repo\\dsh\\lib\\bin.js',
     'web', '--host', '127.0.0.1', '--port', '3080',
@@ -177,6 +180,41 @@ test('startDsh win32 + 找不到 dsh.cmd（exists 全 false）→ 抛 code ENOEN
   assert.throws(
     () => runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] }),
     (err: Error & { code?: string }) => err.code === 'ENOENT',
+  );
+});
+
+test('startDsh win32 + Electron 环境：绝不使用 execPath（Code.exe），改用 PATH 里的 node.exe', () => {
+  const calls: { cmd: string; args: string[] }[] = [];
+  const spawnImpl: SpawnFn = (cmd, args) => {
+    calls.push({ cmd, args });
+    return new FakeChild();
+  };
+  // 模拟 VS Code 扩展宿主：Electron 运行时，execPath 指向 Code.exe（不可当 node 用），
+  // PATH 里 node.exe 位于 C:\Program Files\nodejs（exists 仅对该路径返回 true）
+  const nodeExe = 'C:\\Program Files\\nodejs\\node.exe';
+  const runner = createProcessRunner(spawnImpl, 'win32', 3000, (p) => p === nodeExe, {
+    execPath: 'C:\\Users\\x\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe',
+    path: `C:\\Windows\\System32;C:\\Program Files\\nodejs`,
+    electronVersion: '39.2.0',
+  });
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: 'C:\\npm\\dsh.cmd' });
+  // 关键：cmd 必须是系统 node.exe，而不是 Electron 的 Code.exe
+  assert.equal(calls[0].cmd, nodeExe);
+  assert.deepEqual(calls[0].args, [
+    'C:\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
+    'web', '--host', '127.0.0.1', '--port', '3080',
+  ]);
+});
+
+test('startDsh win32 + Electron 环境且 PATH 无 node.exe → 抛 code NODE_NOT_FOUND', () => {
+  const runner = createProcessRunner(() => new FakeChild(), 'win32', 3000, () => false, {
+    execPath: 'C:\\Users\\x\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe',
+    path: 'C:\\Windows\\System32',
+    electronVersion: '39.2.0',
+  });
+  assert.throws(
+    () => runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: 'C:\\npm\\dsh.cmd' }),
+    (err: Error & { code?: string }) => err.code === 'NODE_NOT_FOUND',
   );
 });
 
