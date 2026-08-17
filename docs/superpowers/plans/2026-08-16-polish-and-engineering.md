@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- 代码注释必须为完整中文；git 提交信息为中文；提交身份 `Fengze233` / `ni125803@163.com`。
+- 代码注释必须为完整中文；git 提交信息为中文；提交身份 `Fengze233` / `your-email@example.com`。
 - i18n 规则：VS Code 语言以 `zh-` 开头 → 简体中文，其余一律英文（README 英文主版 + README.zh.md 中文版已确立）。
 - 仓库根目录 `dsh-vscode`；开发在隔离 worktree（`.worktrees/polish`，分支 `feature/polish-and-engineering`）进行，完成后合并回 main（沿用上轮 worktree 流程）。
 - 测试运行方式：`npm test`（真实测试数 75；构建脚本清理后测试数应保持 75 不变）；`npm run typecheck` 通过。

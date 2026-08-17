@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- 代码注释必须为完整中文；git 提交信息为中文；提交身份 `Fengze233` / `ni125803@163.com`。
+- 代码注释必须为完整中文；git 提交信息为中文；提交身份 `Fengze233` / `your-email@example.com`。
 - i18n 规则：VS Code 语言以 `zh-` 开头 → 简体中文，其余一律英文（动态文案走 `src/i18n.ts`，静态文案走 `package.nls.json` / `package.nls.zh-cn.json`）。
 - 全平台代码兼容（Windows 本地 / WSL / macOS / Linux）：路径一律 `node:path`，命令名按平台 `dsh` / `dsh.cmd`（沿用 `src/service/process.ts` 模式）。
 - 绝不写 DSH 安装目录；只允许写用户目录 `$DSH_HOME`（默认 `~/.dsh`）下 `profiles/web/`。

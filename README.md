@@ -21,7 +21,7 @@ Use the [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness
 - 🖱️ **One-click open**: a DSH whale icon in both the left Activity Bar and the right Secondary Side Bar — click either to embed the DSH page in that sidebar;
 - 🚀 **Automatic service management**: auto-detects the port — reuses an already-running `dsh web`, otherwise starts one silently in the background and loads it once ready;
 - 🔄 **Live status sync**: four-state status bar indicator (running green / starting yellow / failed red / stopped gray); click it to toggle the panel;
-- 🛟 **Error fallbacks**: port occupied, `dsh` missing, start timeout, crash/disconnect — each has a dedicated page with one-click reconnect, never a blank screen;
+- 🛟 **Error fallbacks**: port occupied, `dsh` missing, start timeout, crash/disconnect — each has a dedicated page with one-click reconnect; if the configured port is taken by another program, the extension temporarily falls back to the first free port for that session, never a blank screen;
 - 🌐 **Bilingual UI**: copy follows the VS Code display language — Chinese for `zh-*`, English otherwise;
 - 🧹 **Clean exit**: closing the window stops the auto-started service, no zombie processes; manually started services are never touched;
 - 🔒 **Security boundary**: loopback addresses only (127.0.0.1 / localhost / [::1]); no credentials are read.
@@ -116,6 +116,7 @@ The bridge only works inside the panel. If it is inactive (e.g. you open the DSH
 | `dsh.autoStart` | `true` | Auto-start the service when it is not running |
 | `dsh.stopOnExit` | `true` | Stop the extension-started service when the last window closes |
 | `dsh.extraArgs` | `[]` | Extra arguments appended when starting `dsh web` |
+| `dsh.executablePath` | `""` | Absolute path to the `dsh` executable (`dsh.cmd` on Windows); empty = look up on PATH |
 
 ## 🌍 Localization
 
@@ -127,7 +128,7 @@ Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 75 unit/integration tests (including a full real dsh web flow)
+npm run test          # 129 unit/integration tests (including a full real dsh web flow)
 npm run compile       # builds out/extension.js
 npm run watch         # watch build
 npm run typecheck     # type check
