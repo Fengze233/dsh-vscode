@@ -54,6 +54,8 @@ export interface ManagerDeps {
 const DEFAULT_START_TIMEOUT_MS = 15000;
 /** 就绪后健康探测间隔默认值（毫秒） */
 const DEFAULT_HEALTH_INTERVAL_MS = 30000;
+/** 「崩溃后换端口重启」的最大轮数（防死循环；超过后报启动崩溃） */
+const PORT_FALLBACK_MAX_ROUNDS = 3;
 
 export class ServiceManager {
   private snapshot: ServiceSnapshot = { state: 'idle', url: null, error: null, owned: false };
@@ -111,6 +113,7 @@ export class ServiceManager {
   ensureRunning(): Promise<ServiceSnapshot> {
     if (this.op) return this.op;
     if (this.snapshot.state === 'ready') return Promise.resolve(this.getSnapshot());
+    this.stopRequested = false; // 新一轮启动流程重置停止标志
     this.op = this.doStart().finally(() => {
       this.op = null;
     });
@@ -120,6 +123,7 @@ export class ServiceManager {
   /** 重启：停掉自己启动的服务后重新走启动流程 */
   restart(): Promise<ServiceSnapshot> {
     if (this.op) return this.op;
+    this.stopRequested = false; // 新一轮启动流程重置停止标志
     this.op = (async () => {
       await this.stopOwned();
       return this.doStart();
@@ -158,9 +162,13 @@ export class ServiceManager {
     this.set({ state: 'idle', url: null, owned: false, error: null });
   }
 
-  /** 完整启动流程：探测 → 复用 / 启动 → 等待就绪 */
-  private async doStart(): Promise<ServiceSnapshot> {
-    this.stopRequested = false; // 新一轮启动流程重置停止标志
+  /**
+   * 完整启动流程：探测 → 复用 / 启动 → 等待就绪。
+   *
+   * @param portFallbackRounds 已发生的「崩溃后换端口重启」轮数（递归调用时递增；
+   *                            达到上限后不再换端口，直接报启动崩溃，防止死循环）
+   */
+  private async doStart(portFallbackRounds = 0): Promise<ServiceSnapshot> {
     this.set({ state: 'detecting', error: null });
     const probe = await this.deps.probeService(this.opts.host, this.opts.port, this.opts.timeoutMs);
     if (probe === 'dsh') {
@@ -291,11 +299,14 @@ export class ServiceManager {
       if (spawnFailed) return this.getSnapshot(); // 已置为 failed（err.dshNotFound）
       if (this.stopRequested) return this.getSnapshot(); // 等待阶段被叫停（先于 childExited 判定）
       if (childExited) {
-        // 子进程没撑到就绪就退出：多数是启动崩溃，但也可能是「残留 dsh 实例占着端口，
-        // 新实例因 EADDRINUSE 崩溃」（例如上次测试遗留的进程未清理）。
-        // 后者自愈：探测一次端口，若已有 dsh 在跑则直接复用（owned=false，
-        // 复用外部服务的语义，stop 时不会误杀他人进程），
-        // 避免把环境残留误报成启动失败。
+        // 子进程没撑到就绪就退出：两类场景——
+        // 1) 残留 dsh 实例占着端口，新实例因 EADDRINUSE 崩溃；
+        // 2) 启动期间端口被其他程序抢占（如 WSL 与 Windows 共享 localhost 端口，
+        //    WSL 侧 dsh 慢启动导致探测时端口空闲、启动后却被其占用）。
+        // 自愈策略：探测一次端口——
+        //   a. 已有 dsh 在跑 → 直接复用（owned=false，不误杀他人进程）；
+        //   b. 端口被非 dsh 抢占（含 WSL 转发代理占端口但页面不可达）→ 自动换端口重启；
+        //   c. 其余 → 启动崩溃。
         this.child = null;
         const reuse = await this.deps.probeService(this.opts.host, this.opts.port, this.opts.timeoutMs);
         // 自愈探测期间被叫停：保留 stop() 已设置的状态（idle），绝不覆盖为 failed
@@ -305,6 +316,19 @@ export class ServiceManager {
           this.set({ state: 'ready', url: this.url(), owned: false });
           this.startHealthWatch();
           return this.getSnapshot();
+        }
+        // 换端口重启：端口在启动期间被抢占，自动改用第一个空闲端口（仅本次会话，
+        // 弹窗告知）；带轮数上限防死循环（每次崩溃都换新端口重启，最多 3 轮）。
+        if (this.opts.autoStart && portFallbackRounds < PORT_FALLBACK_MAX_ROUNDS) {
+          const fallback = await findFreePort(
+            this.opts.host, this.opts.port, PORT_FALLBACK_ATTEMPTS, this.deps.probeService, this.opts.timeoutMs,
+          );
+          if (fallback !== null && !this.stopRequested) {
+            this.deps.log(`[process] 子进程退出（端口 ${this.opts.port} 启动期间被抢占），本次会话临时改用端口 ${fallback} 重启`);
+            this.deps.onPortFallback?.(this.opts.port, fallback);
+            this.opts.port = fallback; // 运行时替换：本次会话内 URL/探测/重启均使用新端口
+            return this.doStart(portFallbackRounds + 1); // 递归重启（新端口重新探测 + 启动）
+          }
         }
         this.set({ state: 'failed', error: 'err.startCrashed' });
         return this.getSnapshot();

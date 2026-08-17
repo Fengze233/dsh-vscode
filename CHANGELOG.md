@@ -12,6 +12,7 @@
   - 安装器比对桥接包版本，升级插件时自动刷新旧版桥接包；
   - Windows 下改用系统 PATH 中的 `node.exe` 直跑 dsh 入口，不再使用扩展宿主的 `process.execPath`（Electron 的 Code.exe）——Electron 运行时缺少 dsh loader/HMR 依赖的系统 Node 内部特性，会报 `--expose-internals is required` 并崩溃。
 - 子进程因端口被残留 dsh 实例占用而崩溃时，自动探测并复用现有服务，不再误报启动失败。
+- 启动期间端口被其他程序抢占（如 WSL 与 Windows 共享 localhost 端口、WSL 侧 dsh 慢启动竞态）导致崩溃时，自动改用第一个空闲端口重启，不再报启动失败。
 
 ### 新增
 - **端口占用自动替换**：`dsh.port` 被其他程序占用时，自动改用第一个空闲端口（仅本次会话临时生效，不修改设置），并弹窗告知临时端口。

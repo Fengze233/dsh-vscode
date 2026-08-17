@@ -169,9 +169,10 @@ test('启动超时：failed + err.startTimeout', async () => {
   h.manager.dispose();
 });
 
-test('等待中子进程退出：failed + err.startCrashed', async () => {
+test('等待中子进程退出且换端口无望（候选全被占）：failed + err.startCrashed', async () => {
   const h = makeHarness();
-  h.probeQueue = ['down', 'down', 'down'];
+  // 初始探测 down → spawn；崩溃后自愈探测 down；findFreePort 候选探测 foreign（全被占）→ 报启动崩溃
+  h.probeQueue = ['down', 'down', 'foreign'];
   const p = h.manager.ensureRunning();
   // 第一次探测后子进程已 spawn，模拟崩溃
   await new Promise((r) => setTimeout(r, 1));
@@ -179,6 +180,29 @@ test('等待中子进程退出：failed + err.startCrashed', async () => {
   const s = await p;
   assert.equal(s.state, 'failed');
   assert.equal(s.error, 'err.startCrashed');
+  h.manager.dispose();
+});
+
+test('等待中子进程退出且端口被抢占（非 dsh）：自动换端口重启 → ready', async () => {
+  const logs: string[] = [];
+  const fallbackCalls: [number, number][] = [];
+  const h = makeHarness(undefined, {
+    log: (line) => logs.push(line),
+    onPortFallback: (a, b) => fallbackCalls.push([a, b]),
+  });
+  // 初始探测 down → spawn#1；首轮轮询 down；崩溃后自愈探测 down；findFreePort 候选 3081 down → 换端口；
+  // 递归 doStart 探测 3081 down → spawn#2；等待循环探测 dsh → ready
+  h.probeQueue = ['down', 'down', 'down', 'down', 'down', 'dsh'];
+  const p = h.manager.ensureRunning();
+  await new Promise((r) => setTimeout(r, 1));
+  h.child?.emitExit(1); // 模拟启动期间端口被抢占（如 WSL/Windows localhost 共享冲突）
+  const s = await p;
+  assert.equal(s.state, 'ready');
+  assert.equal(s.error, null);
+  assert.equal(s.url, 'http://127.0.0.1:3081/'); // 运行时替换为临时端口
+  assert.deepEqual(fallbackCalls, [[3080, 3081]]); // 弹窗通知
+  assert.equal(h.spawnCount, 2); // 换端口后重新启动一次
+  assert.ok(logs.some((l) => l.includes('启动期间被抢占') && l.includes('3081')));
   h.manager.dispose();
 });
 
