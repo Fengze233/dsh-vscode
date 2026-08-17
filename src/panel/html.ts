@@ -15,6 +15,7 @@ export type PanelMessage =
   | { type: 'showLogs' }
   | { type: 'bridgeOpenExternal'; url: string }
   | { type: 'bridgeOpenFile'; path: string; cwd?: string }
+  | { type: 'bridgeCopyText'; text: string; requestId: string }
   | { type: 'bridgeAck'; ok: boolean };
 
 /** 渲染上下文 */
@@ -65,36 +66,62 @@ document.addEventListener('click', (e) => {
  * 桥接握手脚本（内联，nonce 放行，紧随 BUTTON_SCRIPT 之后、共用其声明的 vscode）。
  * 职责：
  *  - 上行：向 iframe 下发 { kind:'bridgeHello', token } 握手消息，接收其 bridgeAck 回执，
- *    并把 iframe 上行消息（openExternal / openFile）转发给扩展侧处理。
+ *    并把 iframe 上行消息（openExternal / openFile / copyText）转发给扩展侧处理；
+ *  - 下行：把扩展侧的剪贴板回执 { type:'bridgeCopyTextAck' } 转发回 iframe，
+ *    供 DSH 页面内的 writeText Promise 收尾（VS Code 会拦截跨源 iframe 的原生剪贴板 API）。
  * 安全约束：上行仅接收「目标 origin」且「source 为 iframe 内容窗口」的消息，防止其它站点伪造。
  * @param token 握手防伪凭据（与桥接侧 isBridgeMessage 校验的一致）
  * @param allowedOrigin 允许的消息来源 origin（由 DSH 页面地址推导，如 http://127.0.0.1:3080）
  */
 function bridgeHandshakeScript(token: string, allowedOrigin: string): string {
   return `
-// dsh-bridge-handshake：DSH 页面桥接握手与消息路由（上行转发）
+// dsh-bridge-handshake：DSH 页面桥接握手与消息路由（上行转发 + 剪贴板回执下行转发）
 const iframeEl = document.getElementById('dsh-frame');
 if (iframeEl) {
   const iframeSrc = iframeEl.src;
   // 握手 token 与允许的 DSH 页面 origin
   const TOKEN = ${JSON.stringify(token)};
   const ALLOWED_ORIGIN = ${JSON.stringify(allowedOrigin)};
+  let bridgeAcked = false;
   window.addEventListener('message', (e) => {
     const d = e.data;
+    // —— 下行：扩展宿主回执（vscode.webview.postMessage 投递），转发给 iframe ——
+    if (d && d.type === 'bridgeCopyTextAck' && typeof d.requestId === 'string' && typeof d.ok === 'boolean') {
+      iframeEl.contentWindow.postMessage({ kind: 'copyTextAck', requestId: d.requestId, ok: d.ok }, iframeSrc);
+      return;
+    }
     // —— 上行：iframe 发来的消息，origin + source 双重校验 ——
     if (e.origin !== ALLOWED_ORIGIN || e.source !== iframeEl.contentWindow) return;
     // 握手回执：统一形状 { kind:'bridgeAck', ok }（不带 token 字段），只读 ok
-    if (d && d.kind === 'bridgeAck') { vscode.postMessage({ type: 'bridgeAck', ok: d.ok === true }); return; }
+    if (d && d.kind === 'bridgeAck') { bridgeAcked = true; vscode.postMessage({ type: 'bridgeAck', ok: d.ok === true }); return; }
     // 打开外链：转发给扩展 → vscode.env.openExternal
     if (d && d.kind === 'openExternal' && typeof d.url === 'string') { vscode.postMessage({ type: 'bridgeOpenExternal', url: d.url }); return; }
     // 打开文件：转发给扩展 → showTextDocument（携带可选 cwd）
     if (d && d.kind === 'openFile' && typeof d.path === 'string') {
       vscode.postMessage({ type: 'bridgeOpenFile', path: d.path, cwd: typeof d.cwd === 'string' ? d.cwd : undefined });
+      return;
+    }
+    // 复制文本：转发给扩展 → vscode.env.clipboard.writeText（跨源 iframe 原生剪贴板 API 被 VS Code 拦截）
+    if (d && d.kind === 'copyText' && typeof d.text === 'string' && typeof d.requestId === 'string') {
+      vscode.postMessage({ type: 'bridgeCopyText', text: d.text, requestId: d.requestId });
     }
   });
-  // iframe 加载完成后下发握手消息（携带 token）
+  // iframe 加载完成后下发握手消息（携带 token）。
+  // DSH 的 client 插件 factory 可能在 load 之后才 materialize，握手消息会丢失，
+  // 因此收到 bridgeAck 前每 250ms 重发一次，最多重试 3 秒。
   iframeEl.addEventListener('load', () => {
-    iframeEl.contentWindow.postMessage({ kind: 'bridgeHello', token: TOKEN }, iframeSrc);
+    let helloAttempts = 0;
+    const sendHello = () => {
+      if (!bridgeAcked && iframeEl.contentWindow) {
+        iframeEl.contentWindow.postMessage({ kind: 'bridgeHello', token: TOKEN }, iframeSrc);
+      }
+    };
+    sendHello();
+    const helloRetry = setInterval(() => {
+      helloAttempts += 1;
+      if (bridgeAcked || helloAttempts > 12) { clearInterval(helloRetry); return; }
+      sendHello();
+    }, 250);
   });
 }`;
 }
@@ -170,7 +197,10 @@ export function stoppedPage(t: T, ctx: PageCtx): string {
 
 /**
  * 就绪页：全屏 iframe 加载真实 DSH 网页（无 sandbox，避免破坏页面自身功能）。
- * 桥接启用时注入握手脚本，让顶层 webview 与 DSH 页面 iframe 建立握手并转发跳转消息。
+ * iframe 显式声明 allow="clipboard-write" 作为第一层修复；但 VS Code 对 webview 内跨源 iframe 的
+ * 原生剪贴板 API 仍存在权限拦截（microsoft/vscode#182642），因此还需桥接脚本把 DSH 页面内的
+ * writeText 转发给扩展宿主（vscode.env.clipboard）执行，才能真正写入系统剪贴板。
+ * 桥接启用时注入握手脚本，让顶层 webview 与 DSH 页面 iframe 建立握手并转发跳转/剪贴板消息。
  * @param bridge 桥接配置（可选，向后兼容既有调用）：token 为握手凭据，enabled 为是否注入握手脚本
  */
 export function readyPage(url: string, ctx: PageCtx, bridge?: { token: string; enabled: boolean }): string {
@@ -178,5 +208,11 @@ export function readyPage(url: string, ctx: PageCtx, bridge?: { token: string; e
   const extraScripts = bridge?.enabled
     ? `<script nonce="${ctx.nonce}">${bridgeHandshakeScript(bridge.token, new URL(url).origin)}</script>`
     : '';
-  return shell(ctx, 'DSH', 'frame-body', `<iframe id="dsh-frame" class="frame" src="${url}"></iframe>`, extraScripts);
+  return shell(
+    ctx,
+    'DSH',
+    'frame-body',
+    `<iframe id="dsh-frame" class="frame" allow="clipboard-write" src="${url}"></iframe>`,
+    extraScripts,
+  );
 }

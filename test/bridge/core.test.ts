@@ -6,6 +6,8 @@ import {
   buildOpenExternalMessage,
   buildOpenFileMessage,
   buildSyncWorkspaceAck,
+  buildCopyTextMessage,
+  buildCopyTextAck,
   isBridgeMessage,
   HANDSHAKE_TOKEN_KEY,
 } from '../../bridge-client/lib/core.js';
@@ -30,6 +32,12 @@ test('buildOpenFileMessage 携带可选 cwd', () => {
 test('buildSyncWorkspaceAck 构造回执', () => {
   assert.deepEqual(buildSyncWorkspaceAck(true), { kind: 'bridgeAck', ok: true });
   assert.deepEqual(buildSyncWorkspaceAck(false, '/proj'), { kind: 'bridgeAck', ok: false, path: '/proj' });
+});
+
+test('buildCopyTextMessage / buildCopyTextAck 构造剪贴板桥接消息', () => {
+  assert.deepEqual(buildCopyTextMessage('hello', 'req-1'), { kind: 'copyText', text: 'hello', requestId: 'req-1' });
+  assert.deepEqual(buildCopyTextAck('req-1', true), { kind: 'copyTextAck', requestId: 'req-1', ok: true });
+  assert.deepEqual(buildCopyTextAck('req-2', false), { kind: 'copyTextAck', requestId: 'req-2', ok: false });
 });
 
 test('isBridgeMessage 校验 token', () => {

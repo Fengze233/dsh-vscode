@@ -30,6 +30,16 @@ export function buildSyncWorkspaceAck(ok, path) {
   return path === undefined ? { kind: 'bridgeAck', ok } : { kind: 'bridgeAck', ok, path };
 }
 
+// 构造"复制文本"消息（iframe 页面 → 父页面 → 扩展 → 系统剪贴板）
+export function buildCopyTextMessage(text, requestId) {
+  return { kind: 'copyText', text, requestId };
+}
+
+// 构造"复制文本回执"消息（父页面 → iframe 页面，用于 resolve/reject writeText 的 Promise）
+export function buildCopyTextAck(requestId, ok) {
+  return { kind: 'copyTextAck', requestId, ok };
+}
+
 // 校验来自父页面的消息 token（握手防伪）：必须是对象且携带匹配的非空 token
 export function isBridgeMessage(data, token) {
   return (

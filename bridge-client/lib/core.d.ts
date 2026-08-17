@@ -13,6 +13,12 @@ export function buildOpenFileMessage(path: string, cwd: string | undefined): { k
 /** 构造"工作区同步回执"消息（bridgeAck，path 可选） */
 export function buildSyncWorkspaceAck(ok: boolean, path?: string): { kind: 'bridgeAck'; ok: boolean; path?: string };
 
+/** 构造"复制文本"消息（iframe 页面 → 父页面 → 扩展 → 系统剪贴板） */
+export function buildCopyTextMessage(text: string, requestId: string): { kind: 'copyText'; text: string; requestId: string };
+
+/** 构造"复制文本回执"消息（父页面 → iframe 页面） */
+export function buildCopyTextAck(requestId: string, ok: boolean): { kind: 'copyTextAck'; requestId: string; ok: boolean };
+
 /** 校验来自父页面的消息 token（握手防伪） */
 export function isBridgeMessage(data: unknown, token: string): boolean;
 

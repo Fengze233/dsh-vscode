@@ -32,8 +32,17 @@ test('disconnectedPage 与 stoppedPage 都包含重连按钮', () => {
 
 test('readyPage 包含目标地址 iframe 且无 sandbox 属性', () => {
   const html = readyPage('http://127.0.0.1:3080/', ctx());
-  assert.ok(html.includes('<iframe id="dsh-frame" class="frame" src="http://127.0.0.1:3080/"></iframe>'));
+  assert.ok(html.includes('id="dsh-frame"'));
+  assert.ok(html.includes('class="frame"'));
+  assert.ok(html.includes('src="http://127.0.0.1:3080/"'));
   assert.ok(!html.includes('sandbox'));
+});
+
+test('readyPage 为跨源 iframe 声明 clipboard-write 权限', () => {
+  // VS Code webview 与 DSH 页面跨源：不声明 allow="clipboard-write" 时，
+  // DSH 代码块复制按钮的 navigator.clipboard.writeText 会被 Permissions Policy 拦截。
+  const html = readyPage('http://127.0.0.1:3080/', ctx());
+  assert.ok(html.includes('allow="clipboard-write"'));
 });
 
 test('readyPage 启用桥接时注入握手脚本', () => {
@@ -50,6 +59,16 @@ test('readyPage 握手脚本包含上行 bridgeHello 发送', () => {
   assert.ok(html.includes('token: TOKEN'), '握手消息应携带 token');
   // 不应再包含下行 syncWorkspace 转发逻辑（工作区同步已移除）
   assert.ok(!html.includes('syncWorkspace'), '脚本不应包含 syncWorkspace 下行转发');
+});
+
+test('readyPage 握手脚本包含剪贴板桥接的上下行转发', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
+  // 上行：iframe 的 copyText → vscode.postMessage(bridgeCopyText)
+  assert.ok(html.includes("kind === 'copyText'"), '应转发 iframe 的 copyText 上行消息');
+  assert.ok(html.includes("type: 'bridgeCopyText'"), '应向扩展宿主发送 bridgeCopyText');
+  // 下行：扩展宿主 bridgeCopyTextAck → iframe 的 copyTextAck
+  assert.ok(html.includes("type === 'bridgeCopyTextAck'"), '应接收扩展宿主的剪贴板回执');
+  assert.ok(html.includes("kind: 'copyTextAck'"), '应把回执转发为 iframe 的 copyTextAck');
 });
 
 test('readyPage 未启用桥接时不注入握手脚本', () => {

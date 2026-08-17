@@ -203,6 +203,7 @@ export function activate(context: vscode.ExtensionContext): void {
       handshakeTimer = undefined;
       // 3 秒内无任何 bridgeAck → 判定握手失败（degraded）
       if (handshakeOk === undefined) {
+        appendLog('[bridge] handshake timeout');
         handshakeOk = false;
         evaluateAndWarn(); // 握手刚失败，立即评估（不必再等固定延迟）
       }
@@ -211,6 +212,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   /** 面板握手回执回调（两个面板共享）：记录结果并取消超时（握手已发生，无论成败） */
   function onBridgeAck(ok: boolean): void {
+    appendLog(`[bridge] handshake ${ok ? 'ok' : 'failed'}`);
     handshakeOk = ok;
     clearHandshakeTimer();
   }

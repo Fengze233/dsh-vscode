@@ -1,3 +1,11 @@
+## [0.2.3] - 2026-08-17
+
+### 修复
+
+- **DSH 侧栏内代码块「复制」无反应**：双层修复剪贴板在 VS Code 内嵌跨源 iframe 中失效的问题：
+  - 给内嵌 DSH 页面的 iframe 显式声明 `allow="clipboard-write"`；
+  - 桥接包接管 DSH 页面的 `navigator.clipboard.writeText`：复制文本经面板转发给扩展宿主，由 `vscode.env.clipboard` 写入系统剪贴板，绕开 VS Code 对 webview 跨源 iframe 剪贴板 API 的权限拦截；桥接禁用/未安装时保持 DSH 原生行为不变。
+
 # 更新日志
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。

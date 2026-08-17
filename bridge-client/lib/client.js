@@ -19,6 +19,52 @@ window.__ModuleLoader__.load({
     // —— 握手状态 ——
     let bridgeToken = ""; // 父页面下发的握手 token；未握手前为空，不激活任何拦截
 
+    // —— 剪贴板桥接：VS Code webview 对跨源 iframe 的 navigator.clipboard.writeText 有权限拦截 ——
+    // 背景：即使 iframe 声明 allow="clipboard-write"，VS Code（Electron）仍会拒绝写入
+    // （microsoft/vscode#182642），DSH 的 execCommand('copy') 回退在内嵌场景也不可靠。
+    // 因此握手成功后接管 writeText：文本经父页面转发给扩展宿主，由 vscode.env.clipboard 写系统剪贴板。
+    let copyRequestSeq = 0;
+    const copyPending = new Map();
+
+    function copyViaBridge(text) {
+      return new Promise((resolve, reject) => {
+        const requestId = "copy-" + (++copyRequestSeq) + "-" + Date.now();
+        const timer = setTimeout(() => {
+          copyPending.delete(requestId);
+          reject(new Error("dsh-vscode-bridge copyText timeout"));
+        }, 5000);
+        copyPending.set(requestId, {
+          resolve: (ok) => {
+            clearTimeout(timer);
+            if (ok) resolve(); else reject(new Error("dsh-vscode-bridge copyText failed"));
+          },
+        });
+        parent.postMessage(buildCopyTextMessage(text, requestId), "*");
+      });
+    }
+
+    function installClipboardBridge() {
+      const clipboard = navigator.clipboard;
+      if (!clipboard || typeof clipboard.writeText !== "function") return;
+      const originalWriteText = clipboard.writeText.bind(clipboard);
+      const bridgedWriteText = function (text) {
+        // 未握手（普通浏览器 / 桥接禁用）走原生 API；已握手走扩展宿主，绕开 VS Code 权限拦截。
+        if (bridgeToken === "") return originalWriteText(text);
+        return copyViaBridge(String(text));
+      };
+      // 先 defineProperty（可覆盖 configurable 的实例自有属性），失败再退化为直接赋值。
+      try {
+        Object.defineProperty(clipboard, "writeText", { configurable: true, writable: true, value: bridgedWriteText });
+      } catch {
+        try {
+          clipboard.writeText = bridgedWriteText;
+        } catch {
+          // 剪贴板对象完全不可改写时放弃接管：DSH 仍会走原生 API 与其 execCommand 回退。
+        }
+      }
+    }
+    installClipboardBridge();
+
     // —— DOM 拦截：外链与 fileMention 点击 → postMessage 转发给父页面（扩展） ——
     function bindLinkInterception() {
       document.addEventListener("click", (e) => {
@@ -46,7 +92,7 @@ window.__ModuleLoader__.load({
       }, true); // 捕获阶段：先于 DSH 自身处理器
     }
 
-    // —— 接收父页面消息：仅处理握手 ——
+    // —— 接收父页面消息：握手 + 剪贴板回执 ——
     function onParentMessage(e) {
       const d = e.data;
       if (!d || typeof d !== "object") return;
@@ -57,6 +103,15 @@ window.__ModuleLoader__.load({
         // （{ kind: 'bridgeAck', ok }，不带 token 字段）；顶层 webview 靠 origin + source
         // 校验消息来源，按 { kind: 'bridgeAck', ok } 解析，避免同 kind 两种形状。
         parent.postMessage(buildSyncWorkspaceAck(true), "*");
+        return;
+      }
+      // 剪贴板回执：resolve / reject 对应的 writeText Promise
+      if (d.kind === "copyTextAck" && typeof d.requestId === "string" && typeof d.ok === "boolean") {
+        const pending = copyPending.get(d.requestId);
+        if (pending) {
+          copyPending.delete(d.requestId);
+          pending.resolve(d.ok);
+        }
         return;
       }
     }

@@ -29,6 +29,8 @@ test('buildBridgeClient 内联产物语法合法且不含 export/占位符残留
     // ② 包含核心逻辑与包名标识
     assert.ok(code.includes('isBridgeMessage'), '产物应包含 isBridgeMessage');
     assert.ok(code.includes('isAllowedExternalUrl'), '产物应包含 isAllowedExternalUrl');
+    assert.ok(code.includes('buildCopyTextMessage'), '产物应包含剪贴板桥接消息构造');
+    assert.ok(code.includes('copyViaBridge'), '产物应包含 writeText 接管逻辑');
     assert.ok(code.includes('dsh-vscode-bridge'), '产物应包含包名 dsh-vscode-bridge');
     // ③ 不含占位符（替换应已完成）
     assert.ok(!code.includes('/*__CORE_INLINE__*/'), '产物不应残留占位符');

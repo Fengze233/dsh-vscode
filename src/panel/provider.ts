@@ -81,6 +81,11 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       case 'showLogs':
         void vscode.commands.executeCommand('dsh.showLogs');
         break;
+      case 'bridgeCopyText':
+        // 桥接剪贴板消息：VS Code 会拦截跨源 iframe 的原生 clipboard API，
+        // 这里由扩展宿主写系统剪贴板，并回执给 iframe 收尾其 writeText Promise。
+        void this.copyTextToClipboard(msg);
+        break;
       case 'bridgeOpenExternal':
       case 'bridgeOpenFile':
         // 桥接跳转消息统一走 host 的 handleBridgeMessage（内部分流外链/文件，做白名单与路径解析）
@@ -99,6 +104,23 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
         // 握手回执：通知注入的回调（Task 7 据此评估桥接状态）
         this.onBridgeAck?.(msg.ok);
         break;
+    }
+  }
+
+  /** 剪贴板桥接：扩展宿主写系统剪贴板，完成后回执给 webview（由顶层脚本转发给 iframe） */
+  private async copyTextToClipboard(msg: Extract<PanelMessage, { type: 'bridgeCopyText' }>): Promise<void> {
+    let ok = false;
+    try {
+      await vscode.env.clipboard.writeText(msg.text);
+      ok = true;
+    } catch {
+      // 写剪贴板失败：回执 ok=false，iframe 侧会 reject writeText，
+      // DSH 会继续走自己的 execCommand('copy') 回退路径。
+    }
+    try {
+      await this.view?.webview.postMessage({ type: 'bridgeCopyTextAck', requestId: msg.requestId, ok });
+    } catch {
+      // 面板可能已隐藏/销毁，回执发不出去也不影响扩展其它功能。
     }
   }
 

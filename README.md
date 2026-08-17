@@ -87,10 +87,11 @@ npm run package        # produces dsh-vscode.vsix, then install as in Option 2
 
 ## 🔗 Bridge integration
 
-After installation, the extension installs its own bridge package `dsh-vscode-bridge` into DSH's official client-plugin extension point under your DSH user directory, enabling two integrations:
+After installation, the extension installs its own bridge package `dsh-vscode-bridge` into DSH's official client-plugin extension point under your DSH user directory, enabling three integrations:
 
 - 🔗 **External links**: clicking a link in the panel opens it in your system browser (instead of being trapped inside the iframe);
-- 📂 **File jumps**: clicking a file path in the panel opens the file in VS Code.
+- 📂 **File jumps**: clicking a file path in the panel opens the file in VS Code;
+- 📋 **Clipboard copy**: copy buttons inside DSH (such as code-block copy) are routed through the extension host, working around VS Code's clipboard permission block for cross-origin iframes inside webviews.
 
 ### Install / uninstall mechanism (transparency disclosure)
 
@@ -105,13 +106,13 @@ To remove: run `DSH: Uninstall Bridge` — the extension deletes the marked entr
 
 | Setting | Default | Description |
 |---|---|---|
-| `dsh.bridge.enabled` | `true` | Enable the bridge (when off: no install, no injection, no warning; the two integrations are unavailable) |
+| `dsh.bridge.enabled` | `true` | Enable the bridge (when off: no install, no injection, no warning; the three integrations are unavailable) |
 | `dsh.workspaceRootIndex` | `0` | For multi-root workspaces: which root to use as the `dsh web` process working directory (out-of-range falls back to the first) |
 | `dsh.bridge.silenceWarning` | `false` | Suppress the bridge degradation warning |
 
 ### Degradation behavior
 
-The bridge only works inside the panel. If it is inactive (e.g. you open the DSH page in a browser, or the install failed), the panel remains **fully usable** — only the two integrations above are unavailable; a one-time startup warning (with "Retry Install" / "Don't Show Again") is shown.
+The bridge only works inside the panel. If it is inactive (e.g. you open the DSH page in a browser, or the install failed), the panel remains **fully usable** — only the three integrations above are unavailable; a one-time startup warning (with "Retry Install" / "Don't Show Again") is shown.
 
 ## ⚙️ Settings (`dsh.*`)
 
@@ -134,7 +135,7 @@ Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 129 unit/integration tests (including a full real dsh web flow)
+npm run test          # 132 unit/integration tests (including a full real dsh web flow)
 npm run compile       # builds out/extension.js
 npm run watch         # watch build
 npm run typecheck     # type check
