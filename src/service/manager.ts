@@ -261,8 +261,21 @@ export class ServiceManager {
       if (spawnFailed) return this.getSnapshot(); // 已置为 failed（err.dshNotFound）
       if (this.stopRequested) return this.getSnapshot(); // 等待阶段被叫停（先于 childExited 判定）
       if (childExited) {
-        // 子进程没撑到就绪就退出：判定为启动崩溃
+        // 子进程没撑到就绪就退出：多数是启动崩溃，但也可能是「残留 dsh 实例占着端口，
+        // 新实例因 EADDRINUSE 崩溃」（例如上次测试遗留的进程未清理）。
+        // 后者自愈：探测一次端口，若已有 dsh 在跑则直接复用（owned=false，
+        // 复用外部服务的语义，stop 时不会误杀他人进程），
+        // 避免把环境残留误报成启动失败。
         this.child = null;
+        const reuse = await this.deps.probeService(this.opts.host, this.opts.port, this.opts.timeoutMs);
+        // 自愈探测期间被叫停：保留 stop() 已设置的状态（idle），绝不覆盖为 failed
+        if (this.stopRequested) return this.getSnapshot();
+        if (reuse === 'dsh') {
+          this.deps.log('[process] 子进程退出，但端口已有 dsh 服务在运行（残留实例占端口自愈），改为复用');
+          this.set({ state: 'ready', url: this.url(), owned: false });
+          this.startHealthWatch();
+          return this.getSnapshot();
+        }
         this.set({ state: 'failed', error: 'err.startCrashed' });
         return this.getSnapshot();
       }

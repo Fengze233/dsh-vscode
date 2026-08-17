@@ -137,6 +137,20 @@ test('等待中子进程退出：failed + err.startCrashed', async () => {
   h.manager.dispose();
 });
 
+test('等待中子进程退出但端口已有 dsh（残留实例自愈）：复用 → ready(owned=false)', async () => {
+  const h = makeHarness();
+  // 第一次探测 down → spawn；等待循环首轮轮询 down；子进程崩溃后的自愈探测命中 dsh
+  h.probeQueue = ['down', 'down', 'dsh'];
+  const p = h.manager.ensureRunning();
+  await new Promise((r) => setTimeout(r, 1));
+  h.child?.emitExit(1); // 模拟新实例因 EADDRINUSE 崩溃退出
+  const s = await p;
+  assert.equal(s.state, 'ready');
+  assert.equal(s.owned, false); // 复用外部（残留）服务，插件不拥有它
+  assert.equal(s.error, null);
+  h.manager.dispose();
+});
+
 test('ready 后子进程意外退出：回到 idle（面板据此显示已断开）', async () => {
   const h = makeHarness();
   h.probeQueue = ['down', 'dsh'];

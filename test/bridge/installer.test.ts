@@ -19,7 +19,9 @@ import {
 // 内存 fs：files 是路径→内容，dirs 是目录集合。
 // copyDir 落一个含 `"name"` 的 package.json，满足幂等分支「读 package.json 验证」的要求，
 // 同时让 exists(dest) 为真；真实递归复制由生产侧的 createNodeFs（fs.cpSync recursive）负责，此处不模拟。
-function makeMemFs(init: Record<string, string> = {}): InstallerFs {
+// copyPkgVersion 指定时，复制产物带该版本号（模拟真实复制「随附版本的包」），
+// 供「版本不一致强制重装」用例断言刷新结果。
+function makeMemFs(init: Record<string, string> = {}, copyPkgVersion?: string): InstallerFs {
   const files = new Map(Object.entries(init));
   const dirs = new Set<string>();
   return {
@@ -27,7 +29,12 @@ function makeMemFs(init: Record<string, string> = {}): InstallerFs {
     readFile: (p) => { const v = files.get(p); if (v === undefined) throw new Error(`no such file: ${p}`); return v; },
     writeFile: (p, c) => { files.set(p, c); },
     mkdir: (p) => { dirs.add(p); },
-    copyDir: (src, dest) => { dirs.add(dest); files.set(`${dest}/package.json`, `{"name":"dsh-vscode-bridge","copied":"${src}"}`); },
+    copyDir: (src, dest) => {
+      dirs.add(dest);
+      files.set(`${dest}/package.json`, copyPkgVersion
+        ? `{"name":"dsh-vscode-bridge","version":"${copyPkgVersion}"}`
+        : `{"name":"dsh-vscode-bridge","copied":"${src}"}`);
+    },
     rmDir: (p) => { dirs.delete(p); for (const k of [...files.keys()]) { if (k.startsWith(`${p}/`)) files.delete(k); } },
     readdir: () => [],
   };
@@ -55,6 +62,50 @@ test('installBridge 幂等：第二次安装不重复追加条目', () => {
   assert.ok(after1.includes(BRIDGE_BEGIN_MARK));
   assert.ok(after1.includes('- id: dsh-vscode-bridge'));
   assert.ok(after1.includes('# 用户自己的内容')); // 不覆盖用户内容
+});
+
+test('已装包版本与随附版本不一致：强制重装刷新为新版本', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const source = '/ext/bridge-client';
+  // 源包带版本 0.2.2，复制产物同样带 0.2.2（模拟真实递归复制随附包）
+  const fs = makeMemFs({
+    [patchPath]: '[]\n',
+    [`${source}/package.json`]: JSON.stringify({ name: 'dsh-vscode-bridge', version: '0.2.2' }),
+  }, '0.2.2');
+  fs.mkdir(profile);
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: source, fs };
+  installBridge(opts); // 首次安装：版本 0.2.2
+  // 模拟升级前的旧版本残留（例如 0.2.1 安装的包，version 不一致）
+  for (const t of bridgeTargetDirs(profile)) {
+    fs.writeFile(`${t}/package.json`, JSON.stringify({ name: 'dsh-vscode-bridge', version: '0.2.1' }));
+  }
+  const r = installBridge(opts); // 幂等分支：版本不一致 → 判定不可用 → 强制重装
+  assert.equal(r.status, 'ok');
+  for (const t of bridgeTargetDirs(profile)) {
+    const pkg = JSON.parse(fs.readFile(`${t}/package.json`));
+    assert.equal(pkg.version, '0.2.2'); // 已刷新为随附版本
+  }
+});
+
+test('随附版本未知（源包不可读）：不比版本，可用即跳过（防误重装）', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  // source 目录无 package.json → 版本读取失败 → 退回「只看 name」的旧行为
+  const fs = makeMemFs({ [patchPath]: '[]\n' });
+  fs.mkdir(profile);
+  let copies = 0;
+  const countingFs: InstallerFs = {
+    ...fs,
+    copyDir: (src, dest) => { copies += 1; fs.copyDir(src, dest); },
+  };
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs: countingFs };
+  installBridge(opts);
+  const afterFirst = copies; // 首次安装的复制次数（双位置 = 2）
+  assert.ok(afterFirst > 0);
+  const r = installBridge(opts);
+  assert.equal(r.status, 'ok');
+  assert.equal(copies, afterFirst); // 无重装：复制次数不变
 });
 
 test('uninstallBridge 还原用户内容并删除桥接目录', () => {

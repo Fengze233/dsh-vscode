@@ -2,7 +2,7 @@
   "name": "dsh-vscode-panel",
   "displayName": "DSH",
   "description": "在 VS Code 侧边栏中使用 DeepSeek Harness（DSH）网页界面",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "Fengze233",
   "icon": "assets/icon.png",
   "license": "MIT",
