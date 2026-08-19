@@ -11,6 +11,7 @@ test('合法配置原样通过', () => {
   assert.deepEqual(config, {
     host: 'localhost', port: 4000, autoStart: false, stopOnExit: false, extraArgs: ['--trusted-host', 'x:1'],
     bridgeEnabled: true, workspaceRootIndex: 0, silenceWarning: false, executablePath: '',
+    openInBrowser: false, remoteEnabled: false, imageFallback: true,
   });
 });
 
@@ -92,4 +93,33 @@ test('executablePath：非字符串静默回退空串', () => {
 test('executablePath：合法值原样通过（含空串）', () => {
   assert.equal(normalizeConfig({ executablePath: 'C:\\tools\\dsh.cmd' }).config.executablePath, 'C:\\tools\\dsh.cmd');
   assert.equal(normalizeConfig({ executablePath: '' }).config.executablePath, '');
+});
+
+// —— v0.3.0 新设置：openInBrowser / remoteEnabled / imageFallback ——
+test('v0.3.0 新设置缺省值：openInBrowser=false / remoteEnabled=false / imageFallback=true', () => {
+  const r = normalizeConfig({});
+  assert.equal(r.config.openInBrowser, false);
+  assert.equal(r.config.remoteEnabled, false);
+  assert.equal(r.config.imageFallback, true);
+  assert.deepEqual(r.config, DEFAULTS);
+});
+
+test('v0.3.0 新设置合法值原样通过', () => {
+  const r1 = normalizeConfig({ openInBrowser: true, remoteEnabled: true, imageFallback: false });
+  assert.equal(r1.config.openInBrowser, true);
+  assert.equal(r1.config.remoteEnabled, true);
+  assert.equal(r1.config.imageFallback, false);
+  assert.equal(r1.errors.length, 0);
+});
+
+test('v0.3.0 新设置非布尔值回退默认（不记错误）', () => {
+  const r2 = normalizeConfig({ openInBrowser: 'yes' as unknown as boolean });
+  assert.equal(r2.config.openInBrowser, false);
+  const r3 = normalizeConfig({ remoteEnabled: 1 as unknown as boolean });
+  assert.equal(r3.config.remoteEnabled, false);
+  const r4 = normalizeConfig({ imageFallback: 0 as unknown as boolean });
+  assert.equal(r4.config.imageFallback, true);
+  assert.equal(r2.errors.length, 0);
+  assert.equal(r3.errors.length, 0);
+  assert.equal(r4.errors.length, 0);
 });

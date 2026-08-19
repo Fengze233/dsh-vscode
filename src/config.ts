@@ -18,6 +18,12 @@ export interface RawDshConfig {
   silenceWarning?: boolean;
   /** dsh 可执行文件绝对路径（空串 = 用 PATH 里的 dsh） */
   executablePath?: string;
+  /** 是否在启动 dsh web 时允许打开浏览器（默认 false，即默认追加 --no-open） */
+  openInBrowser?: boolean;
+  /** 是否启用 SSH Remote 等远程场景（在远端运行 dsh 并建立隧道；默认关闭） */
+  remoteEnabled?: boolean;
+  /** 模型无视觉能力时是否自动把图片降级为文本+路径转发（默认开启） */
+  imageFallback?: boolean;
 }
 
 /** 规范化后的配置（均有合法默认值） */
@@ -35,6 +41,12 @@ export interface DshConfig {
   silenceWarning: boolean;
   /** dsh 可执行文件绝对路径（空串 = 用 PATH 里的 dsh） */
   executablePath: string;
+  /** 是否允许 dsh web 启动时打开浏览器（true=不追加 --no-open） */
+  openInBrowser: boolean;
+  /** 是否启用远程（SSH Remote/WSL/Dev Container/Codespaces）隧道支持 */
+  remoteEnabled: boolean;
+  /** 非视觉模型下发图自动降级为文本+路径转发 */
+  imageFallback: boolean;
 }
 
 /** 默认配置 */
@@ -48,6 +60,9 @@ export const DEFAULTS: DshConfig = {
   workspaceRootIndex: 0,
   silenceWarning: false,
   executablePath: '',
+  openInBrowser: false,
+  remoteEnabled: false,
+  imageFallback: true,
 };
 
 /** 安全边界：仅允许回环地址 */
@@ -114,10 +129,15 @@ export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors:
   // executablePath：非字符串静默回退默认 ''；空字符串合法（表示用 PATH 里的 dsh）
   const executablePath = typeof raw.executablePath === 'string' ? raw.executablePath : DEFAULTS.executablePath;
 
+  // v0.3.0 新布尔设置：沿用 bridgeEnabled 的缺省处理——仅接受布尔，否则回退默认（不记错误）
+  const openInBrowser = typeof raw.openInBrowser === 'boolean' ? raw.openInBrowser : DEFAULTS.openInBrowser;
+  const remoteEnabled = typeof raw.remoteEnabled === 'boolean' ? raw.remoteEnabled : DEFAULTS.remoteEnabled;
+  const imageFallback = typeof raw.imageFallback === 'boolean' ? raw.imageFallback : DEFAULTS.imageFallback;
+
   return {
     config: {
       host, port, autoStart, stopOnExit, extraArgs, bridgeEnabled, workspaceRootIndex,
-      silenceWarning, executablePath,
+      silenceWarning, executablePath, openInBrowser, remoteEnabled, imageFallback,
     },
     errors,
   };
@@ -136,5 +156,8 @@ export function readConfig(): { config: DshConfig; errors: string[] } {
     workspaceRootIndex: ws.get<number>('workspaceRootIndex'),
     silenceWarning: ws.get<boolean>('bridge.silenceWarning'),
     executablePath: ws.get<string>('executablePath'),
+    openInBrowser: ws.get<boolean>('openInBrowser'),
+    remoteEnabled: ws.get<boolean>('remote.enabled'),
+    imageFallback: ws.get<boolean>('image.fallback'),
   });
 }
