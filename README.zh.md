@@ -150,7 +150,7 @@ npm run package        # 产出 dsh-vscode.vsix，再按方式二安装
 
 ```bash
 npm install
-npm run test          # 132 个单元/集成测试（含真实 dsh web 全流程）
+npm run test          # 161 个单元/集成测试（含真实 dsh web 全流程）
 npm run compile       # 构建 out/extension.js
 npm run watch         # 监听构建
 npm run typecheck     # 类型检查

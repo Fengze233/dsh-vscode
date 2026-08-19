@@ -150,7 +150,7 @@ Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 132 unit/integration tests (including a full real dsh web flow)
+npm run test          # 161 unit/integration tests (including a full real dsh web flow)
 npm run compile       # builds out/extension.js
 npm run watch         # watch build
 npm run typecheck     # type check
