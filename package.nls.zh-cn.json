@@ -4,6 +4,7 @@
   "dsh.view.panelSecondary.name": "DSH 面板（右）",
   "dsh.cmd.openPanel.title": "DSH: 打开面板",
   "dsh.cmd.openSecondary.title": "DSH: 在辅助侧边栏打开",
+  "dsh.cmd.openFromTitle.title": "DSH：打开右侧面板",
   "dsh.cmd.openExternal.title": "在浏览器中打开",
   "dsh.cmd.restart.title": "重启服务",
   "dsh.cmd.stop.title": "停止服务",

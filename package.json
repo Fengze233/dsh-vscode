@@ -132,9 +132,21 @@
       {
         "command": "dsh.bridge.uninstall",
         "title": "%dsh.cmd.bridgeUninstall.title%"
+      },
+      {
+        "command": "dsh.openFromTitle",
+        "title": "%dsh.cmd.openFromTitle.title%",
+        "icon": "$(layout-sidebar-right)"
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "dsh.openFromTitle",
+          "group": "navigation@0",
+          "when": "editorIsOpen"
+        }
+      ],
       "view/title": [
         {
           "command": "dsh.openExternal",

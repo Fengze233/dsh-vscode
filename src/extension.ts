@@ -362,6 +362,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('dsh.openPanel', () => openPanel()),
     vscode.commands.registerCommand('dsh.openSecondary', () => openSecondary(context)),
+    vscode.commands.registerCommand('dsh.openFromTitle', () => openSecondary(context)),
     vscode.commands.registerCommand('dsh.openExternal', () => openExternal()),
     vscode.commands.registerCommand('dsh.restart', () => void manager?.restart()),
     vscode.commands.registerCommand('dsh.stop', () => void manager?.stop()),

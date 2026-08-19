@@ -4,6 +4,7 @@
   "dsh.view.panelSecondary.name": "DSH Panel (Right)",
   "dsh.cmd.openPanel.title": "DSH: Open Panel",
   "dsh.cmd.openSecondary.title": "DSH: Open in Secondary Side Bar",
+  "dsh.cmd.openFromTitle.title": "DSH: Open Right Panel",
   "dsh.cmd.openExternal.title": "Open in Browser",
   "dsh.cmd.restart.title": "Restart Service",
   "dsh.cmd.stop.title": "Stop Service",
