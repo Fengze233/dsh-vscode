@@ -3,8 +3,90 @@
 // VS Code 动作（打开外部浏览器 / 打开文本文档），并做协议白名单与路径解析的纵深防御。
 // 依赖注入设计：生产侧接 vscode API（openExternal / showTextDocument），测试侧注入假实现，
 // 保证纯逻辑可被 node:test 直接验证。
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, resolve, join, basename } from 'node:path';
 import type { PanelMessage } from '../panel/html';
+
+/** 图片缓存文件名白名单正则：前缀（与 core.js 的 imageCacheFilename 一致）+ 时间戳/序号 + 白名单扩展名 */
+const IMAGE_CACHE_NAME_RE = /^dsh-imgcache-[A-Za-z0-9._:-]+-\d+\.(png|jpe?g|gif|webp)$/i;
+
+/**
+ * 已落盘图片注册表：仅允许删除「本扩展写过的」缓存文件。
+ * 这是纵深防御——即使页面被攻破/伪造 deleteImages 消息的任意路径，也无法删除工作区外的文件。
+ * 默认使用模块级共享注册表（主/次面板共享）；测试可注入独立注册表。
+ */
+export interface ImageRegistry {
+  has(p: string): boolean;
+  add(p: string): void;
+  delete(p: string): void;
+}
+export function createImageRegistry(): ImageRegistry {
+  const set = new Set<string>();
+  return { has: (p) => set.has(p), add: (p) => set.add(p), delete: (p) => set.delete(p) };
+}
+const sharedImageRegistry = createImageRegistry();
+
+/** 图片文件写入依赖（生产接 node:fs/promises 的 writeFile/unlink） */
+export interface ImageFileDeps {
+  writeFile(path: string, dataB64: string): Thenable<void>;
+  rmFile(path: string): Thenable<void>;
+}
+
+/**
+ * 安全落盘图片缓存：仅接受绝对 cwd + 白名单文件名（无路径穿越），写入 join(cwd, name)。
+ * 成功返回 { ok: true, path } 并登记到注册表；失败返回原因（不抛异常，由调用方回 ack）。
+ */
+export async function saveImageToCwd(
+  deps: ImageFileDeps,
+  req: { cwd?: string; name: string; dataB64: string },
+  registry: ImageRegistry = sharedImageRegistry,
+): Promise<{ ok: boolean; path?: string; error?: string }> {
+  if (typeof req.cwd !== 'string' || req.cwd === '' || !isAbsolute(req.cwd)) {
+    return { ok: false, error: 'invalid cwd' };
+  }
+  // 文件名必须是普通名称（无路径分隔符/穿越）、符合白名单
+  if (typeof req.name !== 'string' || basename(req.name) !== req.name || !IMAGE_CACHE_NAME_RE.test(req.name)) {
+    return { ok: false, error: 'invalid filename' };
+  }
+  const target = join(req.cwd, req.name);
+  // 防御：产物必须是 cwd 内的精确拼接（join 结果）
+  if (target !== resolve(req.cwd, req.name)) {
+    return { ok: false, error: 'path mismatch' };
+  }
+  if (typeof req.dataB64 !== 'string' || req.dataB64 === '') {
+    return { ok: false, error: 'empty data' };
+  }
+  try {
+    await deps.writeFile(target, req.dataB64);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  registry.add(target);
+  return { ok: true, path: target };
+}
+
+/**
+ * 删除图片缓存：只删除注册表中「本扩展曾写过的」路径，其余一律忽略。
+ * 单个文件删除失败不中断其余；返回 { ok: true }（尽力而为，不因个别失败而整体报错）。
+ */
+export async function deleteImageFiles(
+  deps: ImageFileDeps,
+  req: { paths: string[] },
+  registry: ImageRegistry = sharedImageRegistry,
+): Promise<{ ok: boolean; error?: string }> {
+  const list = Array.isArray(req.paths) ? req.paths : [];
+  for (const p of list) {
+    if (typeof p !== 'string' || !registry.has(p)) continue;
+    try {
+      await deps.rmFile(p);
+    } catch {
+      // 删除失败（文件已被移走/权限）尽力而为，不中断其余
+    } finally {
+      registry.delete(p);
+    }
+  }
+  return { ok: true };
+}
+
 
 /** 桥接消息处理依赖（生产接 vscode API，测试注入假实现） */
 export interface BridgeMessageDeps {
@@ -16,6 +98,12 @@ export interface BridgeMessageDeps {
   showWarning(msg: string): void;
   /** 工作区根目录（相对路径解析的兜底基准，生产由扩展入口注入） */
   workspaceRoot?: string;
+  /** 写入图片缓存文件（生产接 node:fs/promises，产物 base64）——v0.3.0 图片降级用 */
+  writeFile?: (path: string, dataB64: string) => Thenable<void>;
+  /** 删除图片缓存文件（生产接 node:fs/promises）——v0.3.0 会话结束清理用 */
+  rmFile?: (path: string) => Thenable<void>;
+  /** 回执消息投递（生产接 webview.postMessage）——v0.3.0 saveImage/deleteImages 回执 */
+  reply?: (msg: PanelMessage) => Thenable<void>;
 }
 
 /**
@@ -78,6 +166,29 @@ export async function handleBridgeMessage(msg: PanelMessage, deps: BridgeMessage
       // 路径无法解析（危险协议或缺少基准目录）：仅弹提示，不打断面板与桥接流程
       deps.showWarning(`无法解析路径：${msg.path}`);
     }
+    return;
+  }
+  if (msg.type === 'bridgeSaveImage') {
+    // 图片缓存落盘：白名单校验 + 路径安全由 saveImageToCwd 保证；回执 success/路径给 iframe
+    const r = await saveImageToCwd(
+      { writeFile: deps.writeFile ?? (async () => {}), rmFile: deps.rmFile ?? (async () => {}) },
+      { cwd: msg.sessionCwd, name: msg.name, dataB64: msg.dataB64 },
+    );
+    await deps.reply?.({
+      type: 'bridgeSaveImageAck',
+      requestId: msg.requestId,
+      ok: r.ok,
+      ...(r.path === undefined ? {} : { path: r.path }),
+    });
+    return;
+  }
+  if (msg.type === 'bridgeDeleteImages') {
+    // 会话结束清理：只删除注册表中的本扩展缓存文件
+    const r = await deleteImageFiles(
+      { writeFile: deps.writeFile ?? (async () => {}), rmFile: deps.rmFile ?? (async () => {}) },
+      { paths: msg.paths },
+    );
+    await deps.reply?.({ type: 'bridgeDeleteImagesAck', requestId: msg.requestId, ok: r.ok });
     return;
   }
 }

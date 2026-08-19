@@ -4,7 +4,7 @@
 // 生产侧接 vscode API，这里注入假实现验证纯逻辑（showWarning 一并注入以断言提示文案）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveBridgePath, handleBridgeMessage } from '../../src/bridge/host';
+import { resolveBridgePath, handleBridgeMessage, saveImageToCwd, deleteImageFiles, createImageRegistry } from '../../src/bridge/host';
 
 test('resolveBridgePath 处理绝对/相对/危险协议', () => {
   // 绝对路径直接采用（忽略 cwd 与工作区根）
@@ -92,3 +92,71 @@ test('handleBridgeMessage openFile 路径无法解析时提示用户', async () 
   assert.equal(warnings.length, 1);
   assert.ok(warnings[0].includes('https://x.com/a'), `提示应含原始路径，实际：${warnings[0]}`);
 });
+// —— v0.3.0 图片缓存落盘/删除（路径安全） ——
+test('saveImageToCwd：合法写入并登记，返回绝对路径', async () => {
+  const written: string[] = [];
+  const reg = createImageRegistry();
+  const ok = await saveImageToCwd(
+    { writeFile: async (p: string, _b: string) => { written.push(p); }, rmFile: async () => {} },
+    { cwd: '/ws', name: 'dsh-imgcache-a-0.png', dataB64: 'AAAA' },
+    reg,
+  );
+  assert.equal(ok.ok, true);
+  assert.equal(ok.path, '/ws/dsh-imgcache-a-0.png');
+  assert.equal(written.length, 1);
+  assert.ok(reg.has('/ws/dsh-imgcache-a-0.png'), '落盘后登记进注册表');
+});
+
+test('saveImageToCwd：无 cwd/相对 cwd/穿越文件名/非法扩展名/空数据一律拒绝且不写入', async () => {
+  const written: string[] = [];
+  const deps = { writeFile: async (p: string) => { written.push(p); }, rmFile: async () => {} };
+  assert.equal((await saveImageToCwd(deps, { cwd: undefined, name: 'dsh-imgcache-a-0.png', dataB64: 'x' })).ok, false);
+  assert.equal((await saveImageToCwd(deps, { cwd: 'rel/ws', name: 'dsh-imgcache-a-0.png', dataB64: 'x' })).ok, false);
+  assert.equal((await saveImageToCwd(deps, { cwd: '/ws', name: '../dsh-imgcache-a-0.png', dataB64: 'x' })).ok, false);
+  assert.equal((await saveImageToCwd(deps, { cwd: '/ws', name: 'dsh-imgcache-a-0.exe', dataB64: 'x' })).ok, false);
+  assert.equal((await saveImageToCwd(deps, { cwd: '/ws', name: 'dsh-imgcache-a-0.png', dataB64: '' })).ok, false);
+  assert.equal(written.length, 0, '任何拒绝都不落盘');
+});
+
+test('deleteImageFiles：只删除注册表中的缓存文件，任意路径被忽略', async () => {
+  const reg = createImageRegistry();
+  reg.add('/ws/dsh-imgcache-a-0.png');
+  const deleted: string[] = [];
+  const deps = { writeFile: async () => {}, rmFile: async (p: string) => { deleted.push(p); } };
+  await deleteImageFiles(deps, { paths: ['/ws/dsh-imgcache-a-0.png', '/ws/user.txt', '/etc/passwd'] }, reg);
+  assert.deepEqual(deleted, ['/ws/dsh-imgcache-a-0.png'], '只删注册过的缓存文件');
+  assert.ok(!reg.has('/ws/dsh-imgcache-a-0.png'), '删除后移出注册表');
+});
+
+test('handleBridgeMessage 处理 bridgeSaveImage：回执 saveImageAck（ok+path）', async () => {
+  const acks: unknown[] = [];
+  await handleBridgeMessage({ type: 'bridgeSaveImage', requestId: 's1', name: 'dsh-imgcache-a-0.png', dataB64: 'AAAA', sessionCwd: '/ws' }, {
+    openExternal: async () => true,
+    openTextDocument: async () => {},
+    showWarning: () => {},
+    writeFile: async () => {},
+    rmFile: async () => {},
+    reply: async (m: unknown) => { acks.push(m); },
+  });
+  assert.equal(acks.length, 1);
+  const a = acks[0] as { type: string; ok: boolean; path: string };
+  assert.equal(a.type, 'bridgeSaveImageAck');
+  assert.equal(a.ok, true);
+  assert.equal(a.path, '/ws/dsh-imgcache-a-0.png');
+});
+
+test('handleBridgeMessage 处理 bridgeDeleteImages：回执 deleteImagesAck', async () => {
+  const acks: unknown[] = [];
+  await handleBridgeMessage({ type: 'bridgeDeleteImages', requestId: 'd1', paths: [] }, {
+    openExternal: async () => true,
+    openTextDocument: async () => {},
+    showWarning: () => {},
+    writeFile: async () => {},
+    rmFile: async () => {},
+    reply: async (m: unknown) => { acks.push(m); },
+  });
+  assert.equal(acks.length, 1);
+  assert.equal((acks[0] as { type: string }).type, 'bridgeDeleteImagesAck');
+  assert.equal((acks[0] as { ok: boolean }).ok, true);
+});
+

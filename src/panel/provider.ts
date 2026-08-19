@@ -1,6 +1,7 @@
 // src/panel/provider.ts — 侧边栏面板：iframe 与占位页切换
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
+import * as nodeFs from 'node:fs/promises';
 import { ServiceManager } from '../service/manager';
 import { handleBridgeMessage } from '../bridge/host';
 import { isRemoteName } from '../remote';
@@ -122,23 +123,41 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
         break;
       case 'bridgeOpenExternal':
       case 'bridgeOpenFile':
-        // 桥接跳转消息统一走 host 的 handleBridgeMessage（内部分流外链/文件，做白名单与路径解析）
-        void handleBridgeMessage(msg, {
-          openExternal: (u) => vscode.env.openExternal(vscode.Uri.parse(u)),
-          // showTextDocument 返回 TextEditor，而依赖约定返回 Thenable<void>：用 async 包装丢弃返回值
-          openTextDocument: async (p) => {
-            await vscode.window.showTextDocument(vscode.Uri.file(p), { preview: false });
-          },
-          // 用户提示统一走 vscode.window.showWarningMessage（host 层不 import vscode，保持纯逻辑可单测）
-          showWarning: (m) => void vscode.window.showWarningMessage(m),
-          workspaceRoot: this.workspaceRoot(), // 工作区根目录：openFile 相对路径解析的兜底基准
-        });
+      case 'bridgeSaveImage':
+      case 'bridgeDeleteImages':
+        // 桥接消息统一走 host 的 handleBridgeMessage（外链/文件/图片落盘与删除，白名单与路径安全在 host 层）
+        void handleBridgeMessage(msg, this.bridgeDeps());
         break;
       case 'bridgeAck':
         // 握手回执：通知注入的回调（Task 7 据此评估桥接状态）
         this.onBridgeAck?.(msg.ok);
         break;
     }
+  }
+
+  /** 桥接落盘/删除依赖：图片缓存写文件/删文件（node:fs/promises）与回执投递（webview.postMessage） */
+  private bridgeDeps(): Parameters<typeof handleBridgeMessage>[1] {
+    return {
+      openExternal: (u) => vscode.env.openExternal(vscode.Uri.parse(u)),
+      // showTextDocument 返回 TextEditor，而依赖约定返回 Thenable<void>：用 async 包装丢弃返回值
+      openTextDocument: async (p) => {
+        await vscode.window.showTextDocument(vscode.Uri.file(p), { preview: false });
+      },
+      // 用户提示统一走 vscode.window.showWarningMessage（host 层不 import vscode，保持纯逻辑可单测）
+      showWarning: (m) => void vscode.window.showWarningMessage(m),
+      workspaceRoot: this.workspaceRoot(), // 工作区根目录：openFile 相对路径解析的兜底基准
+      // 图片缓存：以 base64 写入（node:fs/promises 支持 base64 编码字符串）；删除用 unlink
+      writeFile: async (p, b64) => {
+        await nodeFs.writeFile(p, Buffer.from(b64, 'base64'));
+      },
+      rmFile: async (p) => {
+        await nodeFs.unlink(p);
+      },
+      // 回执：由顶层握手脚本转发回 iframe（saveImageAck / deleteImagesAck）
+      reply: async (m) => {
+        await this.view?.webview.postMessage(m);
+      },
+    };
   }
 
   /** 剪贴板桥接：扩展宿主写系统剪贴板，完成后回执给 webview（由顶层脚本转发给 iframe） */
