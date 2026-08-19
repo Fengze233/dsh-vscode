@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import { ServiceManager } from '../service/manager';
 import { handleBridgeMessage } from '../bridge/host';
+import { isRemoteName } from '../remote';
 import { t } from '../i18n';
 import {
   loadingPage,
@@ -10,6 +11,7 @@ import {
   disconnectedPage,
   stoppedPage,
   readyPage,
+  remoteDisabledPage,
   type PanelMessage,
   type PageCtx,
 } from './html';
@@ -22,6 +24,10 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   private openedOnce = false;
   /** 桥接握手 token：一次性防伪凭据，用密码学随机数（不可预测） */
   private readonly bridgeToken = randomUUID();
+  /** 解析后的本地可达 URL（远程=隧道 URL、本地=原 URL；仅 ready 且远程启用时被设置） */
+  private pendingExternalUrl: string | null = null;
+  /** 渲染代数：递增使进行中的异步 URL 解析过期，防止乱序覆盖 */
+  private renderGen = 0;
 
   /**
    * @param manager 服务管理器（面板与服务状态联动）
@@ -30,6 +36,8 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
    * @param workspaceRoot 工作区根目录注入函数（openFile 相对路径解析的兜底基准；可选，默认无根）
    * @param bridgeEnabled 桥接是否启用的 getter（Task 7 由 dsh.bridge.enabled 配置驱动；默认启用，
    *   disabled 时不注入握手脚本，避免向未安装桥接的 DSH 页面发送无意义的握手）
+   * @param remoteEnabled 是否启用远程（SSH Remote 等）的 getter（v0.3.0，默认关闭）
+   * @param resolveExternalUrl URL→本地可达 URL 解析器（远程走 asExternalUri 隧道；默认原样返回）
    */
   constructor(
     private manager: ServiceManager,
@@ -37,9 +45,11 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
     private onBridgeAck?: (ok: boolean) => void,
     private workspaceRoot: () => string | undefined = () => undefined,
     private bridgeEnabled: () => boolean = () => true,
+    private remoteEnabled: () => boolean = () => false,
+    private resolveExternalUrl: (url: string) => Promise<string> = async (u) => u,
   ) {
     // 订阅状态变化，重绘面板（iframe 与占位页由状态驱动，无白屏路径）
-    manager.onChange(() => this.render());
+    manager.onChange(() => void this.handleStateChange());
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -54,8 +64,23 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       this.onFirstOpen?.(); // 首次打开：触发一次性引导（如"移到右侧栏"提示）
     }
     this.render();
+    // 远程窗口且未启用远程支持：仅显示占位页，绝不在此窗口启动远端 dsh 服务。
+    if (this.remoteWindowDisabled()) return;
     // 面板打开即确保服务运行：复用已有或自动启动。
     void this.manager.ensureRunning();
+  }
+
+  /**
+   * 当前窗口是否处于「远程但未启用」状态：远程窗口（remoteName 非空）且 dsh.remote.enabled=false。
+   * 该状态下不拉起远端服务、不建隧道，仅展示引导占位页。
+   */
+  private remoteWindowDisabled(): boolean {
+    return isRemoteName(vscode.env.remoteName) && !this.remoteEnabled();
+  }
+
+  /** 当前展示用的本地可达 URL（供「复制网址」命令使用；未解析时返回 null 由调用方回退原 URL） */
+  getDisplayUrl(): string | null {
+    return this.pendingExternalUrl;
   }
 
   /** 处理面板内按钮消息（全部转交给 manager 或对应命令） */
@@ -80,6 +105,10 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
         break;
       case 'showLogs':
         void vscode.commands.executeCommand('dsh.showLogs');
+        break;
+      case 'openSettings':
+        // 远程未启用占位页的「打开设置」按钮：聚焦 dsh.remote.enabled 设置
+        void vscode.commands.executeCommand('workbench.action.openSettings', 'dsh.remote.enabled');
         break;
       case 'bridgeCopyText':
         // 桥接剪贴板消息：VS Code 会拦截跨源 iframe 的原生 clipboard API，
@@ -152,6 +181,31 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * 状态变化处理：远程且启用时异步解析隧道 URL（防乱序后落地），
+   * 其余情况直接渲染（远程未启用会由 render 短路为占位页）。
+   */
+  private async handleStateChange(): Promise<void> {
+    const s = this.manager.getSnapshot();
+    if (s.state === 'ready' && isRemoteName(vscode.env.remoteName) && this.remoteEnabled()) {
+      const gen = ++this.renderGen;
+      const raw = s.url ?? this.rawUrl();
+      const resolved = await this.resolveExternalUrl(raw);
+      if (gen !== this.renderGen) return; // 期间状态又变，丢弃过期结果
+      this.pendingExternalUrl = resolved;
+    } else {
+      ++this.renderGen; // 使进行中的解析过期
+      this.pendingExternalUrl = null;
+    }
+    this.render();
+  }
+
+  /** 未解析兜底的目标地址（manager 配置的 host/port） */
+  private rawUrl(): string {
+    const { host, port } = this.manager.getTarget();
+    return `http://${host}:${port}/`;
+  }
+
   /** 按服务状态渲染对应页面 */
   private render(): void {
     const v = this.view;
@@ -161,23 +215,36 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
     const ctx: PageCtx = { nonce, cspSource: v.webview.cspSource, frameHosts: [`http://${host}:${port}`] };
     const s = this.manager.getSnapshot();
     let html: string;
-    switch (s.state) {
-      case 'ready':
-        this.wasConnected = true;
-        html = readyPage(s.url ?? `http://${host}:${port}/`, ctx, {
-          token: this.bridgeToken,
-          enabled: this.bridgeEnabled(), // 由 dsh.bridge.enabled 配置驱动（Task 7 接入）
-        });
-        break;
-      case 'failed':
-        html = errorPage(t, ctx, s.error ? t(s.error, s.errorVars) : t('err.loadFailed'));
-        break;
-      case 'idle':
-        html = this.wasConnected ? disconnectedPage(t, ctx) : stoppedPage(t, ctx);
-        break;
-      default:
-        // detecting / starting / waiting / stopping：统一加载中动画页
-        html = loadingPage(t, ctx);
+    // 远程窗口且未启用：任何状态都只展示引导占位页，不触碰远端服务。
+    if (this.remoteWindowDisabled()) {
+      html = remoteDisabledPage(t, ctx);
+    } else {
+      switch (s.state) {
+        case 'ready':
+          this.wasConnected = true;
+          // iframe/CSP 使用解析后的本地可达 URL（远程=隧道；本地=原地址）。
+          // frameHosts 以解析出的 origin 为准，保证 CSP 放行该隧道地址。
+          {
+            const displayUrl = this.pendingExternalUrl ?? s.url ?? this.rawUrl();
+            if (this.pendingExternalUrl !== null) {
+              ctx.frameHosts = [new URL(this.pendingExternalUrl).origin];
+            }
+            html = readyPage(displayUrl, ctx, {
+              token: this.bridgeToken,
+              enabled: this.bridgeEnabled(), // 由 dsh.bridge.enabled 配置驱动（Task 7 接入）
+            });
+          }
+          break;
+        case 'failed':
+          html = errorPage(t, ctx, s.error ? t(s.error, s.errorVars) : t('err.loadFailed'));
+          break;
+        case 'idle':
+          html = this.wasConnected ? disconnectedPage(t, ctx) : stoppedPage(t, ctx);
+          break;
+        default:
+          // detecting / starting / waiting / stopping：统一加载中动画页
+          html = loadingPage(t, ctx);
+      }
     }
     v.webview.html = html;
   }

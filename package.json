@@ -9,6 +9,10 @@
   "engines": {
     "vscode": "^1.91.0"
   },
+  "extensionKind": [
+    "workspace",
+    "ui"
+  ],
   "categories": [
     "Other"
   ],
@@ -217,6 +221,21 @@
           "type": "string",
           "default": "",
           "markdownDescription": "%dsh.config.executablePath%"
+        },
+        "dsh.openInBrowser": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%dsh.config.openInBrowser%"
+        },
+        "dsh.remote.enabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%dsh.config.remoteEnabled%"
+        },
+        "dsh.image.fallback": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%dsh.config.imageFallback%"
         }
       }
     }

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { initI18n, t } from '../src/i18n';
-import { loadingPage, errorPage, disconnectedPage, stoppedPage, readyPage, type PageCtx } from '../src/panel/html';
+import { loadingPage, errorPage, disconnectedPage, stoppedPage, readyPage, remoteDisabledPage, type PageCtx } from '../src/panel/html';
 
 function ctx(): PageCtx {
   return { nonce: 'abc123', cspSource: 'vscode-webview:', frameHosts: ['http://127.0.0.1:3080'] };
@@ -93,3 +93,10 @@ test('CSP 声明 frame-src 与 script-src nonce', () => {
   assert.ok(html.includes('frame-src http://127.0.0.1:3080'));
   assert.ok(html.includes("script-src 'nonce-abc123'"));
 });
+test('remoteDisabledPage 包含提示文案与打开设置按钮（v0.3.0）', () => {
+  initI18n('zh-cn');
+  const html = remoteDisabledPage(t, ctx());
+  assert.ok(html.includes(t('panel.remoteDisabled')));
+  assert.ok(html.includes('data-action="openSettings"'));
+});
+

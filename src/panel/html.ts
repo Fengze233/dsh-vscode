@@ -18,7 +18,8 @@ export type PanelMessage =
   | { type: 'bridgeCopyText'; text: string; requestId: string }
   | { type: 'bridgeReadText'; requestId: string }
   | { type: 'bridgeReadTextAck'; requestId: string; ok: boolean; text?: string }
-  | { type: 'bridgeAck'; ok: boolean };
+  | { type: 'bridgeAck'; ok: boolean }
+  | { type: 'openSettings' };
 
 /** 渲染上下文 */
 export interface PageCtx {
@@ -198,6 +199,17 @@ export function disconnectedPage(t: T, ctx: PageCtx): string {
     `<div class="center"><p>${t('panel.disconnectedTitle')}</p>
 <button data-action="reconnect">${t('panel.reconnect')}</button>
 <button data-action="showLogs">${t('panel.showLogs')}</button></div>`,
+  );
+}
+
+/** 远程未启用占位页：远程窗口且 dsh.remote.enabled=false 时展示，引导用户开启并重载（v0.3.0） */
+export function remoteDisabledPage(t: T, ctx: PageCtx): string {
+  return shell(
+    ctx,
+    t('panel.remoteDisabled'),
+    '',
+    '<div class="center"><p>' + t('panel.remoteDisabled') + '</p>' +
+    '<button data-action="openSettings">' + t('panel.openSettings') + '</button></div>',
   );
 }
 

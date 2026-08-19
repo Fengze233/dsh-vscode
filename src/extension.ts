@@ -11,6 +11,7 @@ import { ServiceManager, type ManagerOptions } from './service/manager';
 import { DshPanelProvider } from './panel/provider';
 import { StatusBarController } from './statusbar';
 import { resolveWorkspaceRoot } from './workspaceRoot';
+import { createUrlResolver } from './remote';
 import {
   installBridge,
   uninstallBridge,
@@ -21,6 +22,8 @@ import { evaluateBridgeStatus, bridgeWarningText } from './bridge/status';
 
 let manager: ServiceManager | null = null;
 let output: vscode.OutputChannel | null = null;
+/** 当前展示用本地可达 URL 的来源（读主面板解析结果；远程=隧道 URL，本地=null 回退原地址） */
+let getDisplayUrl: (() => string | null) | null = null;
 
 /** 日志缓冲（供「复制日志」命令 dsh.copyLogs 使用；上限行数防内存膨胀） */
 const logBuffer: string[] = [];
@@ -309,6 +312,12 @@ export function activate(context: vscode.ExtensionContext): void {
     resolveWorkspaceRoot(vscode.workspace.workspaceFolders ?? [], readConfig().config.workspaceRootIndex);
   // 桥接启用 getter：随时读取最新配置，供 readyPage 决定是否注入握手脚本
   const bridgeEnabledGetter = (): boolean => readConfig().config.bridgeEnabled;
+  // 远程启用 getter：v0.3.0 由 dsh.remote.enabled 驱动（默认关闭，远程窗口不自动启动远端 dsh）
+  const remoteEnabledGetter = (): boolean => readConfig().config.remoteEnabled;
+  // URL 解析器：远程窗口经 vscode.env.asExternalUri 建立端口隧道，返回本地可达 URL；本地原样返回
+  const resolveExternalUrl = createUrlResolver({
+    asExternalUri: async (uri) => await vscode.env.asExternalUri(vscode.Uri.parse(uri.toString())),
+  });
 
   // 左右两侧各一个 provider 实例，共享同一 manager（服务状态一致）
   const panelPrimary = new DshPanelProvider(
@@ -320,6 +329,8 @@ export function activate(context: vscode.ExtensionContext): void {
     onBridgeAck, // onBridgeAck：桥接握手回执 → handshakeOk（Task 7 状态评估）
     workspaceRootGetter, // workspaceRoot：文件相对路径解析的兜底基准
     bridgeEnabledGetter, // bridgeEnabled：dsh.bridge.enabled 驱动握手脚本注入
+    remoteEnabledGetter, // remoteEnabled：dsh.remote.enabled 驱动远程隧道（开启后才接线）
+    resolveExternalUrl, // resolveExternalUrl：远程窗口的 URL 隧道解析
   );
   const panelSecondary = new DshPanelProvider(
     manager,
@@ -327,7 +338,11 @@ export function activate(context: vscode.ExtensionContext): void {
     onBridgeAck,
     workspaceRootGetter,
     bridgeEnabledGetter,
+    remoteEnabledGetter,
+    resolveExternalUrl,
   );
+  // 复制网址命令读取主面板的展示 URL（远程=隧道本地 URL）
+  getDisplayUrl = () => panelPrimary.getDisplayUrl();
   new StatusBarController(manager);
 
   // 服务就绪后启动握手超时（若面板已打开）
@@ -380,15 +395,17 @@ async function openExternal(): Promise<void> {
   await vscode.env.openExternal(vscode.Uri.parse(s.url));
 }
 
-/** 复制 DSH 页面地址到剪贴板 */
+/** 复制 DSH 页面地址到剪贴板（远程窗口复制隧道本地 URL） */
 async function copyUrl(): Promise<void> {
   const s = manager?.getSnapshot();
   if (!s || s.state !== 'ready' || !s.url) {
     void vscode.window.showWarningMessage(t('info.notReady'));
     return;
   }
-  await vscode.env.clipboard.writeText(s.url);
-  void vscode.window.showInformationMessage(t('info.urlCopied', { url: s.url }));
+  // 远程窗口优先复制「已解析的本地隧道 URL」，用户直接可访问；本地回退原地址
+  const display = getDisplayUrl?.() ?? s.url;
+  await vscode.env.clipboard.writeText(display);
+  void vscode.window.showInformationMessage(t('info.urlCopied', { url: display }));
 }
 
 /** 复制完整 DSH 日志（含环境信息头）到剪贴板：问题报告的提交内容 */
