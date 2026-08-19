@@ -62,3 +62,37 @@ export function buildReadTextAck(
   ok: boolean,
   text?: string,
 ): { kind: 'readTextAck'; requestId: string; ok: boolean; text?: string };
+// —— v0.3.0 图片缓存降级消息（与 core.js 运行时导出保持一致） ——
+
+/** 图片缓存文件扩展名白名单 */
+export const IMAGE_CACHE_EXTENSIONS: readonly string[];
+
+/**
+ * 生成图片缓存文件名（不含目录）：dsh-imgcache-<ts>-<i><ext>。
+ * 扩展名不在白名单返回 null。
+ */
+export function imageCacheFilename(timestamp: string | number, index: number, ext: string): string | null;
+
+/** 构造「保存图片」上行消息 */
+export function buildSaveImageRequest(
+  requestId: string,
+  name: string,
+  dataB64: string,
+  sessionCwd: string | undefined,
+): { kind: 'saveImage'; requestId: string; name: string; dataB64: string; sessionCwd?: string };
+
+/** 解析「保存图片」回执；requestId 不匹配或形状不合法返回 null */
+export function parseSaveImageAck(
+  data: unknown,
+  expectedRequestId: string,
+): { ok: boolean; path?: string } | null;
+
+/** 构造「删除图片缓存」上行消息 */
+export function buildDeleteImagesRequest(
+  requestId: string,
+  paths: string[],
+): { kind: 'deleteImages'; requestId: string; paths: string[] };
+
+/** 解析「删除图片缓存」回执；requestId 不匹配或形状不合法返回 null */
+export function parseDeleteImagesAck(data: unknown, expectedRequestId: string): { ok: boolean } | null;
+

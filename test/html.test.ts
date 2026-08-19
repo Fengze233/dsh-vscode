@@ -99,4 +99,13 @@ test('remoteDisabledPage 包含提示文案与打开设置按钮（v0.3.0）', (
   assert.ok(html.includes(t('panel.remoteDisabled')));
   assert.ok(html.includes('data-action="openSettings"'));
 });
+test('readyPage 握手脚本包含 saveImage/deleteImages 上下行转发（v0.3.0）', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
+  assert.ok(html.includes("kind === 'saveImage'"), '上行：转发 iframe 的 saveImage');
+  assert.ok(html.includes("type: 'bridgeSaveImage'"), '上行：向扩展宿主发送 bridgeSaveImage');
+  assert.ok(html.includes("kind === 'deleteImages'"), '上行：转发 iframe 的 deleteImages');
+  assert.ok(html.includes("type === 'bridgeSaveImageAck'"), '下行：接收扩展宿主的保存回执');
+  assert.ok(html.includes("type === 'bridgeDeleteImagesAck'"), '下行：接收扩展宿主的删除回执');
+});
+
 

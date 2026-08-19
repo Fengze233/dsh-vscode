@@ -19,7 +19,11 @@ export type PanelMessage =
   | { type: 'bridgeReadText'; requestId: string }
   | { type: 'bridgeReadTextAck'; requestId: string; ok: boolean; text?: string }
   | { type: 'bridgeAck'; ok: boolean }
-  | { type: 'openSettings' };
+  | { type: 'openSettings' }
+  | { type: 'bridgeSaveImage'; requestId: string; name: string; dataB64: string; sessionCwd?: string }
+  | { type: 'bridgeSaveImageAck'; requestId: string; ok: boolean; path?: string }
+  | { type: 'bridgeDeleteImages'; requestId: string; paths: string[] }
+  | { type: 'bridgeDeleteImagesAck'; requestId: string; ok: boolean };
 
 /** 渲染上下文 */
 export interface PageCtx {
@@ -103,6 +107,21 @@ if (iframeEl) {
       }, iframeSrc);
       return;
     }
+    // 保存图片回执：转发给 iframe，resolve 其 saveImage Promise（ok + 落盘绝对路径）
+    if (d && d.type === 'bridgeSaveImageAck' && typeof d.requestId === 'string' && typeof d.ok === 'boolean') {
+      iframeEl.contentWindow.postMessage({
+        kind: 'saveImageAck',
+        requestId: d.requestId,
+        ok: d.ok,
+        ...(typeof d.path === 'string' ? { path: d.path } : {}),
+      }, iframeSrc);
+      return;
+    }
+    // 删除图片回执：转发给 iframe，resolve 其 deleteImages Promise
+    if (d && d.type === 'bridgeDeleteImagesAck' && typeof d.requestId === 'string' && typeof d.ok === 'boolean') {
+      iframeEl.contentWindow.postMessage({ kind: 'deleteImagesAck', requestId: d.requestId, ok: d.ok }, iframeSrc);
+      return;
+    }
     // —— 上行：iframe 发来的消息，origin + source 双重校验 ——
     if (e.origin !== ALLOWED_ORIGIN || e.source !== iframeEl.contentWindow) return;
     // 握手回执：统一形状 { kind:'bridgeAck', ok }（不带 token 字段），只读 ok
@@ -117,6 +136,22 @@ if (iframeEl) {
     // 复制文本：转发给扩展 → vscode.env.clipboard.writeText（跨源 iframe 原生剪贴板 API 被 VS Code 拦截）
     if (d && d.kind === 'copyText' && typeof d.text === 'string' && typeof d.requestId === 'string') {
       vscode.postMessage({ type: 'bridgeCopyText', text: d.text, requestId: d.requestId });
+      return;
+    }
+    // 保存图片：转发给扩展 → 扩展宿主落盘到会话 cwd（v0.3.0 图片降级）
+    if (d && d.kind === 'saveImage' && typeof d.requestId === 'string' && typeof d.name === 'string' && typeof d.dataB64 === 'string') {
+      vscode.postMessage({
+        type: 'bridgeSaveImage',
+        requestId: d.requestId,
+        name: d.name,
+        dataB64: d.dataB64,
+        ...(typeof d.sessionCwd === 'string' ? { sessionCwd: d.sessionCwd } : {}),
+      });
+      return;
+    }
+    // 删除图片缓存：转发给扩展 → 扩展宿主删除文件（会话结束清理）
+    if (d && d.kind === 'deleteImages' && typeof d.requestId === 'string' && Array.isArray(d.paths)) {
+      vscode.postMessage({ type: 'bridgeDeleteImages', requestId: d.requestId, paths: d.paths });
       return;
     }
     // 读取剪贴板：转发给扩展 → vscode.env.clipboard.readText（Cmd+V 粘贴兜底）

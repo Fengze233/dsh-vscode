@@ -144,3 +144,55 @@ export function buildReadTextAck(requestId, ok, text) {
     ? { kind: 'readTextAck', requestId, ok: true, text }
     : { kind: 'readTextAck', requestId, ok: false };
 }
+// —— v0.3.0 图片缓存降级：saveImage / deleteImages 消息与缓存文件名 ——
+// 图片缓存文件的扩展名白名单（仅这些结尾才允许由扩展宿主落盘/删除，防任意文件写入/删除）
+export const IMAGE_CACHE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+
+/**
+ * 生成图片缓存文件名（不含目录，目录由扩展侧拼接）：dsh-imgcache-<ts>-<i><ext>。
+ * 扩展名不在白名单（或缺少点号）时返回 null（调用方不得落盘）。
+ */
+export function imageCacheFilename(timestamp, index, ext) {
+  if (typeof ext !== 'string' || !IMAGE_CACHE_EXTENSIONS.includes(ext.toLowerCase())) return null;
+  const t = typeof timestamp === 'string' && timestamp !== '' ? timestamp : String(Date.now());
+  const i = Number.isFinite(index) ? index : 0;
+  return 'dsh-imgcache-' + t + '-' + i + ext.toLowerCase();
+}
+
+// 构造「保存图片」上行消息（iframe 页面 → 父页面 → 扩展宿主落盘）
+export function buildSaveImageRequest(requestId, name, dataB64, sessionCwd) {
+  return { kind: 'saveImage', requestId, name, dataB64, sessionCwd };
+}
+
+/**
+ * 解析「保存图片」回执：仅接受与期望 requestId 一致的 saveImageAck。
+ * 返回 { ok, path? }；形状不合法或 requestId 不匹配返回 null。
+ */
+export function parseSaveImageAck(data, expectedRequestId) {
+  if (
+    data && typeof data === 'object' && data.kind === 'saveImageAck' &&
+    data.requestId === expectedRequestId && typeof data.ok === 'boolean'
+  ) {
+    return typeof data.path === 'string' ? { ok: data.ok, path: data.path } : { ok: data.ok };
+  }
+  return null;
+}
+
+// 构造「删除图片缓存」上行消息（iframe 页面 → 父页面 → 扩展宿主删除）
+export function buildDeleteImagesRequest(requestId, paths) {
+  return { kind: 'deleteImages', requestId, paths: Array.isArray(paths) ? paths : [] };
+}
+
+/**
+ * 解析「删除图片缓存」回执：仅接受与期望 requestId 一致的 deleteImagesAck。
+ */
+export function parseDeleteImagesAck(data, expectedRequestId) {
+  if (
+    data && typeof data === 'object' && data.kind === 'deleteImagesAck' &&
+    data.requestId === expectedRequestId && typeof data.ok === 'boolean'
+  ) {
+    return { ok: data.ok };
+  }
+  return null;
+}
+
