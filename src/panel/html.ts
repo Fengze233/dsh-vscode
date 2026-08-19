@@ -23,7 +23,8 @@ export type PanelMessage =
   | { type: 'bridgeSaveImage'; requestId: string; name: string; dataB64: string; sessionCwd?: string }
   | { type: 'bridgeSaveImageAck'; requestId: string; ok: boolean; path?: string }
   | { type: 'bridgeDeleteImages'; requestId: string; paths: string[] }
-  | { type: 'bridgeDeleteImagesAck'; requestId: string; ok: boolean };
+  | { type: 'bridgeDeleteImagesAck'; requestId: string; ok: boolean }
+  | { type: 'bridgeImageFallback'; paths: string[] };
 
 /** 渲染上下文 */
 export interface PageCtx {
@@ -80,7 +81,7 @@ document.addEventListener('click', (e) => {
  * @param token 握手防伪凭据（与桥接侧 isBridgeMessage 校验的一致）
  * @param allowedOrigin 允许的消息来源 origin（由 DSH 页面地址推导，如 http://127.0.0.1:3080）
  */
-function bridgeHandshakeScript(token: string, allowedOrigin: string): string {
+function bridgeHandshakeScript(token: string, allowedOrigin: string, imageFallback: boolean): string {
   return `
 // dsh-bridge-handshake：DSH 页面桥接握手与消息路由（上行转发 + 剪贴板回执下行转发）
 const iframeEl = document.getElementById('dsh-frame');
@@ -89,6 +90,7 @@ if (iframeEl) {
   // 握手 token 与允许的 DSH 页面 origin
   const TOKEN = ${JSON.stringify(token)};
   const ALLOWED_ORIGIN = ${JSON.stringify(allowedOrigin)};
+  const IMAGE_FALLBACK = ${JSON.stringify(imageFallback)}; // v0.3.0：非视觉模型图片降级开关
   let bridgeAcked = false;
   window.addEventListener('message', (e) => {
     const d = e.data;
@@ -154,6 +156,11 @@ if (iframeEl) {
       vscode.postMessage({ type: 'bridgeDeleteImages', requestId: d.requestId, paths: d.paths });
       return;
     }
+    // 图片降级通知：转发给扩展 → 用户可见提示（v0.3.0）
+    if (d && d.kind === 'imageFallback' && Array.isArray(d.paths)) {
+      vscode.postMessage({ type: 'bridgeImageFallback', paths: d.paths });
+      return;
+    }
     // 读取剪贴板：转发给扩展 → vscode.env.clipboard.readText（Cmd+V 粘贴兜底）
     if (d && d.kind === 'readText' && typeof d.requestId === 'string') {
       vscode.postMessage({ type: 'bridgeReadText', requestId: d.requestId });
@@ -166,7 +173,7 @@ if (iframeEl) {
     let helloAttempts = 0;
     const sendHello = () => {
       if (!bridgeAcked && iframeEl.contentWindow) {
-        iframeEl.contentWindow.postMessage({ kind: 'bridgeHello', token: TOKEN }, iframeSrc);
+        iframeEl.contentWindow.postMessage({ kind: 'bridgeHello', token: TOKEN, imageFallback: IMAGE_FALLBACK }, iframeSrc);
       }
     };
     sendHello();
@@ -267,10 +274,10 @@ export function stoppedPage(t: T, ctx: PageCtx): string {
  * 桥接启用时注入握手脚本，让顶层 webview 与 DSH 页面 iframe 建立握手并转发跳转/剪贴板消息。
  * @param bridge 桥接配置（可选，向后兼容既有调用）：token 为握手凭据，enabled 为是否注入握手脚本
  */
-export function readyPage(url: string, ctx: PageCtx, bridge?: { token: string; enabled: boolean }): string {
+export function readyPage(url: string, ctx: PageCtx, bridge?: { token: string; enabled: boolean; imageFallback?: boolean }): string {
   // 桥接启用时注入握手脚本；未传入或 enabled=false 时保持向后兼容，不注入
   const extraScripts = bridge?.enabled
-    ? `<script nonce="${ctx.nonce}">${bridgeHandshakeScript(bridge.token, new URL(url).origin)}</script>`
+    ? `<script nonce="${ctx.nonce}">${bridgeHandshakeScript(bridge.token, new URL(url).origin, bridge.imageFallback === true)}</script>`
     : '';
   return shell(
     ctx,

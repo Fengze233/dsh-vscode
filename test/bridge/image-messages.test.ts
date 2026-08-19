@@ -8,6 +8,13 @@ import {
   parseDeleteImagesAck,
   imageCacheFilename,
   IMAGE_CACHE_EXTENSIONS,
+  detectModelReject,
+  isPromptWithImages,
+  extractPromptText,
+  buildImagePointerLine,
+  buildTextOnlyContent,
+  buildImageFallbackNotice,
+  imageCacheKey,
 } from '../../bridge-client/lib/core.js';
 
 test('saveImage 请求构造与 ack 解析', () => {
@@ -37,3 +44,34 @@ test('缓存文件名：白名单扩展名可用，非法扩展名拒绝', () =>
   assert.equal(imageCacheFilename('x', 0, '.JPG')?.endsWith('.jpg'), true);
   assert.ok(IMAGE_CACHE_EXTENSIONS.length > 0);
 });
+test('detectModelReject：识别 MODEL_DOES_NOT_SUPPORT_IMAGES（兼容三种形状）', () => {
+  assert.equal(detectModelReject({ code: 'attachment-error', details: { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' } }), true);
+  assert.equal(detectModelReject({ result: { ok: false, error: { code: 'attachment-error', details: { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' } } } }), true);
+  assert.equal(detectModelReject({ ok: false, error: { code: 'attachment-error', details: { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' } } }), true);
+  assert.equal(detectModelReject({ code: 'attachment-error', details: { reason: 'IMAGE_TOO_LARGE' } }), false);
+  assert.equal(detectModelReject({}), false);
+  assert.equal(detectModelReject(null), false);
+});
+
+test('isPromptWithImages / extractPromptText / buildTextOnlyContent', () => {
+  assert.equal(isPromptWithImages([{ type: 'image' }, { type: 'text', text: 'hi' }]), true);
+  assert.equal(isPromptWithImages([{ type: 'text', text: 'hi' }]), false);
+  assert.equal(extractPromptText([{ type: 'text', text: 'a' }, { type: 'image' }, { type: 'text', text: 'b' }]), 'a\nb');
+  const built = buildTextOnlyContent([{ type: 'text', text: 'a' }, { type: 'image' }], [buildImagePointerLine('/w/x.png')]);
+  assert.equal(built.length, 1);
+  assert.equal(built[0].type, 'text');
+  assert.ok(built[0].text.includes('/w/x.png'));
+  assert.ok(built[0].text.includes('a'));
+  // 无指针时保持原文本
+  assert.equal(buildTextOnlyContent([{ type: 'text', text: 'a' }], []).length, 1);
+});
+
+test('buildImageFallbackNotice / imageCacheKey', () => {
+  const n = buildImageFallbackNotice(['/a.png']);
+  assert.equal(n.kind, 'imageFallback');
+  assert.deepEqual(n.paths, ['/a.png']);
+  assert.equal(imageCacheKey({ name: 'x.png', size: 10, lastModified: 5 }), 'x.png:10:5');
+  assert.equal(imageCacheKey({ name: '', size: 1, lastModified: 2 }), null);
+  assert.equal(imageCacheKey(null), null);
+});
+

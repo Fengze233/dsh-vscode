@@ -107,5 +107,19 @@ test('readyPage 握手脚本包含 saveImage/deleteImages 上下行转发（v0.3
   assert.ok(html.includes("type === 'bridgeSaveImageAck'"), '下行：接收扩展宿主的保存回执');
   assert.ok(html.includes("type === 'bridgeDeleteImagesAck'"), '下行：接收扩展宿主的删除回执');
 });
+test('readyPage 握手脚本携带 imageFallback 开关（v0.3.0）', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true, imageFallback: true });
+  assert.ok(html.includes('IMAGE_FALLBACK'), '脚本应定义 IMAGE_FALLBACK');
+  assert.ok(html.includes('imageFallback: IMAGE_FALLBACK'), 'hello 消息应携带 imageFallback');
+  // 未指定时默认 false（降级关闭）
+  const html2 = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
+  assert.ok(html2.includes('IMAGE_FALLBACK = false'));
+});
+test('readyPage 握手脚本包含 imageFallback 通知上行转发（v0.3.0）', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
+  assert.ok(html.includes("kind === 'imageFallback'"), '上行：转发 iframe 的 imageFallback 通知');
+  assert.ok(html.includes("type: 'bridgeImageFallback'"), '上行：向扩展宿主发送 bridgeImageFallback');
+});
+
 
 

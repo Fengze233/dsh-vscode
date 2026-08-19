@@ -314,6 +314,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const bridgeEnabledGetter = (): boolean => readConfig().config.bridgeEnabled;
   // 远程启用 getter：v0.3.0 由 dsh.remote.enabled 驱动（默认关闭，远程窗口不自动启动远端 dsh）
   const remoteEnabledGetter = (): boolean => readConfig().config.remoteEnabled;
+  // 图片降级 getter：dsh.image.fallback 驱动桥接客户端「非视觉模型自动降级」行为
+  const imageFallbackGetter = (): boolean => readConfig().config.imageFallback;
   // URL 解析器：远程窗口经 vscode.env.asExternalUri 建立端口隧道，返回本地可达 URL；本地原样返回
   const resolveExternalUrl = createUrlResolver({
     asExternalUri: async (uri) => await vscode.env.asExternalUri(vscode.Uri.parse(uri.toString())),
@@ -331,6 +333,7 @@ export function activate(context: vscode.ExtensionContext): void {
     bridgeEnabledGetter, // bridgeEnabled：dsh.bridge.enabled 驱动握手脚本注入
     remoteEnabledGetter, // remoteEnabled：dsh.remote.enabled 驱动远程隧道（开启后才接线）
     resolveExternalUrl, // resolveExternalUrl：远程窗口的 URL 隧道解析
+    imageFallbackGetter, // imageFallback：dsh.image.fallback 驱动图片降级
   );
   const panelSecondary = new DshPanelProvider(
     manager,
@@ -340,6 +343,7 @@ export function activate(context: vscode.ExtensionContext): void {
     bridgeEnabledGetter,
     remoteEnabledGetter,
     resolveExternalUrl,
+    imageFallbackGetter,
   );
   // 复制网址命令读取主面板的展示 URL（远程=隧道本地 URL）
   getDisplayUrl = () => panelPrimary.getDisplayUrl();

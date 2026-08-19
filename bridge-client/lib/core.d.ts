@@ -96,3 +96,26 @@ export function buildDeleteImagesRequest(
 /** 解析「删除图片缓存」回执；requestId 不匹配或形状不合法返回 null */
 export function parseDeleteImagesAck(data: unknown, expectedRequestId: string): { ok: boolean } | null;
 
+// —— v0.3.0 图片自由上传降级（与 core.js 运行时导出保持一致） ——
+
+/** 判定一次 RPC 响应是否为「模型不支持图像输入」而被拒 */
+export function detectModelReject(data: unknown): boolean;
+
+/** 内容块数组是否含图片块 */
+export function isPromptWithImages(content: unknown): boolean;
+
+/** 提取内容块中的全部文本（按顺序拼接） */
+export function extractPromptText(content: unknown): string;
+
+/** 构造图片指针行 */
+export function buildImagePointerLine(path: string): string;
+
+/** 构造纯文本内容块数组（原文本 + 图片指针行） */
+export function buildTextOnlyContent(content: unknown, pointerLines?: string[]): { type: 'text'; text: string }[];
+
+/** 构造「图片降级已发生」的通知消息 */
+export function buildImageFallbackNotice(paths: string[]): { kind: 'imageFallback'; paths: string[] };
+
+/** 文件指纹（去重键）；关键字段缺失返回 null */
+export function imageCacheKey(fileLike: unknown): string | null;
+

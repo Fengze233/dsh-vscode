@@ -196,3 +196,68 @@ export function parseDeleteImagesAck(data, expectedRequestId) {
   return null;
 }
 
+// —— v0.3.0 图片自由上传降级：模型拒绝判定 / 内容重构 / 指纹 / 指针行 ——
+/**
+ * 判定一次 prompt RPC 响应是否为「模型不支持图像输入」而被拒。
+ * 兼容三种形状：wire 包 ({ result:{ ok:false, error } })、flat ({ ok:false, error })、
+ * 裸错误 ({ code, details })，便于单测与线上解析复用。
+ */
+export function detectModelReject(data) {
+  if (!data || typeof data !== 'object') return false;
+  const result = data.result && typeof data.result === 'object' ? data.result : data;
+  const error = result.error && typeof result.error === 'object'
+    ? result.error
+    : data.error && typeof data.error === 'object'
+      ? data.error
+      : data;
+  if (error.code !== 'attachment-error') return false;
+  return !!(error.details && typeof error.details === 'object' && error.details.reason === 'MODEL_DOES_NOT_SUPPORT_IMAGES');
+}
+
+/** 内容块数组是否含图片块（v0.3.0 判定是否需要走降级） */
+export function isPromptWithImages(content) {
+  return Array.isArray(content) && content.some((b) => b && typeof b === 'object' && b.type === 'image');
+}
+
+/** 提取内容块中的全部文本（按顺序拼接，空行分隔） */
+export function extractPromptText(content) {
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter((b) => b && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text)
+    .join('\n');
+}
+
+/** 构造图片指针行（模型应能据此调用图像识别工具查看文件） */
+export function buildImagePointerLine(path) {
+  return '[图片已保存到: ' + path + ']（模型可用图像识别工具查看该文件）';
+}
+
+/**
+ * 构造纯文本内容块数组：原文本 + 图片指针行。
+ * 无图片指针时保持原文本不变（形状不变），有指针时拼接到文本之后。
+ */
+export function buildTextOnlyContent(content, pointerLines) {
+  const text = extractPromptText(content);
+  const pointers = (Array.isArray(pointerLines) ? pointerLines : []).filter((l) => typeof l === 'string' && l !== '');
+  const joined = pointers.length === 0 ? text : text === '' ? pointers.join('\n') : text + '\n\n' + pointers.join('\n');
+  return [{ type: 'text', text: joined }];
+}
+
+/** 构造「图片降级已发生」的通知消息（iframe → 扩展宿主 → 用户可见提示） */
+export function buildImageFallbackNotice(paths) {
+  return { kind: 'imageFallback', paths: Array.isArray(paths) ? paths : [] };
+}
+
+/**
+ * 文件指纹（去重键）：name:size:lastModified；关键字段缺失返回 null。
+ * 用于附件捕获时对同一文件去重，避免重复落盘。
+ */
+export function imageCacheKey(fileLike) {
+  if (!fileLike || typeof fileLike !== 'object') return null;
+  const name = typeof fileLike.name === 'string' ? fileLike.name : '';
+  const size = typeof fileLike.size === 'number' ? fileLike.size : 0;
+  const lm = typeof fileLike.lastModified === 'number' ? fileLike.lastModified : 0;
+  return name === '' ? null : name + ':' + size + ':' + lm;
+}
+

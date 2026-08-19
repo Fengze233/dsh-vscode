@@ -403,6 +403,8 @@ window.__ModuleLoader__.load({
       // 握手：父页面下发 { kind: 'bridgeHello', token }，校验非空后回执 bridgeAck
       if (d.kind === "bridgeHello" && typeof d.token === "string" && d.token !== "") {
         bridgeToken = d.token;
+        imageFallbackEnabled = d.imageFallback === true; // v0.3.0：非视觉模型图片降级开关（随 hello 下发）
+        bindImageCapture(); // 握手后才开始捕获附件图片（避免非面板场景行为变化）
         // 回执统一用 core.js 的 buildSyncWorkspaceAck 构造，形状与工作区同步回执一致
         // （{ kind: 'bridgeAck', ok }，不带 token 字段）；顶层 webview 靠 origin + source
         // 校验消息来源，按 { kind: 'bridgeAck', ok } 解析，避免同 kind 两种形状。
@@ -429,8 +431,135 @@ window.__ModuleLoader__.load({
       }
     }
 
-    // —— 入口：立即绑定 DOM 拦截与父消息监听，等待父页面握手 ——
+
+    // —— v0.3.0 图片自由上传：捕获图片字节 + 发送被拒(模型无视觉)自动降级为路径转发 ——
+    // 全程仅在该标识为 true（父页面握手时随 bridgeHello 下发 dsh.image.fallback=true）时生效；
+    // 未握手或降级关闭时，本段落不改变任何原生行为（与 v0.2.4 保持一致）。
+    let imageFallbackEnabled = false; // 是否允许非视觉模型图片降级
+    const imageCache = new Map(); // key(imageCacheKey) -> { name, b64, mime }
+    let fallbackResendInFlight = false; // 幂等：一个被拒只触发一次重发
+    const persistedForCleanup = []; // 本次已落盘路径（pagehide 时删除）
+
+    // 字节数组 → base64（页面内 btoa 可用；仅用于桥接通道传输，不影响 DSH 原生附件）
+    function bytesToBase64(bytes) {
+      let bin = "";
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      return btoa(bin);
+    }
+
+    // 附件捕获入口：图片类型 + 有指纹 + 未缓存，才把字节缓存起来
+    function captureImageFile(file) {
+      if (!imageFallbackEnabled) return; // 降级关闭不捕获
+      if (!file || typeof file.arrayBuffer !== "function") return;
+      if (typeof file.type !== "string" || !file.type.toLowerCase().startsWith("image/")) return;
+      const key = imageCacheKey(file);
+      if (!key || imageCache.has(key)) return; // 同指纹去重
+      file.arrayBuffer()
+        .then((buf) => { if (imageCache.has(key)) return; imageCache.set(key, { name: file.name, b64: bytesToBase64(new Uint8Array(buf)), mime: file.type }); })
+        .catch(() => {});
+    }
+
+    // DOM 附件捕获：change(文件选择)/drop(拖拽)/paste(粘贴) 三路，捕获阶段先于 DSH 处理器
+    // 注：本函数在握手成功时由 hello 分支调用（绑定一次即常驻，内部用开关过滤）
+    function bindImageCapture() {
+      if (bindImageCapture.bound) return; bindImageCapture.bound = true;
+      document.addEventListener("change", (e) => {
+        const t = e.target;
+        if (t && t.files) { for (const f of Array.from(t.files)) captureImageFile(f); }
+      }, true);
+      document.addEventListener("drop", (e) => {
+        if (e.dataTransfer && e.dataTransfer.files) { for (const f of Array.from(e.dataTransfer.files)) captureImageFile(f); }
+      }, true);
+      document.addEventListener("paste", (e) => {
+        if (e.clipboardData && e.clipboardData.items) {
+          for (const it of Array.from(e.clipboardData.items)) {
+            if (it.kind === "file") { const f = it.getAsFile(); if (f) captureImageFile(f); }
+          }
+        }
+      }, true);
+    }
+
+    // 经桥接把一张图片落盘到扩展宿主侧（工作区根），成功返回绝对路径，失败/超时返回 null
+    function saveImageViaBridge(b64, name, requestId) {
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(null), 5000);
+        function onAck(e) {
+          const parsed = parseSaveImageAck(e.data, requestId);
+          if (!parsed) return;
+          clearTimeout(timer);
+          window.removeEventListener("message", onAck);
+          resolve(parsed.ok && parsed.path ? parsed.path : null);
+        }
+        window.addEventListener("message", onAck);
+        parent.postMessage(buildSaveImageRequest(requestId, name, b64, undefined), "*");
+      });
+    }
+
+    // 图片被拒后：落盘全部缓存 → 纯文本+路径指针重发 → 通知与清理登记
+    async function handlePromptImageRejected(parsed, url, init, origFetch) {
+      try {
+        const entries = Array.from(imageCache.values());
+        const pointerLines = [];
+        const savedPaths = [];
+        for (let i = 0; i < entries.length; i++) {
+          const entry = entries[i];
+          const ext = "." + (entry.mime ? entry.mime.split("/")[1].toLowerCase() : "png");
+          const name = imageCacheFilename(String(Date.now()), i, ext);
+          if (!name) continue; // 扩展名不在白名单：跳过该张
+          const p = await saveImageViaBridge(entry.b64, name, "img-" + Date.now() + "-" + i);
+          if (p) { savedPaths.push(p); pointerLines.push(buildImagePointerLine(p)); }
+        }
+        if (savedPaths.length === 0) return; // 无可用落盘（如无工作区根）：保持原生“发送失败”可见
+        // 用新 rpcId 以纯文本重发，避免与已拒请求撞车/重复投递
+        const content = buildTextOnlyContent(parsed.content, pointerLines);
+        const payload = { ...parsed, rpcId: "vsc-fb-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8), content };
+        await origFetch(url, { ...init, body: JSON.stringify(payload) });
+        persistedForCleanup.push(...savedPaths);
+        parent.postMessage(buildImageFallbackNotice(savedPaths), "*");
+      } catch (err) {
+        // 降级全程失败：保留可观察的原生错误，绝不吞用户消息
+        console.error("[dsh-vscode-bridge] image fallback failed:", err);
+      } finally {
+        fallbackResendInFlight = false;
+      }
+    }
+
+    // 拦截 prompt RPC：发送含图内容被「模型不支持图像输入」拒绝时，自动降级重发
+    function interceptPromptFetch() {
+      const origFetch = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const res = await origFetch(input, init);
+        try {
+          if (!imageFallbackEnabled || bridgeToken === "") return res;
+          if (!init || init.method !== "POST" || typeof init.body !== "string" || init.body === "") return res;
+          const parsed = JSON.parse(init.body);
+          if (!parsed || !Array.isArray(parsed.content) || !isPromptWithImages(parsed.content)) return res;
+          const clone = res.clone();
+          let respJson = null;
+          try { respJson = await clone.json(); } catch {}
+          if (detectModelReject(respJson) && !fallbackResendInFlight) {
+            fallbackResendInFlight = true;
+            const u = typeof input === "string" ? input : input && typeof input.url === "string" ? input.url : "";
+            void handlePromptImageRejected(parsed, u, init, origFetch);
+          }
+        } catch {}
+        return res;
+      };
+    }
+
+    // 页面卸载清理：删除本次已由本页落盘的缓存图片（避免长期占用工作区存储）
+    function bindPageCleanup() {
+      window.addEventListener("pagehide", () => {
+        if (persistedForCleanup.length === 0) return;
+        parent.postMessage(buildDeleteImagesRequest("cleanup-" + Date.now(), persistedForCleanup.slice()), "*");
+        persistedForCleanup.length = 0;
+      });
+    }
+
+    // —— 入口：立即可绑定的拦截先挂载；图片捕获在握手后才绑定 ——
     bindLinkInterception();
+    interceptPromptFetch(); // fetch 拦截常驻挂载（内部用开关过滤，未握手/关闭时零干扰）
+    bindPageCleanup();
     window.addEventListener("message", onParentMessage);
     window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("contextmenu", onContextMenu, true);
