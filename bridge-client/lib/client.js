@@ -404,7 +404,7 @@ window.__ModuleLoader__.load({
       if (d.kind === "bridgeHello" && typeof d.token === "string" && d.token !== "") {
         bridgeToken = d.token;
         imageFallbackEnabled = d.imageFallback === true; // v0.3.0：非视觉模型图片降级开关（随 hello 下发）
-        bindImageCapture(); // 握手后才开始捕获附件图片（避免非面板场景行为变化）
+        // 附件图片捕获已由工厂期常驻绑定（bindImageCapture），此处仅刷新开关即可生效
         // 回执统一用 core.js 的 buildSyncWorkspaceAck 构造，形状与工作区同步回执一致
         // （{ kind: 'bridgeAck', ok }，不带 token 字段）；顶层 webview 靠 origin + source
         // 校验消息来源，按 { kind: 'bridgeAck', ok } 解析，避免同 kind 两种形状。
@@ -513,7 +513,9 @@ window.__ModuleLoader__.load({
         // 用新 rpcId 以纯文本重发，避免与已拒请求撞车/重复投递
         const content = buildTextOnlyContent(parsed.content, pointerLines);
         const payload = { ...parsed, rpcId: "vsc-fb-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8), content };
-        await origFetch(url, { ...init, body: JSON.stringify(payload) });
+        // 重发时剥离原请求的 signal：避免复用可能已中止/中止中的 AbortSignal 导致重发被中途取消
+        const { signal: _signal, ...initNoSignal } = init || {};
+        await origFetch(url, { ...initNoSignal, body: JSON.stringify(payload) });
         persistedForCleanup.push(...savedPaths);
         parent.postMessage(buildImageFallbackNotice(savedPaths), "*");
       } catch (err) {
@@ -558,6 +560,7 @@ window.__ModuleLoader__.load({
 
     // —— 入口：立即可绑定的拦截先挂载；图片捕获在握手后才绑定 ——
     bindLinkInterception();
+    bindImageCapture(); // 附件图片捕获常驻挂载（未握手/关闭时经 imageFallbackEnabled 过滤，零干扰）
     interceptPromptFetch(); // fetch 拦截常驻挂载（内部用开关过滤，未握手/关闭时零干扰）
     bindPageCleanup();
     window.addEventListener("message", onParentMessage);
