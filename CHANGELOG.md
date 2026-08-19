@@ -1,3 +1,31 @@
+## [0.3.0] - 2026-08-20
+
+### 新增
+
+- **SSH Remote 支持（可选）**：远程连接时可在远端运行 dsh，并经 VS Code 隧道在面板中打开。
+  新增设置 `dsh.remote.enabled`（默认 `false`）。开启后：扩展在远端宿主管控 dsh（复用优先、自动启动兜底），
+  用 `vscode.env.asExternalUri` 建立本地↔远端端口隧道，展示、复制网址与浏览器打开均使用隧道本地 URL；
+  关闭时远程窗口显示引导占位页，不启动远端服务。声明 `extensionKind` 优先在工作区（远端）运行。
+- **编辑器右上角 DSH 图标**：`editor/title` 贡献 + `dsh.openFromTitle` 命令，点击在编辑器标签栏右上角图标
+  打开右侧辅助侧边栏面板（与 Claude Code 同位置）。
+- **对话框自由上传图片**：模型无视觉能力时不再报错——桥接客户端在附件加入/拖拽/粘贴时捕获图片字节并去重缓存；
+  发送被服务端以 `MODEL_DOES_NOT_SUPPORT_IMAGES` 拒绝后，自动把图片经扩展宿主缓存到工作区，
+  以纯文本+文件路径引用重发（模型可用图像识别工具查看），页面卸载时清理缓存文件；
+  新增设置 `dsh.image.fallback`（默认 `true`）。普通浏览器/未握手时行为与之前完全一致。
+- **新增设置**：`dsh.openInBrowser`（默认 `false`，关闭即默认传 `--no-open`）、
+  `dsh.remote.enabled`（默认 `false`）、`dsh.image.fallback`（默认 `true`）。
+
+### 修复
+
+- **dsh 新版默认弹浏览器**：启动 `dsh web` 默认追加 `--no-open`（DSH 上游 `openBrowser` 默认 true），
+  不再自动打开浏览器；需要时用 `dsh.openInBrowser=true` 恢复原行为。
+
+### 其他
+
+- 桥接消息协议扩展：`saveImage` / `deleteImages` / `imageFallback`（含握手转发与扩展宿主落盘/删除，
+  均为白名单 + 路径安全防护）。
+- 回归：既有 v0.2.4 功能（本地面板/双侧栏/命令/状态栏/桥接/端口回退/退出清理/双语）全部保留并有回归测试覆盖。
+
 ## [0.2.4] - 2026-08-19
 
 ### 修复
