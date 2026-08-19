@@ -34,6 +34,8 @@ export interface ManagerOptions {
   pollMs: number;
   /** dsh 可执行文件绝对路径（非空时优先于平台默认命令名使用） */
   executablePath?: string;
+  /** 是否允许 dsh web 打开浏览器（true=不传 --no-open；默认追加 --no-open） */
+  openInBrowser?: boolean;
 }
 
 /** 注入依赖 */
@@ -226,6 +228,7 @@ export class ServiceManager {
           extraArgs: this.opts.extraArgs,
           cwd: cwdForSpawn,
           executablePath: this.opts.executablePath,
+          openInBrowser: this.opts.openInBrowser,
         });
         break; // spawn 成功（未同步抛异常），跳出重试循环继续等待就绪
       } catch (err) {

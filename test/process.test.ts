@@ -43,7 +43,7 @@ test('Linux/macOS：命令为 dsh，detached 为 true，参数顺序正确', () 
   runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: ['--trusted-host', 'x:1'] });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].cmd, 'dsh');
-  assert.deepEqual(calls[0].args, ['web', '--host', '127.0.0.1', '--port', '3080', '--trusted-host', 'x:1']);
+  assert.deepEqual(calls[0].args, ['web', '--host', '127.0.0.1', '--port', '3080', '--trusted-host', 'x:1', '--no-open']);
   assert.equal(calls[0].opts.detached, true);
 });
 
@@ -62,7 +62,7 @@ test('Windows：注入 PATH 命中 dsh.cmd 后以 node 直跑 bin.js 启动，de
   assert.equal(calls[0].cmd, 'C:\\npm-global\\node.exe');
   assert.deepEqual(calls[0].args, [
     'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
-    'web', '--host', '127.0.0.1', '--port', '0',
+    'web', '--host', '127.0.0.1', '--port', '0', '--no-open',
   ]);
   assert.equal(calls[0].opts.detached, false);
 });
@@ -145,7 +145,7 @@ test('startDsh 传 executablePath 指向 dsh.cmd 时以 node 直跑其 bin.js（
   assert.equal(calls[0].cmd, 'C:\\tools\\node.exe');
   assert.deepEqual(calls[0].args, [
     'C:\\tools\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
-    'web', '--host', '127.0.0.1', '--port', '3080',
+    'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
 });
 
@@ -164,7 +164,7 @@ test('startDsh 传 executablePath 指向 .js 时直接将其作为 argsPrefix（
   assert.equal(calls[0].cmd, 'C:\\repo\\dsh\\lib\\node.exe');
   assert.deepEqual(calls[0].args, [
     'C:\\repo\\dsh\\lib\\bin.js',
-    'web', '--host', '127.0.0.1', '--port', '3080',
+    'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
 });
 
@@ -183,7 +183,7 @@ test('startDsh 未传 executablePath 时 win32 从 PATH 推导 bin.js（PATH 注
   assert.equal(calls[0].cmd, 'C:\\node\\node.exe');
   assert.deepEqual(calls[0].args, [
     `${npmDir}\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js`,
-    'web', '--host', '127.0.0.1', '--port', '3080',
+    'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
 });
 
@@ -217,7 +217,7 @@ test('startDsh win32 + Electron 环境：绝不使用 execPath（Code.exe），�
   assert.equal(calls[0].cmd, nodeExe);
   assert.deepEqual(calls[0].args, [
     'C:\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
-    'web', '--host', '127.0.0.1', '--port', '3080',
+    'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
 });
 
@@ -319,3 +319,16 @@ test('windowsDshInvocation：command 为传入 execPath，argsPrefix[0] 为 bin.
     'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
   ]);
 });
+test('startDsh 默认追加 --no-open，openInBrowser=true 时不追加（v0.3.0）', () => {
+  const calls: { args: string[] }[] = [];
+  const spawnImpl: SpawnFn = (_cmd, args, _opts) => {
+    calls.push({ args });
+    return new FakeChild();
+  };
+  const runner = createProcessRunner(spawnImpl, 'linux');
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
+  assert.equal(calls[0].args.at(-1), '--no-open');
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], openInBrowser: true });
+  assert.equal(calls[1].args.includes('--no-open'), false);
+});
+

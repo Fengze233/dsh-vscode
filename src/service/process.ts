@@ -26,6 +26,8 @@ export interface StartOptions {
   cwd?: string;
   /** dsh 可执行文件绝对路径（非空时优先于平台默认命令名 dsh.cmd / dsh 使用） */
   executablePath?: string;
+  /** 是否允许 dsh web 打开浏览器（true=不追加 --no-open；默认 false=追加 --no-open） */
+  openInBrowser?: boolean;
 }
 
 /**
@@ -227,9 +229,11 @@ export function createProcessRunner(
   let lastStart: { command: string; args: string[] } | null = null;
 
   return {
-    startDsh({ host, port, extraArgs, cwd, executablePath }) {
+    startDsh({ host, port, extraArgs, cwd, executablePath, openInBrowser }) {
       // 基础参数（web 子命令 + host/port + 用户额外参数），两种平台共用
       const webArgs = ['web', '--host', host, '--port', String(port), ...extraArgs];
+      // 默认不让 dsh 弹浏览器（嵌入面板场景无需浏览器）：除非用户打开 openInBrowser 开关
+      if (openInBrowser !== true) webArgs.push('--no-open');
       // 工作目录容错：过滤掉 Windows 上的 UNC / 不存在 / 相对路径，避免 spawn 抛 EINVAL
       const sanitizedCwd = sanitizeCwd(cwd, platform, existsImpl);
       const spawnOptions: SpawnOptions = {
