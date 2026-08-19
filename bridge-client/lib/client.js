@@ -99,14 +99,28 @@ window.__ModuleLoader__.load({
     // 自行调用 document.execCommand 模拟（Flutter DevTools 已在同类场景验证有效），
     // 失败时再用剪贴板桥接兜底，保证复制/粘贴在 macOS 上可用。
 
-    // 读取当前选区文本（复制/剪切兜底用）
+    // 读取当前选区文本（复制/剪切及右键菜单可用性判断用）。
+    // 注意：Chromium 中 textarea/input 聚焦时的选区不体现在 window.getSelection()，
+    // 因此除文档选区外，还要读聚焦可编辑元素内的选区，避免复制兜底/菜单置灰失效。
     function readSelectionText() {
+      let text = "";
       try {
         const sel = window.getSelection();
-        return sel && sel.rangeCount ? sel.toString() : "";
+        text = sel && sel.rangeCount ? sel.toString() : "";
       } catch {
-        return "";
+        text = "";
       }
+      if (text) return text;
+      // 文档选区为空：尝试从聚焦的 textarea/input 读其内部选区
+      try {
+        const el = focusedEditable();
+        if (el && typeof el.value === "string" && typeof el.selectionStart === "number") {
+          text = el.value.slice(el.selectionStart, el.selectionEnd);
+        }
+      } catch {
+        text = "";
+      }
+      return text;
     }
 
     // 执行页面级编辑命令；成功返回 true，失败（不支持/被拒）返回 false
