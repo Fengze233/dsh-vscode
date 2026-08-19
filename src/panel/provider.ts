@@ -86,6 +86,11 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
         // 这里由扩展宿主写系统剪贴板，并回执给 iframe 收尾其 writeText Promise。
         void this.copyTextToClipboard(msg);
         break;
+      case 'bridgeReadText':
+        // 剪贴板读取：扩展宿主读系统剪贴板（无 webview 权限限制），
+        // 回执给 iframe 供其 Cmd+V 粘贴兜底使用。
+        void this.readTextFromClipboard(msg);
+        break;
       case 'bridgeOpenExternal':
       case 'bridgeOpenFile':
         // 桥接跳转消息统一走 host 的 handleBridgeMessage（内部分流外链/文件，做白名单与路径解析）
@@ -119,6 +124,29 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
     }
     try {
       await this.view?.webview.postMessage({ type: 'bridgeCopyTextAck', requestId: msg.requestId, ok });
+    } catch {
+      // 面板可能已隐藏/销毁，回执发不出去也不影响扩展其它功能。
+    }
+  }
+
+  /** 剪贴板桥接：扩展宿主读系统剪贴板，完成后回执给 webview（由顶层脚本转发给 iframe） */
+  private async readTextFromClipboard(msg: Extract<PanelMessage, { type: 'bridgeReadText' }>): Promise<void> {
+    let ok = false;
+    let text: string | undefined;
+    try {
+      // 读取失败或内容为空时都回执 ok=false，iframe 侧放弃本次粘贴
+      text = await vscode.env.clipboard.readText();
+      ok = typeof text === 'string' && text !== '';
+    } catch {
+      // 读剪贴板失败（如系统无剪贴板权限）：回执 ok=false，iframe 侧静默放弃
+    }
+    try {
+      await this.view?.webview.postMessage({
+        type: 'bridgeReadTextAck',
+        requestId: msg.requestId,
+        ok,
+        text,
+      });
     } catch {
       // 面板可能已隐藏/销毁，回执发不出去也不影响扩展其它功能。
     }

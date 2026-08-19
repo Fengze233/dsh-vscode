@@ -53,3 +53,94 @@ export function isBridgeMessage(data, token) {
 
 // 握手 token 字段名（父页面发来的消息里携带）
 export const HANDSHAKE_TOKEN_KEY = 'token';
+
+/**
+ * 从键盘事件判定"标准编辑快捷键"命令。
+ *
+ * 背景：VS Code 在 macOS 上会调用 setIgnoreMenuShortcuts(true) 并只在顶层 webview
+ * 转发快捷键，导致嵌套 iframe（本桥接所在的 DSH 页面）里的 Cmd+C / Cmd+V / Cmd+A 等
+ * 被吞掉（microsoft/vscode#129178 / #180234，官方至今未修复）。但 iframe 内的 JS 仍能
+ * 收到 keydown 事件，因此这里把"按键 → 编辑命令"的判定抽成纯函数，
+ * 由 client.js 捕获后自行模拟对应行为。
+ *
+ * @param {{ key?: string, metaKey?: boolean, ctrlKey?: boolean, shiftKey?: boolean }} e
+ *   键盘事件的关键字段（兼容真实 KeyboardEvent 与测试桩，多余字段忽略）
+ * @returns {null | 'copy' | 'paste' | 'cut' | 'selectAll' | 'undo' | 'redo'}
+ *   命中的编辑命令；未命中返回 null（调用方应放行原事件）
+ */
+export function getShortcutCommand(e) {
+  if (!e || typeof e !== 'object') return null;
+  // 主修饰键：mac 用 meta（⌘），Windows/Linux 用 ctrl，两者都识别以兼容两种平台
+  const hasMod = e.ctrlKey === true || e.metaKey === true;
+  // Windows 上 Shift+Insert 是经典的粘贴组合，一并支持
+  if (!hasMod) {
+    return e.shiftKey === true && e.key === 'Insert' ? 'paste' : null;
+  }
+  // 键名统一小写以兼容 'c' 与 'C'（Shift+字母时 key 为大写）
+  const k = typeof e.key === 'string' ? e.key.toLowerCase() : '';
+  switch (k) {
+    case 'c':
+      return 'copy';
+    case 'v':
+      return 'paste';
+    case 'x':
+      return 'cut';
+    case 'a':
+      return 'selectAll';
+    case 'z':
+      // Cmd+Shift+Z 是重做（mac 惯例；Windows 上 Ctrl+Y 也能重做，暂不额外处理）
+      return e.shiftKey === true ? 'redo' : 'undo';
+    default:
+      return null;
+  }
+}
+
+/**
+ * 判定一个元素是否为"可编辑元素"（可接收粘贴/剪切/打字的目标）。
+ *
+ * @param {object|null} el DOM 元素
+ * @returns {boolean} true 表示 textarea / 可输入 input / contenteditable
+ */
+export function isEditableElement(el) {
+  if (!el || typeof el !== 'object' || !('tagName' in el)) return false;
+  const tag = typeof el.tagName === 'string' ? el.tagName.toLowerCase() : '';
+  if (tag === 'textarea') return true;
+  if (tag === 'input') {
+    // 真实 DOM 的 input.type 属性默认为 'text'，但为兼容测试桩与旧浏览器，
+    // 空字符串 type 一律按 text 处理
+    const type = typeof el.type === 'string' && el.type !== '' ? el.type.toLowerCase() : 'text';
+    // 仅把能接收键盘文本输入的 type 视为可编辑（checkbox/button/range 等排除）
+    return ['text', 'search', 'url', 'tel', 'password', 'number', 'email'].includes(type);
+  }
+  return el.isContentEditable === true;
+}
+
+/**
+ * 计算在字符串的 [start, end) 区间插入 text 后的新值（纯函数，供可编辑元素兜底写入）。
+ *
+ * @param {string|undefined|null} value 原值（textarea.value 等）
+ * @param {number} start 选区起点（selectionStart）
+ * @param {number} end 选区终点（selectionEnd）
+ * @param {string} text 待插入文本
+ * @returns {string} 插入后的完整新值
+ */
+export function computeInsertedValue(value, start, end, text) {
+  const v = typeof value === 'string' ? value : String(value ?? '');
+  // 越界/负值/顺序异常都归一到合法区间，避免 slice 结果错乱
+  const s = Math.max(0, Math.min(Number.isFinite(start) ? start : v.length, v.length));
+  const e = Math.max(s, Math.min(Number.isFinite(end) ? end : v.length, v.length));
+  return v.slice(0, s) + text + v.slice(e);
+}
+
+// 构造"读取剪贴板"消息（iframe 页面 → 父页面 → 扩展 → 系统剪贴板读取，供粘贴兜底）
+export function buildReadTextMessage(requestId) {
+  return { kind: 'readText', requestId };
+}
+
+// 构造"读取剪贴板回执"消息（父页面 → iframe 页面，resolve/reject readText 的 Promise）
+// ok=true 且 text 非空才视为成功；空文本/失败一律回执 ok=false（无可粘贴内容）
+export function buildReadTextAck(requestId, ok, text) {
+  return ok === true && typeof text === 'string' && text !== ''
+    ? { kind: 'readTextAck', requestId, ok: true, text }
+    : { kind: 'readTextAck', requestId, ok: false };
+}

@@ -1,3 +1,14 @@
+## [0.2.4] - 2026-08-19
+
+### 修复
+
+- **macOS 上聊天内容无法复制/粘贴/右键（issue #3）**：VS Code 在 macOS 上会吞掉嵌套 iframe 内的 `Cmd+C` / `Cmd+V` / `Cmd+A` 等标准快捷键与右键菜单（上游 bug [microsoft/vscode#129178](https://github.com/microsoft/vscode/issues/129178) / [#180234](https://github.com/microsoft/vscode/issues/180234)，官方未修复）。桥接包在握手后接管这些操作：
+  - 捕获 `keydown`，识别 `Cmd/Ctrl+C/V/X/A/Z` 与 `Shift+Insert`，优先用 `document.execCommand` 模拟（此方案由 Flutter DevTools 团队在同类场景验证有效）；
+  - **复制/剪切兜底**：`execCommand` 不可用时，把选区文本经剪贴板写桥接交给扩展宿主写入系统剪贴板；
+  - **粘贴兜底**：新增剪贴板读取桥接（`vscode.env.clipboard.readText`，无 webview 权限限制），把剪贴板文本插入焦点输入框（textareas 兼容 React 受控组件）；
+  - **右键菜单**：捕获 `contextmenu` 弹出自定义菜单（复制/粘贴/剪切/全选/撤销/重做），不再依赖 VS Code 的原生菜单；
+  - 未握手（普通浏览器）时保持原生行为完全不变。
+
 ## [0.2.3] - 2026-08-17
 
 ### 修复

@@ -71,6 +71,17 @@ test('readyPage 握手脚本包含剪贴板桥接的上下行转发', () => {
   assert.ok(html.includes("kind: 'copyTextAck'"), '应把回执转发为 iframe 的 copyTextAck');
 });
 
+test('readyPage 握手脚本包含剪贴板读取（粘贴兜底）的上下行转发', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
+  // 上行：iframe 的 readText → vscode.postMessage(bridgeReadText)
+  assert.ok(html.includes("kind === 'readText'"), '应转发 iframe 的 readText 上行消息');
+  assert.ok(html.includes("type: 'bridgeReadText'"), '应向扩展宿主发送 bridgeReadText');
+  // 下行：扩展宿主 bridgeReadTextAck → iframe 的 readTextAck（携带 text）
+  assert.ok(html.includes("type === 'bridgeReadTextAck'"), '应接收扩展宿主的读取回执');
+  assert.ok(html.includes("kind: 'readTextAck'"), '应把回执转发为 iframe 的 readTextAck');
+  assert.ok(html.includes('typeof d.text === \'string\''), '回执应透传剪贴板文本');
+});
+
 test('readyPage 未启用桥接时不注入握手脚本', () => {
   const html = readyPage('http://127.0.0.1:3080/', ctx());
   // 未传第三参（或 enabled=false）时保持向后兼容，不注入握手脚本

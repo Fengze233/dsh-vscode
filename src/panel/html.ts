@@ -16,6 +16,8 @@ export type PanelMessage =
   | { type: 'bridgeOpenExternal'; url: string }
   | { type: 'bridgeOpenFile'; path: string; cwd?: string }
   | { type: 'bridgeCopyText'; text: string; requestId: string }
+  | { type: 'bridgeReadText'; requestId: string }
+  | { type: 'bridgeReadTextAck'; requestId: string; ok: boolean; text?: string }
   | { type: 'bridgeAck'; ok: boolean };
 
 /** 渲染上下文 */
@@ -90,6 +92,16 @@ if (iframeEl) {
       iframeEl.contentWindow.postMessage({ kind: 'copyTextAck', requestId: d.requestId, ok: d.ok }, iframeSrc);
       return;
     }
+    // 剪贴板读取回执：转发给 iframe，供其 resolve 粘贴兜底的 readText Promise
+    if (d && d.type === 'bridgeReadTextAck' && typeof d.requestId === 'string' && typeof d.ok === 'boolean') {
+      iframeEl.contentWindow.postMessage({
+        kind: 'readTextAck',
+        requestId: d.requestId,
+        ok: d.ok,
+        text: typeof d.text === 'string' ? d.text : undefined,
+      }, iframeSrc);
+      return;
+    }
     // —— 上行：iframe 发来的消息，origin + source 双重校验 ——
     if (e.origin !== ALLOWED_ORIGIN || e.source !== iframeEl.contentWindow) return;
     // 握手回执：统一形状 { kind:'bridgeAck', ok }（不带 token 字段），只读 ok
@@ -104,6 +116,11 @@ if (iframeEl) {
     // 复制文本：转发给扩展 → vscode.env.clipboard.writeText（跨源 iframe 原生剪贴板 API 被 VS Code 拦截）
     if (d && d.kind === 'copyText' && typeof d.text === 'string' && typeof d.requestId === 'string') {
       vscode.postMessage({ type: 'bridgeCopyText', text: d.text, requestId: d.requestId });
+      return;
+    }
+    // 读取剪贴板：转发给扩展 → vscode.env.clipboard.readText（Cmd+V 粘贴兜底）
+    if (d && d.kind === 'readText' && typeof d.requestId === 'string') {
+      vscode.postMessage({ type: 'bridgeReadText', requestId: d.requestId });
     }
   });
   // iframe 加载完成后下发握手消息（携带 token）。
