@@ -24,3 +24,41 @@ export function isBridgeMessage(data: unknown, token: string): boolean;
 
 /** 握手 token 字段名（父页面发来的消息里携带） */
 export const HANDSHAKE_TOKEN_KEY: string;
+
+/** 键盘事件关键字段（getShortcutCommand 的输入，兼容真实 KeyboardEvent 与测试桩） */
+interface ShortcutEventLike {
+  key?: string;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  shiftKey?: boolean;
+}
+
+/** 编辑命令枚举（getShortcutCommand 的返回） */
+type EditCommand = 'copy' | 'paste' | 'cut' | 'selectAll' | 'undo' | 'redo';
+
+/**
+ * 从键盘事件判定"标准编辑快捷键"命令（VS Code 吞掉 iframe 内 Cmd+C/V/A 的修复）。
+ * 命中返回对应编辑命令；未命中返回 null（调用方应放行原事件）。
+ */
+export function getShortcutCommand(e: ShortcutEventLike | null | undefined): EditCommand | null;
+
+/** 判定元素是否为可编辑元素（textarea / 可输入 input / contenteditable） */
+export function isEditableElement(el: unknown): boolean;
+
+/** 计算在 [start, end) 选区插入 text 后的新值（越界/负值归一） */
+export function computeInsertedValue(
+  value: string | null | undefined,
+  start: number,
+  end: number,
+  text: string,
+): string;
+
+/** 构造"读取剪贴板"消息（iframe 页面 → 父页面 → 扩展 → 系统剪贴板读取，粘贴兜底用） */
+export function buildReadTextMessage(requestId: string): { kind: 'readText'; requestId: string };
+
+/** 构造"读取剪贴板回执"消息（父页面 → iframe 页面）；成功带 text，失败省略 text */
+export function buildReadTextAck(
+  requestId: string,
+  ok: boolean,
+  text?: string,
+): { kind: 'readTextAck'; requestId: string; ok: boolean; text?: string };
