@@ -62,8 +62,7 @@ export const DEFAULTS: DshConfig = {
   executablePath: '',
   openInBrowser: false,
   remoteEnabled: false,
-  // 图片降级功能已停用（待删除）：默认关闭，DSH RC8 起不再需要
-  imageFallback: false,
+  imageFallback: true,
 };
 
 /** 安全边界：仅允许回环地址 */

@@ -34,7 +34,7 @@ Use the [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness
 - 🔒 **Security boundary**: loopback addresses only (127.0.0.1 / localhost / [::1]); no credentials are read.
 - 🔝 **Editor title-bar icon**: a DSH whale button sits in the top-right of the editor tab bar (like Claude Code) — one click opens the right-side DSH panel;
 - 🌐 **SSH Remote (opt-in)**: when connected to a remote host, run dsh on the remote and open the panel through a VS Code tunnel (`dsh.remote.enabled`, off by default);
-- 🖼️ **Free image upload**: *(disabled by default — DSH handles images natively in newer versions; the fallback path is off unless `dsh.image.fallback` is set to `true`, and the code is pending removal)*;
+- 🖼️ **Free image upload**: send images even when the active model has no vision — the image is cached in the workspace and dispatched as a file-path reference, letting the model inspect it with an image tool (files are cleaned up when the panel closes; opt-out via `dsh.image.fallback`);
 - 🪟 **No surprise browser window**: `dsh web` is started with `--no-open` by default (restore with `dsh.openInBrowser`).
 
 ## 📥 Installation
@@ -138,7 +138,7 @@ The bridge only works inside the panel. If it is inactive (e.g. you open the DSH
 | `dsh.executablePath` | `""` | Absolute path to the `dsh` executable (`dsh.cmd` on Windows); empty = look up on PATH |
 | `dsh.openInBrowser` | `false` | Open the DSH page in the default browser after the service starts (when off, `--no-open` is passed to `dsh web`) |
 | `dsh.remote.enabled` | `false` | Enable remote scenarios (SSH Remote / WSL / Dev Containers / Codespaces): run dsh on the remote and open the panel through a VS Code tunnel (off by default; reload the window after enabling) |
-| `dsh.image.fallback` | `false` | **Disabled by default (pending removal).** When on, send attached images as file-path references if the active model has no vision (files are cached in the workspace root and cleaned up later) |
+| `dsh.image.fallback` | `true` | Send attached images as file-path references when the active model has no vision, instead of failing (files are cached in the session working directory and removed when the panel closes) |
 
 ## 🌍 Localization
 
@@ -181,7 +181,7 @@ src/
 - The colored icon on the "Get Started with DSH" walkthrough card comes from Marketplace gallery data and only appears after the extension is published (the card itself works regardless);
 - VS Code platform rule: the left icon opens the left panel, the right icon opens the right panel — the left icon cannot open the right panel.
 - SSH Remote: the extension must also be installed on the remote (VS Code prompts for it); the tunnel appears in the Ports view and can be closed by the user (the plugin re-creates it on the next ready).
-- Image fallback is **disabled by default** (`dsh.image.fallback=false`) and the feature is **pending removal** (newer DSH versions handle images natively). If you re-enable it, remember: files are cached under the **workspace root** — **an open workspace folder is required** — and cleaned up on panel close / page unload / extension deactivate.
+- Image fallback caches the image files under the **workspace root** — **an open workspace folder is required** (with no folder open, images cannot be cached and no fallback happens). Files are cleaned up on panel close / page unload and when the extension is deactivated (best-effort — files added after the last cleanup are kept until the next cleanup).
 - `--no-open` is passed to `dsh web` by default, unless `dsh.extraArgs` or `dsh.openInBrowser` explicitly opts back in to opening the browser.
 
 ## 🌐 Community

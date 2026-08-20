@@ -23,7 +23,7 @@
   "dsh.config.executablePath": "Absolute path to the dsh executable (dsh.cmd on Windows). Empty = look up on PATH.",
   "dsh.config.openInBrowser": "Open the DSH page in the default browser after the service starts (when off, \u0060--no-open\u0060 is passed to \u0060dsh web\u0060).",
   "dsh.config.remoteEnabled": "Enable remote scenarios (SSH Remote / WSL / Dev Containers / Codespaces): run dsh on the remote host and open the panel through a VS Code tunnel. Off by default; when off, remote windows show a guide instead of starting a remote service. Requires \u0060dsh\u0060 installed on the remote and a window reload after enabling.",
-  "dsh.config.imageFallback": "Disabled by default (pending removal). When on: if the active model does not support image input, send attached images as file-path references instead of failing (files are cached in the workspace root and removed later).",
+  "dsh.config.imageFallback": "When the active model does not support image input, automatically send attached images as file-path references instead of failing (files are cached in the session working directory and removed when the conversation ends).",
   "dsh.walkthrough.title": "Get Started with DSH",
   "dsh.walkthrough.description": "Use the DeepSeek Harness web UI right inside VS Code.",
   "dsh.walkthrough.step.title": "Open the DSH panel",
