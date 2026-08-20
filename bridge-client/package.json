@@ -1,6 +1,6 @@
 {
   "name": "dsh-vscode-bridge",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "VS Code 面板桥接客户端（由 dsh-vscode-panel 扩展安装进 DSH web profile 的官方 client 插件）",
   "type": "module",
   "main": "lib/index.js",
