@@ -104,11 +104,23 @@ export function detectModelReject(data: unknown): boolean;
 /** 内容块数组是否含图片块 */
 export function isPromptWithImages(content: unknown): boolean;
 
+/** 提取内容块中的全部图片块（保持消息顺序=上传/发送顺序） */
+export function imageBlocksOf(content: unknown): unknown[];
+
+/** 把本条消息的图片块按顺序映射到已捕获缓存条目，返回有序子集（只引用本条消息的图片） */
+export function matchCapturedImages(
+  content: unknown,
+  entries: { key?: string; name?: string; b64?: string; mime?: string }[],
+): { key?: string; name?: string; b64?: string; mime?: string }[];
+
 /** 提取内容块中的全部文本（按顺序拼接） */
 export function extractPromptText(content: unknown): string;
 
-/** 构造图片地址行：图片: <绝对路径>（地址随消息发给模型，由模型选图像工具查看） */
-export function buildImagePointerLine(path: string): string;
+/** 中文数字 1..10（超出用阿拉伯数字兜底） */
+export function zhOrdinal(n: number): string;
+
+/** 构造图片地址行：图片一/图片二…：<绝对路径>（n 为 1 起序号；缺省时为 '图片：<路径>' 简写） */
+export function buildImagePointerLine(path: string, n?: number): string;
 
 /** 构造纯文本内容块数组（原文本 + 图片指针行） */
 export function buildTextOnlyContent(content: unknown, pointerLines?: string[]): { type: 'text'; text: string }[];

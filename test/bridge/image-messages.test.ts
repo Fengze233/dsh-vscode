@@ -10,7 +10,10 @@ import {
   IMAGE_CACHE_EXTENSIONS,
   detectModelReject,
   isPromptWithImages,
+  imageBlocksOf,
+  matchCapturedImages,
   extractPromptText,
+  zhOrdinal,
   buildImagePointerLine,
   buildTextOnlyContent,
   imageCacheKey,
@@ -67,8 +70,41 @@ test('isPromptWithImages / extractPromptText / buildTextOnlyContent', () => {
   assert.ok(built[0].text.includes('a'));
   // 地址行：以「图片：<绝对路径>」自然标注，不含"插件风格"解释文案
   assert.equal(buildImagePointerLine('/w/x.png'), '图片：/w/x.png');
+  // 序号：zhOrdinal 1..10 中文、超出阿拉伯数字兜底；带序号时输出 图片一/图片二…
+  assert.equal(zhOrdinal(1), '一');
+  assert.equal(zhOrdinal(2), '二');
+  assert.equal(zhOrdinal(10), '十');
+  assert.equal(zhOrdinal(11), '11');
+  assert.equal(buildImagePointerLine('/w/1.png', 1), '图片一：/w/1.png');
+  assert.equal(buildImagePointerLine('/w/2.png', 2), '图片二：/w/2.png');
   // 无指针时保持原文本
   assert.equal(buildTextOnlyContent([{ type: 'text', text: 'a' }], []).length, 1);
+});
+
+test('imageBlocksOf / matchCapturedImages：按本条消息顺序只取实际包含的图片', () => {
+  const content = [
+    { type: 'text', text: '描述' },
+    { type: 'image', name: 'A.png', data: 'dataA' },
+    { type: 'image', name: 'B.png', data: 'dataB' },
+  ];
+  assert.equal(imageBlocksOf(content).length, 2);
+  assert.equal(imageBlocksOf([{ type: 'text' }]).length, 0);
+  // 5 个历史缓存，但本条消息只含 A/B —— 只应匹配到 A/B（按消息顺序）
+  const entries = [
+    { key: 'kA', name: 'A.png', b64: 'dataA' },
+    { key: 'kX', name: 'X.png', b64: 'dataX' },
+    { key: 'kB', name: 'B.png', b64: 'dataB' },
+    { key: 'kY', name: 'Y.png', b64: 'dataY' },
+    { key: 'kZ', name: 'Z.png', b64: 'dataZ' },
+  ];
+  const used = matchCapturedImages(content, entries);
+  assert.deepEqual(used.map((e) => e.key), ['kA', 'kB'], '只应取本条消息实际包含的图片，且保持消息顺序');
+  // 消息图片块无 name 时退回按 base64 数据匹配
+  const used2 = matchCapturedImages([{ type: 'image', data: 'dataZ' }], entries);
+  assert.deepEqual(used2.map((e) => e.key), ['kZ']);
+  // 无任何匹配时兜底按序取第一个未占用
+  const used3 = matchCapturedImages([{ type: 'image', data: 'none' }], [{ key: 'k1', name: '1.png', b64: 'x' }]);
+  assert.deepEqual(used3.map((e) => e.key), ['k1']);
 });
 
 test('imageCacheKey', () => {

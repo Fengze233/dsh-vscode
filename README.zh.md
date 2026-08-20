@@ -182,7 +182,7 @@ src/
 - VS Code 平台规则：左侧图标打开左侧面板、右侧图标打开右侧面板，无法让左侧图标打开右侧面板。
 - SSH Remote：远端也需安装本插件（VS Code 会引导）；隧道会出现在「端口(Ports)」视图，用户可手动关闭，插件在下次就绪时自动重建。
 - 图片降级：缓存文件放在**工作区根目录**——**需先打开一个工作区文件夹**（未打开文件夹时无法落盘缓存，也就不做降级）。缓存在面板关闭/页面卸载与扩展停用时会清理（尽力而为；清理后新加的图片保留到下次清理）。
-- **复测如何确认桥接已更新**：在 DSH 面板 DevTools（开发者工具）Console 中应看到 `[dsh-vscode-bridge] handshake ok, **v0.3.1**, imageFallback=true` 与传图发送后的 `image fallback: 已把图片改为地址随消息重发（N 张）: …` 日志；若仍显示 `v0.3.0`，说明旧桥接未重装——请重启 DSH 服务（新 vsix 随附桥接版本 `0.3.1`，安装器会在版本不一致时强制重装）。
+- **复测如何确认桥接已更新**：在 DSH 面板 DevTools（开发者工具）Console 中应看到 `[dsh-vscode-bridge] handshake ok, **v0.3.2**, imageFallback=true` 与传图发送后的 `image fallback: 已把图片改为地址随消息重发（N 张）: …` 日志；若仍显示旧版本，说明旧桥接未重装——请重启 DSH 服务（新 vsix 随附桥接版本 `0.3.2`，安装器会在版本不一致时强制重装）。
 - `--no-open` 默认传给 `dsh web`；若在 `dsh.extraArgs` 或 `dsh.openInBrowser` 显式选择弹浏览器，则按你的选择执行。
 
 ## 🌐 社区

@@ -214,7 +214,7 @@ test('被拒（非视觉模型）→ 保存图片、图片改为地址重发、�
     assert.ok(Array.isArray(resendBody.payload.content) && resendBody.payload.content.length === 1);
     assert.equal(resendBody.payload.content[0].type, 'text');
     assert.ok(resendBody.payload.content[0].text.includes('这是什么？'), '应保留用户原文');
-    assert.match(resendBody.payload.content[0].text, /图片：\S+dsh-imgcache-\S+\.png/, '应以「图片：<绝对路径>」形式随消息发出');
+    assert.match(resendBody.payload.content[0].text, /图片一：\S+dsh-imgcache-\S+\.png/, '应以「图片一：<绝对路径>」形式随消息发出');
 
     // ③ 请求过 saveImage 落盘（带图像数据，父桩回执了路径）
     const saveReqs = b.parentMessages.filter((m) => m.kind === 'saveImage');
@@ -270,6 +270,107 @@ test('被拒但无图片缓存（未打开工作区）→ 回退原生被拒响�
     assert.equal(json.result.ok, false);
     assert.equal(json.result.error.code, 'attachment-error');
     assert.ok(!b.parentMessages.some((m) => m.kind === 'saveImage'), '无缓存不应落盘');
+  } finally {
+    rmSync(b.outDir, { recursive: true, force: true });
+  }
+});
+
+test('多条历史缓存时只降级本条消息的图片：按序标注 图片一/图片二、用后消费，不再重复引用', async () => {
+  const calls: { input: unknown; init: any }[] = [];
+  // 模拟服务端：含图请求被拒（非视觉模型），纯文本重发成功
+  const fakeRealFetch = async (input: unknown, init: any) => {
+    calls.push({ input, init });
+    let body: any = {};
+    try { body = JSON.parse(init.body || '{}'); } catch {}
+    const content = body.payload && body.payload.content;
+    const hasImage = Array.isArray(content) && content.some((c: any) => c && c.type === 'image');
+    return jsonResponse(hasImage ? REJECT_BODY : ACCEPT_BODY);
+  };
+  const b = loadBridge({ fetch: fakeRealFetch });
+  try {
+    b.apply();
+    b.emitWin('message', { kind: 'bridgeHello', token: 'tok', imageFallback: true });
+    // 捕获 3 张（A/B/C）
+    const mkFile = (name: string) => ({ name, size: name.length, lastModified: 1, type: 'image/png', arrayBuffer: async () => new Uint8Array([1, 2, 3]) });
+    b.emitDoc('change', { target: { files: [mkFile('A.png'), mkFile('B.png'), mkFile('C.png')] } });
+    await new Promise((r) => setTimeout(r, 20));
+
+    // 第 1 次发送：本条消息只含 A、B 两张
+    const body1 = JSON.stringify({
+      type: 'client-request', rpcId: 'm1', method: 'session.prompt',
+      payload: { sessionId: 's1', mode: 'queue',
+        content: [{ type: 'text', text: '看看' }, { type: 'image', name: 'A.png', data: 'x' }, { type: 'image', name: 'B.png', data: 'y' }] },
+    });
+    const out1 = await b.window.fetch('/api/prompt', { method: 'POST', body: body1 });
+    assert.equal((await out1.json()).result.ok, true);
+    // 恰好 2 次 fetch：原始(含图) + 重发(纯文本)
+    assert.equal(calls.length, 2);
+    const text1 = JSON.parse(calls[1].init.body).payload.content[0].text;
+    assert.match(text1, /图片一：\S*dsh-imgcache-[^\n]*\.png/m, '应按序标为图片一');
+    assert.match(text1, /图片二：\S*dsh-imgcache-[^\n]*\.png/m, '应按序标为图片二');
+    assert.ok(!/图片[三四五]/m.test(text1), '不应引用本条消息外的图片');
+    const saves1 = b.parentMessages.filter((m) => m.kind === 'saveImage');
+    assert.equal(saves1.length, 2, '只应落盘本条消息的 2 张');
+
+    // 第 2 次发送：只含 C —— A/B 已被消费，不应再被重复引用
+    const body2 = JSON.stringify({
+      type: 'client-request', rpcId: 'm2', method: 'session.prompt',
+      payload: { sessionId: 's1', mode: 'queue',
+        content: [{ type: 'text', text: '再发' }, { type: 'image', name: 'C.png', data: 'z' }] },
+    });
+    const out2 = await b.window.fetch('/api/prompt', { method: 'POST', body: body2 });
+    assert.equal((await out2.json()).result.ok, true);
+    assert.equal(calls.length, 4);
+    const text2 = JSON.parse(calls[3].init.body).payload.content[0].text;
+    assert.match(text2, /图片一：\S*dsh-imgcache-[^\n]*\.png/m, 'C 应标为图片一');
+    assert.ok(!/图片二/m.test(text2), 'C 只有一张，不应出现第二行');
+    // 不重复引用第 1 次落盘的 A/B 文件
+    for (const s of saves1) {
+      assert.ok(!text2.includes(s.name), '不得重复引用上一轮已消费的临时文件 ' + s.name);
+    }
+    assert.equal(b.parentMessages.filter((m) => m.kind === 'saveImage').length, 3, '本轮新增只落盘 1 张');
+  } finally {
+    rmSync(b.outDir, { recursive: true, force: true });
+  }
+});
+
+test('会话新建/切换时删除上一对话已落盘的临时图片（对话终止清理）', async () => {
+  const calls: { input: unknown; init: any }[] = [];
+  // 含图请求被拒（触发降级落盘），纯文本/其它成功
+  const fakeRealFetch = async (input: unknown, init: any) => {
+    calls.push({ input, init });
+    let body: any = {};
+    try { body = JSON.parse(init.body || '{}'); } catch {}
+    const content = body.payload && body.payload.content;
+    const hasImage = Array.isArray(content) && content.some((c: any) => c && c.type === 'image');
+    return jsonResponse(hasImage ? REJECT_BODY : ACCEPT_BODY);
+  };
+  const b = loadBridge({ fetch: fakeRealFetch });
+  try {
+    b.apply();
+    b.emitWin('message', { kind: 'bridgeHello', token: 'tok', imageFallback: true });
+    // 会话 s1：发一张图 → 被拒 → 落盘 1 张到工作区
+    const mkFile = (name: string) => ({ name, size: 3, lastModified: 7, type: 'image/png', arrayBuffer: async () => new Uint8Array([1, 2, 3]) });
+    b.emitDoc('change', { target: { files: [mkFile('s1.png')] } });
+    await new Promise((r) => setTimeout(r, 20));
+    const bodyP = JSON.stringify({
+      type: 'client-request', rpcId: 'p1', method: 'session.prompt',
+      payload: { sessionId: 's1', content: [{ type: 'text', text: 'hi' }, { type: 'image', name: 's1.png', data: 'x' }] },
+    });
+    const out1 = await b.window.fetch('/api/prompt', { method: 'POST', body: bodyP });
+    assert.equal((await out1.json()).result.ok, true);
+    const saves = b.parentMessages.filter((m) => m.kind === 'saveImage');
+    assert.equal(saves.length, 1);
+    const savedPath = '/ws/' + saves[0].name;
+
+    // 新建会话 → 应删除上一对话（s1）已落盘的临时图片
+    const createBody = JSON.stringify({
+      type: 'client-request', rpcId: 'c1', method: 'session.create', payload: { workspaceId: 'w' },
+    });
+    await b.window.fetch('/api/session.create', { method: 'POST', body: createBody });
+    const dels = b.parentMessages.filter((m) => m.kind === 'deleteImages');
+    assert.equal(dels.length, 1, '会话新建时应发起一次删除清理');
+    assert.ok(Array.isArray(dels[0].paths) && dels[0].paths.includes(savedPath), '应删除上一对话落盘的临时图片 ' + savedPath);
   } finally {
     rmSync(b.outDir, { recursive: true, force: true });
   }

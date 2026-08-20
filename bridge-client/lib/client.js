@@ -405,7 +405,7 @@ window.__ModuleLoader__.load({
         bridgeToken = d.token;
         imageFallbackEnabled = d.imageFallback === true; // v0.3.0：非视觉模型图片降级开关（随 hello 下发）
         // 诊断日志：页面可据此确认握手成功与降级开关状态（排查“图片上传不生效”用）
-        console.log("[dsh-vscode-bridge] handshake ok, v0.3.1, imageFallback=" + imageFallbackEnabled);
+        console.log("[dsh-vscode-bridge] handshake ok, v0.3.2, imageFallback=" + imageFallbackEnabled);
         // 附件图片捕获已由工厂期常驻绑定（bindImageCapture），此处仅刷新开关即可生效
         // 回执统一用 core.js 的 buildSyncWorkspaceAck 构造，形状与工作区同步回执一致
         // （{ kind: 'bridgeAck', ok }，不带 token 字段）；顶层 webview 靠 origin + source
@@ -438,9 +438,23 @@ window.__ModuleLoader__.load({
     // 全程仅在该标识为 true（父页面握手时随 bridgeHello 下发 dsh.image.fallback=true）时生效；
     // 未握手或降级关闭时，本段落不改变任何原生行为（与 v0.2.4 保持一致）。
     let imageFallbackEnabled = false; // 是否允许非视觉模型图片降级
-    const imageCache = new Map(); // key(imageCacheKey) -> { name, b64, mime }
+    const imageCache = new Map(); // key(imageCacheKey) -> { name, b64, mime }（当前待用的捕获，用后即消费移除）
     let fallbackResendInFlight = false; // 幂等：一个被拒只触发一次重发
-    const persistedForCleanup = []; // 本次已落盘路径（pagehide 时删除）
+    const persistedForCleanup = []; // 本次已落盘路径（对话结束/pagehide 时删除）
+    let lastSeenSessionId = ""; // 最近一次对话(session) id，用于会话切换时判定上一对话终止
+
+    // 对话终止（新建/删除/切换会话）→ 删除本页已落盘的临时图片并清偿缓存。
+    // clearCaptures=true 仅用于明确的「新建/删除会话」：此刻尚未进入新会话的输入，
+    // 缓存的旧字节不会再被使用；会话切换(仅 prompt 观测)不清 imageCache，
+    // 避免误删当前消息刚捕获、正要用于降级的图片。
+    function handleConversationEnd(reason, clearCaptures) {
+      if (persistedForCleanup.length > 0) {
+        console.log("[dsh-vscode-bridge] image fallback: 会话" + reason + "，清理已落盘临时图片 " + persistedForCleanup.length + " 张");
+        parent.postMessage(buildDeleteImagesRequest("convend-" + Date.now(), persistedForCleanup.slice()), "*");
+        persistedForCleanup.length = 0;
+      }
+      if (clearCaptures && imageCache.size > 0) imageCache.clear();
+    }
 
     // 字节数组 → base64（页面内 btoa 可用；仅用于桥接通道传输，不影响 DSH 原生附件）
     function bytesToBase64(bytes) {
@@ -497,28 +511,34 @@ window.__ModuleLoader__.load({
       });
     }
 
-    // 图片被拒后：落盘全部缓存 → 组装「原文 + 图片地址」内容 → 以新 rpcId 重发。
+    // 图片被拒后：只把「本条消息实际包含的图片」（按消息顺序）落盘并组装
+    // 「原文 + 图片一/二…：路径」内容 → 以新 rpcId 重发 → 用后从缓存消费移除。
     // 返回重发响应（调用方据此认为发送成功，DSH 不再弹"不支持图像输入"报错）；
     // 任何一步失败或无法落盘时返回 null（调用方回退原生被拒响应，绝不吞用户消息）。
     async function handlePromptImageRejected(parsed, url, init, origFetch) {
       try {
-        const entries = Array.from(imageCache.values());
+        const payload = unwrapRpcPayload(parsed);
+        // 按消息内的顺序把图片块映射到已捕获缓存（匹配 name/data），只取本条消息实际用到的图片
+        const used = matchCapturedImages(payload.content,
+          Array.from(imageCache.entries()).map(([key, v]) => ({ key, ...v })));
         const pointerLines = [];
         const savedPaths = [];
-        for (let i = 0; i < entries.length; i++) {
-          const entry = entries[i];
+        for (let i = 0; i < used.length; i++) {
+          const entry = used[i];
           const ext = "." + (entry.mime ? entry.mime.split("/")[1].toLowerCase() : "png");
           const name = imageCacheFilename(String(Date.now()), i, ext);
           if (!name) continue; // 扩展名不在白名单：跳过该张
           const p = await saveImageViaBridge(entry.b64, name, "img-" + Date.now() + "-" + i);
-          if (p) { savedPaths.push(p); pointerLines.push(buildImagePointerLine(p)); }
+          if (p) { savedPaths.push(p); pointerLines.push(buildImagePointerLine(p, i + 1)); }
         }
         if (savedPaths.length === 0) {
           console.warn("[dsh-vscode-bridge] image fallback: 没有可落盘的图片缓存（未打开工作区?），保持原生报错");
           return null; // 无可用落盘：不作降级
         }
-        // 用新 rpcId 以「原文 + 图片地址」重发：payload 保留原 sessionId/mode，仅替换 content
-        const payload = unwrapRpcPayload(parsed);
+        // 消费：本条消息已用到的图片从缓存移除，避免后续消息继续重复引用
+        for (const entry of used) {
+          if (entry && typeof entry.key === "string") imageCache.delete(entry.key);
+        }
         const content = buildTextOnlyContent(payload.content, pointerLines);
         const resendBody = buildTextResendRequest(parsed, content);
         // 重发时剥离原请求的 signal：避免复用可能已中止/中止中的 AbortSignal 导致重发被中途取消
@@ -547,8 +567,17 @@ window.__ModuleLoader__.load({
           if (!imageFallbackEnabled || bridgeToken === "") return res;
           if (!init || init.method !== "POST" || typeof init.body !== "string" || init.body === "") return res;
           const parsed = JSON.parse(init.body);
-          // DSH 线格式：请求体为 { rpcId, payload }，业务 content 在 payload 下（payload 透传形态也兼容）
+          // DSH 线格式：请求体为 { type, method, rpcId, payload }，业务 content 在 payload 下（payload 透传形态也兼容）
           const payload = unwrapRpcPayload(parsed);
+          // —— 对话生命周期：新建/删除会话或 prompt 观测到会话 id 变更 → 上一对话终止，清理临时图片 ——
+          const method = parsed && typeof parsed.method === "string" ? parsed.method : "";
+          const sessionId = payload && typeof payload.sessionId === "string" ? payload.sessionId : "";
+          if (method === "session.create") handleConversationEnd("新建", true);
+          else if (method === "session.delete") handleConversationEnd("删除", true);
+          else if (sessionId !== "" && lastSeenSessionId !== "" && sessionId !== lastSeenSessionId) {
+            handleConversationEnd("切换", false); // 保留当前消息刚捕获的图片（不清 imageCache）
+          }
+          if (sessionId !== "") lastSeenSessionId = sessionId;
           if (!payload || !Array.isArray(payload.content) || !isPromptWithImages(payload.content)) return res;
           const clone = res.clone();
           let respJson = null;

@@ -219,6 +219,37 @@ export function isPromptWithImages(content) {
   return Array.isArray(content) && content.some((b) => b && typeof b === 'object' && b.type === 'image');
 }
 
+/** 提取内容块中的全部图片块（保持消息内的出现顺序，即用户上传/发送顺序） */
+export function imageBlocksOf(content) {
+  if (!Array.isArray(content)) return [];
+  return content.filter((b) => b && typeof b === 'object' && b.type === 'image');
+}
+
+/**
+ * 把「本条消息的图片块」按顺序映射到已捕获缓存，返回有序子集。
+ * 只引用本条消息实际包含的图片，不再重复引用全部历史缓存（修复"一直重复引用
+ * 根目录临时图片"）。匹配优先级：① 文件名相同；② base64 数据相同；③ 按序取
+ * 首个未占用（尽力而为兜底）。entries 为 { key?, name?, b64?, mime? } 数组。
+ */
+export function matchCapturedImages(content, entries) {
+  const blocks = imageBlocksOf(content);
+  const remaining = Array.isArray(entries) ? [...entries] : [];
+  const used = [];
+  for (const block of blocks) {
+    let hit = null;
+    const name = typeof block.name === 'string' && block.name !== '' ? block.name : '';
+    const data = typeof block.data === 'string' ? block.data.trim() : '';
+    if (name) hit = remaining.find((e) => e && e.name === name) || null;
+    if (!hit && data) hit = remaining.find((e) => e && typeof e.b64 === 'string' && e.b64.trim() === data) || null;
+    if (!hit) hit = remaining[0] || null; // 兜底：按序取第一个未占用
+    if (hit) {
+      used.push(hit);
+      remaining.splice(remaining.indexOf(hit), 1);
+    }
+  }
+  return used;
+}
+
 /** 提取内容块中的全部文本（按顺序拼接，空行分隔） */
 export function extractPromptText(content) {
   if (!Array.isArray(content)) return '';
@@ -228,12 +259,20 @@ export function extractPromptText(content) {
     .join('\n');
 }
 
+/** 中文数字 1..10（超出用阿拉伯数字兜底），用于图片按上传/发送顺序标注：图片一、图片二… */
+export function zhOrdinal(n) {
+  const ZH = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+  const i = Math.floor(Number(n));
+  return i >= 1 && i <= 10 ? ZH[i - 1] : String(i);
+}
+
 /**
  * 构造图片地址行：图片已落盘到 path，把 path 作为「地址」随消息发给模型，
- * 由模型自行判断/选择图像识别工具查看。文案保持自然，不做"插件风格"解释。
+ * 由模型自行判断/选择图像识别工具查看。n 为 1 起序号（图片一、图片二…），
+ * 使多图按上传/发送顺序被明确标注；不传序号时保持'图片：<路径>'简写。
  */
-export function buildImagePointerLine(path) {
-  return '图片：' + path;
+export function buildImagePointerLine(path, n) {
+  return n === undefined || n === null ? '图片：' + path : '图片' + zhOrdinal(n) + '：' + path;
 }
 
 /**
