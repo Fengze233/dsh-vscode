@@ -123,7 +123,7 @@ The bridge only works inside the panel. If it is inactive (e.g. you open the DSH
 
 - **Top-right DSH icon**: the whale icon in the editor title bar opens the right-side panel (command `DSH: Open Right Panel`).
 - **SSH Remote**: with `dsh.remote.enabled` on, the extension runs on the remote host, starts/reuses `dsh` there, and shows the panel through a VS Code tunnel — your local VS Code window stays clean and the remote service stays on `127.0.0.1`.
-- **Image upload counts even for non-vision models**: attach images freely in the dialog. When the current model has no image input, the image is saved into your workspace and the message is re-sent with file-path references the model can inspect with an image tool (your actual image content is never dropped).
+- **Image upload works seamlessly even for non-vision models**: attach images freely in the dialog. When the active model has no image input, the image is saved into your workspace and the message is sent back out as the original text plus a `image: <absolute-path>` reference — no error, no popup; the model inspects the file with its own image tool and answers normally. Vision-capable models keep the native image upload untouched.
 - **No browser auto-open**: `dsh web` is started with `--no-open`, so the plugin no longer pops a browser window; turn that back on with `dsh.openInBrowser`.
 
 ## ⚙️ Settings (`dsh.*`)
@@ -182,6 +182,7 @@ src/
 - VS Code platform rule: the left icon opens the left panel, the right icon opens the right panel — the left icon cannot open the right panel.
 - SSH Remote: the extension must also be installed on the remote (VS Code prompts for it); the tunnel appears in the Ports view and can be closed by the user (the plugin re-creates it on the next ready).
 - Image fallback caches the image files under the **workspace root** — **an open workspace folder is required** (with no folder open, images cannot be cached and no fallback happens). Files are cleaned up on panel close / page unload and when the extension is deactivated (best-effort — files added after the last cleanup are kept until the next cleanup).
+- **Verifying the bridge was updated**: in the DSH panel DevTools console you should see `[dsh-vscode-bridge] handshake ok, **v0.3.1**, imageFallback=true` and, after sending an image, `image fallback: 已把图片改为地址随消息重发（N 张）: …`. If it still says `v0.3.0`, the old bridge was not reinstalled — restart the DSH service (the new vsix ships bridge `0.3.1`; the installer force-reinstalls on version mismatch).
 - `--no-open` is passed to `dsh web` by default, unless `dsh.extraArgs` or `dsh.openInBrowser` explicitly opts back in to opening the browser.
 
 ## 🌐 Community
