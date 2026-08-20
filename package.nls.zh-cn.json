@@ -12,6 +12,7 @@
   "dsh.cmd.showLogs.title": "查看日志",
   "dsh.cmd.bridgeRetry.title": "DSH: 重试桥接安装",
   "dsh.cmd.bridgeUninstall.title": "DSH: 卸载桥接",
+  "dsh.cmd.cleanupImageCache.title": "DSH: 清理图片缓存",
   "dsh.config.host": "服务地址。仅允许回环地址（`127.0.0.1` / `localhost` / `[::1]`），非法值回退默认。",
   "dsh.config.port": "DSH web 服务的期望端口（探测与启动共用）。",
   "dsh.config.autoStart": "服务未运行时自动启动 `dsh web`。",

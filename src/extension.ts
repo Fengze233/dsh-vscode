@@ -18,7 +18,7 @@ import {
   createNodeFs,
   type BridgeInstallResult,
 } from './bridge/installer';
-import { cleanupAllImageCaches } from './bridge/host';
+import { cleanupAllImageCaches, cleanupStaleImageCaches } from './bridge/host';
 import * as nodeFs from 'node:fs/promises';
 import { evaluateBridgeStatus, bridgeWarningText } from './bridge/status';
 
@@ -377,6 +377,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('dsh.copyLogs', () => copyLogs()),
     vscode.commands.registerCommand('dsh.bridge.retry', () => void retryBridge()),
     vscode.commands.registerCommand('dsh.bridge.uninstall', () => void uninstallBridgeCmd()),
+    vscode.commands.registerCommand('dsh.cleanupImageCache', () => void cleanupImageCacheCmd()),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('dsh')) onConfigChanged();
     }),
@@ -385,6 +386,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // 激活后延迟评估一次桥接状态：degraded 且未静默时弹警告
   scheduleEvaluation();
+
+  // 启动时扫地清理：上次会话（VS Code 已重启/面板已销毁）可能遗留的"孤儿"图片降级临时文件——
+  // 它们不在内存注册表里（重启即丢失），只能按工作区目录扫描删除（仅限 dsh-imgcache-* 白名单命名）。
+  {
+    const roots = vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath) ?? [];
+    void cleanupStaleImageCaches((d) => nodeFs.readdir(d), async (p: string) => { await nodeFs.unlink(p); }, roots).catch(() => {});
+  }
 }
 
 /** 打开面板：聚焦视图（VS Code 自动打开视图所在的侧边栏，左/右皆可） */
@@ -445,6 +453,24 @@ async function openSecondary(context: vscode.ExtensionContext): Promise<void> {
   await vscode.commands.executeCommand(focusId);
   await vscode.commands.executeCommand('dsh.panel.focus');
   await showSecondaryGuideOnce(context);
+}
+
+/** 手动清理命令：删除图片降级临时缓存（先按注册表删全部，再扫工作区根清理孤儿） */
+async function cleanupImageCacheCmd(): Promise<void> {
+  const fsDeps = { writeFile: async () => {}, rmFile: async (p: string) => { await nodeFs.unlink(p); } };
+  try {
+    await cleanupAllImageCaches(fsDeps);
+  } catch {
+    // 注册表清理失败不中断后续扫描
+  }
+  const roots = vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath) ?? [];
+  let removed = 0;
+  try {
+    removed = await cleanupStaleImageCaches((d) => nodeFs.readdir(d), async (p: string) => { await nodeFs.unlink(p); }, roots);
+  } catch {
+    removed = 0;
+  }
+  void vscode.window.showInformationMessage(t('msg.imageCacheCleaned', { count: removed }));
 }
 
 /** 配置变更：host/port 变化时自动重启自启服务，退出策略实时生效 */

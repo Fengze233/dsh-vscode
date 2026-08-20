@@ -4,7 +4,7 @@
 // 生产侧接 vscode API，这里注入假实现验证纯逻辑（showWarning 一并注入以断言提示文案）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveBridgePath, handleBridgeMessage, saveImageToCwd, deleteImageFiles, cleanupAllImageCaches, createImageRegistry } from '../../src/bridge/host';
+import { resolveBridgePath, handleBridgeMessage, saveImageToCwd, deleteImageFiles, cleanupAllImageCaches, cleanupStaleImageCaches, createImageRegistry } from '../../src/bridge/host';
 
 test('resolveBridgePath 处理绝对/相对/危险协议', () => {
   // 绝对路径直接采用（忽略 cwd 与工作区根）
@@ -127,6 +127,21 @@ test('cleanupAllImageCaches：全量删除注册表内所有缓存路径并清�
   await cleanupAllImageCaches(deps, reg);
   assert.deepEqual(deleted.sort(), ['/ws/dsh-imgcache-a-0.png', '/ws/dsh-imgcache-a-1.jpg']);
   assert.equal(reg.all().length, 0, '清理后注册表应清空');
+});
+
+test('cleanupStaleImageCaches：按目录扫描只删 dsh-imgcache-* 白名单孤儿，不依赖注册表', async () => {
+  const removed: string[] = [];
+  // 目录里既有我们的临时图，也有用户自己的文件；只删 dsh-imgcache-* 白名单
+  const n = await cleanupStaleImageCaches(
+    async () => ['dsh-imgcache-1710000000-0.png', 'dsh-imgcache-1710000000-1.jpg', 'README.md', 'photo.png', 'dsh-imgcache-1710000000-2.exe'],
+    async (p: string) => { removed.push(p); },
+    ['/ws/root', 'not-absolute', ''],
+  );
+  assert.equal(n, 2);
+  assert.deepEqual(removed.sort(), ['/ws/root/dsh-imgcache-1710000000-0.png', '/ws/root/dsh-imgcache-1710000000-1.jpg']);
+  // 目录不可读（readDir 抛错）→ 跳过，不影响删除计数
+  const n2 = await cleanupStaleImageCaches(async () => { throw new Error('ENOENT'); }, async () => {}, ['/missing']);
+  assert.equal(n2, 0);
 });
 
 test('deleteImageFiles：只删除注册表中的缓存文件，任意路径被忽略', async () => {

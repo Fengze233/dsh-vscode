@@ -29,6 +29,7 @@
     "onCommand:dsh.showLogs",
     "onCommand:dsh.bridge.retry",
     "onCommand:dsh.bridge.uninstall",
+    "onCommand:dsh.cleanupImageCache",
     "onCommand:dsh.copyLogs"
   ],
   "contributes": {
@@ -132,6 +133,11 @@
       {
         "command": "dsh.bridge.uninstall",
         "title": "%dsh.cmd.bridgeUninstall.title%"
+      },
+      {
+        "command": "dsh.cleanupImageCache",
+        "title": "%dsh.cmd.cleanupImageCache.title%",
+        "category": "DSH"
       },
       {
         "command": "dsh.openFromTitle",

@@ -17,3 +17,5 @@ tsconfig.json
 README.zh.md
 CONTRIBUTING.md
 .playwright-mcp
+# 图片降级临时缓存（工作区根目录残留，绝不进安装包）
+dsh-imgcache-*

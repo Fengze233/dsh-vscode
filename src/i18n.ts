@@ -43,6 +43,7 @@ const messages = {
     'msg.portFallback':
       'Port {port} is occupied by another program. Temporarily using port {fallback} for this session (your dsh.port setting is unchanged).',
     'msg.logsCopied': 'DSH logs copied to the clipboard. Paste them into your bug report.',
+    'msg.imageCacheCleaned': 'Cleaned up {count} image-fallback temp file(s) from the workspace.',
     // 桥接状态与警告
     'bridge.warnDegraded':
       'DSH bridge is not active. These features are unavailable: 1) click links to open in browser 2) click file paths to open in VS Code. You can retry installing the bridge or silence this warning.',
@@ -86,6 +87,7 @@ const messages = {
     'msg.portFallback':
       '端口 {port} 被其他程序占用，本次会话临时改用端口 {fallback}（dsh.port 设置未更改，重启 VS Code 后恢复）。',
     'msg.logsCopied': 'DSH 日志已复制到剪贴板，请粘贴到问题报告中。',
+    'msg.imageCacheCleaned': '已清理 {count} 张图片降级临时缓存。',
     'bridge.warnDegraded':
       'DSH 桥接未生效，以下功能不可用：①点击链接跳转浏览器 ②点击文件路径在 VS Code 打开。可重试安装桥接，或不再显示本警告。',
     'bridge.retryNow': '重试安装',

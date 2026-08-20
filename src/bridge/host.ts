@@ -112,6 +112,45 @@ export async function cleanupAllImageCaches(
   }
 }
 
+/**
+ * 扫描并清理「工作区根目录』中残留的图片降级临时文件（孤儿清理，不依赖注册表）。
+ * 背景：dsh-imgcache-* 由扩展按白名单命名落盘到工作区根；若 VS Code/扩展重启，
+ * 内存注册表（sharedImageRegistry）丢失，旧文件会成为「无人追踪的孤儿」——
+ * cleanupAllImageCaches/deleteImageFiles 都按注册表删除，找不到它们。故在扩展激活
+ * 与手动清理命令时按目录扫描，只删除符合 IMAGE_CACHE_NAME_RE（本扩展专属命名空间）的文件。
+ * @param readDir 列出目录条目（生产接 node:fs/promises.readdir）
+ * @param rmFile 删除文件（生产接 node:fs/promises.unlink）
+ * @param roots 要扫描的工作区根目录；缺失/非绝对路径跳过
+ * @returns 删除的文件数
+ */
+export async function cleanupStaleImageCaches(
+  readDir: (dir: string) => Promise<string[]>,
+  rmFile: (path: string) => Promise<void>,
+  roots: string[],
+): Promise<number> {
+  let removed = 0;
+  for (const root of roots) {
+    if (typeof root !== 'string' || root === '' || !isAbsolute(root)) continue;
+    let names: string[];
+    try {
+      names = await readDir(root);
+    } catch {
+      continue; // 目录不可读（不存在/权限）跳过
+    }
+    for (const n of names) {
+      if (typeof n === 'string' && IMAGE_CACHE_NAME_RE.test(n)) {
+        try {
+          await rmFile(join(root, n));
+          removed += 1;
+        } catch {
+          // 单个删除失败（文件已被移走/权限）尽力而为
+        }
+      }
+    }
+  }
+  return removed;
+}
+
 /** 桥接消息处理依赖（生产接 vscode API，测试注入假实现） */
 export interface BridgeMessageDeps {
   /** 打开外部链接（生产接 vscode.env.openExternal，返回是否成功） */
