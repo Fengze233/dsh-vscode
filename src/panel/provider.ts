@@ -113,10 +113,6 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
         // 远程未启用占位页的「打开设置」按钮：聚焦 dsh.remote.enabled 设置
         void vscode.commands.executeCommand('workbench.action.openSettings', 'dsh.remote.enabled');
         break;
-      case 'bridgeImageFallback':
-        // 图片已自动降级为文件路径随消息发送：给用户一条可见提示
-        void vscode.window.showInformationMessage(t('msg.imageFallback'));
-        break;
       case 'bridgeCopyText':
         // 桥接剪贴板消息：VS Code 会拦截跨源 iframe 的原生 clipboard API，
         // 这里由扩展宿主写系统剪贴板，并回执给 iframe 收尾其 writeText Promise。

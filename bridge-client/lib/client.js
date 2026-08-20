@@ -497,7 +497,9 @@ window.__ModuleLoader__.load({
       });
     }
 
-    // 图片被拒后：落盘全部缓存 → 纯文本+路径指针重发 → 通知与清理登记
+    // 图片被拒后：落盘全部缓存 → 组装「原文 + 图片地址」内容 → 以新 rpcId 重发。
+    // 返回重发响应（调用方据此认为发送成功，DSH 不再弹"不支持图像输入"报错）；
+    // 任何一步失败或无法落盘时返回 null（调用方回退原生被拒响应，绝不吞用户消息）。
     async function handlePromptImageRejected(parsed, url, init, origFetch) {
       try {
         const entries = Array.from(imageCache.values());
@@ -511,26 +513,32 @@ window.__ModuleLoader__.load({
           const p = await saveImageViaBridge(entry.b64, name, "img-" + Date.now() + "-" + i);
           if (p) { savedPaths.push(p); pointerLines.push(buildImagePointerLine(p)); }
         }
-        if (savedPaths.length === 0) { console.warn("[dsh-vscode-bridge] image fallback: 没有可落盘的图片缓存（未打开工作区?），保持原生报错"); return; } // 无可用落盘：不作降级
-        // 用新 rpcId 以纯文本重发：payload 保留原 sessionId/mode，仅替换 content，避免与已拒请求撞车/重复投递
+        if (savedPaths.length === 0) {
+          console.warn("[dsh-vscode-bridge] image fallback: 没有可落盘的图片缓存（未打开工作区?），保持原生报错");
+          return null; // 无可用落盘：不作降级
+        }
+        // 用新 rpcId 以「原文 + 图片地址」重发：payload 保留原 sessionId/mode，仅替换 content
         const payload = unwrapRpcPayload(parsed);
         const content = buildTextOnlyContent(payload.content, pointerLines);
         const resendBody = buildTextResendRequest(parsed, content);
         // 重发时剥离原请求的 signal：避免复用可能已中止/中止中的 AbortSignal 导致重发被中途取消
         const { signal: _signal, ...initNoSignal } = init || {};
-        await origFetch(url, { ...initNoSignal, body: JSON.stringify(resendBody) });
+        const resp = await origFetch(url, { ...initNoSignal, body: JSON.stringify(resendBody) });
         persistedForCleanup.push(...savedPaths);
-        console.log("[dsh-vscode-bridge] image fallback: 已以纯文本+路径指针重发 via", savedPaths.length + " 张图片");
-        parent.postMessage(buildImageFallbackNotice(savedPaths), "*");
+        console.log("[dsh-vscode-bridge] image fallback: 已把图片改为地址随消息重发（" + savedPaths.length + " 张）: " + savedPaths.join(", "));
+        return resp;
       } catch (err) {
-        // 降级全程失败：保留可观察的原生错误，绝不吞用户消息
+        // 降级全程失败：返回 null，由调用方回退原生被拒响应（绝不吞用户消息）
         console.error("[dsh-vscode-bridge] image fallback failed:", err);
+        return null;
       } finally {
         fallbackResendInFlight = false;
       }
     }
 
-    // 拦截 prompt RPC：发送含图内容被「模型不支持图像输入」拒绝时，自动降级重发
+    // 拦截 prompt RPC：发送含图内容被「模型不支持图像输入」拒绝时，把图片落盘为文件、
+    // 以「原文 + 图片地址」重发，并用重发成功响应顶替被拒响应返回给 DSH——
+    // 用户视角：图片照常发出、模型正常回答，全程无感知，不再弹"不支持图像输入"报错。
     function interceptPromptFetch() {
       const origFetch = window.fetch.bind(window);
       window.fetch = async (input, init) => {
@@ -545,15 +553,20 @@ window.__ModuleLoader__.load({
           const clone = res.clone();
           let respJson = null;
           try { respJson = await clone.json(); } catch {}
-          if (detectModelReject(respJson)) {
-            console.log("[dsh-vscode-bridge] image fallback: 模型不支持图片，尝试自动降级重发");
-            if (fallbackResendInFlight) { console.log("[dsh-vscode-bridge] image fallback: 已有进行中的降级，跳过本次"); return res; }
-            // input 多为 URL 实例（.href）；resolveFetchUrl 兼容 string/URL/Request 三种
-            const u = resolveFetchUrl(input);
-            if (u === "") { console.warn("[dsh-vscode-bridge] image fallback: 无法解析请求 URL，跳过自动重发"); return res; }
-            fallbackResendInFlight = true;
-            void handlePromptImageRejected(parsed, u, init, origFetch);
-          }
+          if (!detectModelReject(respJson)) return res;
+          console.log("[dsh-vscode-bridge] image fallback: 模型不支持图片，落盘并改为地址重发");
+          if (fallbackResendInFlight) { console.log("[dsh-vscode-bridge] image fallback: 已有进行中的降级，保持原生响应"); return res; }
+          // input 多为 URL 实例（.href）；resolveFetchUrl 兼容 string/URL/Request 三种
+          const u = resolveFetchUrl(input);
+          if (u === "") { console.warn("[dsh-vscode-bridge] image fallback: 无法解析请求 URL，保持原生报错"); return res; }
+          fallbackResendInFlight = true;
+          const patched = await handlePromptImageRejected(parsed, u, init, origFetch);
+          if (!patched) return res; // 降级失败/无法落盘：回退原生被拒响应（不吞错误）
+          // 用「原请求身份(rpcId)」把重发响应交回调用方：DSH 按发送成功处理
+          console.log("[dsh-vscode-bridge] image fallback: 已用重发成功响应顶替被拒响应");
+          return typeof parsed.rpcId === "string"
+            ? await rewriteRpcId(patched, parsed.rpcId)
+            : patched;
         } catch {}
         return res;
       };

@@ -13,11 +13,11 @@ import {
   extractPromptText,
   buildImagePointerLine,
   buildTextOnlyContent,
-  buildImageFallbackNotice,
   imageCacheKey,
   unwrapRpcPayload,
   buildTextResendRequest,
   resolveFetchUrl,
+  rewriteRpcId,
 } from '../../bridge-client/lib/core.js';
 
 test('saveImage 请求构造与 ack 解析', () => {
@@ -65,14 +65,13 @@ test('isPromptWithImages / extractPromptText / buildTextOnlyContent', () => {
   assert.equal(built[0].type, 'text');
   assert.ok(built[0].text.includes('/w/x.png'));
   assert.ok(built[0].text.includes('a'));
+  // 地址行：以「图片：<绝对路径>」自然标注，不含"插件风格"解释文案
+  assert.equal(buildImagePointerLine('/w/x.png'), '图片：/w/x.png');
   // 无指针时保持原文本
   assert.equal(buildTextOnlyContent([{ type: 'text', text: 'a' }], []).length, 1);
 });
 
-test('buildImageFallbackNotice / imageCacheKey', () => {
-  const n = buildImageFallbackNotice(['/a.png']);
-  assert.equal(n.kind, 'imageFallback');
-  assert.deepEqual(n.paths, ['/a.png']);
+test('imageCacheKey', () => {
   assert.equal(imageCacheKey({ name: 'x.png', size: 10, lastModified: 5 }), 'x.png:10:5');
   assert.equal(imageCacheKey({ name: '', size: 1, lastModified: 2 }), null);
   assert.equal(imageCacheKey(null), null);
@@ -98,6 +97,25 @@ test('buildTextResendRequest：换新 rpcId、保留 payload 其余字段、cont
   assert.ok(Array.isArray(req.payload.content));
   assert.equal((req.payload.content as unknown[]).length, 1);
 });
+test('rewriteRpcId：把响应 rpcId 改写为指定值（降级重发响应交回 DSH 用）', async () => {
+  const rpcResp = new Response(JSON.stringify({ rpcId: 'vsc-fb-new', result: { ok: true, value: { accepted: true } } }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+  const rew = await rewriteRpcId(rpcResp as unknown as Response, 'orig-42');
+  const json = (await rew.json()) as { rpcId: string; result: { ok: boolean; value: { accepted: boolean } } };
+  assert.equal(json.rpcId, 'orig-42');
+  assert.equal(json.result.ok, true);
+  assert.equal(json.result.value.accepted, true);
+  assert.equal(rew.status, 200);
+  // 非 JSON 响应：原样返回，不改写
+  const raw = new Response('not json', { status: 500 });
+  assert.equal(await rewriteRpcId(raw as unknown as Response, 'x'), raw);
+  // 无 rpcId 字段的 JSON：原样返回
+  const noId = new Response(JSON.stringify({ ok: 1 }));
+  assert.equal(await rewriteRpcId(noId as unknown as Response, 'x'), noId);
+});
+
 test('resolveFetchUrl：兼容 string / URL(href) / Request(url)，无效输入返回空串', () => {
   assert.equal(resolveFetchUrl('http://127.0.0.1:3080/api/prompt'), 'http://127.0.0.1:3080/api/prompt');
   assert.equal(resolveFetchUrl({ href: 'http://127.0.0.1:3080/api/prompt' }), 'http://127.0.0.1:3080/api/prompt');

@@ -23,8 +23,7 @@ export type PanelMessage =
   | { type: 'bridgeSaveImage'; requestId: string; name: string; dataB64: string; sessionCwd?: string }
   | { type: 'bridgeSaveImageAck'; requestId: string; ok: boolean; path?: string }
   | { type: 'bridgeDeleteImages'; requestId: string; paths: string[] }
-  | { type: 'bridgeDeleteImagesAck'; requestId: string; ok: boolean }
-  | { type: 'bridgeImageFallback'; paths: string[] };
+  | { type: 'bridgeDeleteImagesAck'; requestId: string; ok: boolean };
 
 /** 渲染上下文 */
 export interface PageCtx {
@@ -154,11 +153,6 @@ if (iframeEl) {
     // 删除图片缓存：转发给扩展 → 扩展宿主删除文件（会话结束清理）
     if (d && d.kind === 'deleteImages' && typeof d.requestId === 'string' && Array.isArray(d.paths)) {
       vscode.postMessage({ type: 'bridgeDeleteImages', requestId: d.requestId, paths: d.paths });
-      return;
-    }
-    // 图片降级通知：转发给扩展 → 用户可见提示（v0.3.0）
-    if (d && d.kind === 'imageFallback' && Array.isArray(d.paths)) {
-      vscode.postMessage({ type: 'bridgeImageFallback', paths: d.paths });
       return;
     }
     // 读取剪贴板：转发给扩展 → vscode.env.clipboard.readText（Cmd+V 粘贴兜底）

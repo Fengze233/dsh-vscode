@@ -107,14 +107,12 @@ export function isPromptWithImages(content: unknown): boolean;
 /** 提取内容块中的全部文本（按顺序拼接） */
 export function extractPromptText(content: unknown): string;
 
-/** 构造图片指针行 */
+/** 构造图片地址行：图片: <绝对路径>（地址随消息发给模型，由模型选图像工具查看） */
 export function buildImagePointerLine(path: string): string;
 
 /** 构造纯文本内容块数组（原文本 + 图片指针行） */
 export function buildTextOnlyContent(content: unknown, pointerLines?: string[]): { type: 'text'; text: string }[];
 
-/** 构造「图片降级已发生」的通知消息 */
-export function buildImageFallbackNotice(paths: string[]): { kind: 'imageFallback'; paths: string[] };
 
 /** 文件指纹（去重键）；关键字段缺失返回 null */
 export function imageCacheKey(fileLike: unknown): string | null;
@@ -130,4 +128,7 @@ export function buildTextResendRequest(
 
 /** 从 fetch 的 input 提取 URL 字符串（string/URL(href)/Request(url)）；取不到返回 '' */
 export function resolveFetchUrl(input: unknown): string;
+
+/** 把 RPC 响应打包为携带指定 rpcId 的新 Response（降级重发响应交回 DSH 时统一请求-响应身份）；非 JSON/无 rpcId 时原样返回 */
+export function rewriteRpcId(response: unknown, rpcId: string): Promise<Response>;
 

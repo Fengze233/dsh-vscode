@@ -35,7 +35,7 @@ test('buildBridgeClient 内联产物语法合法且不含 export/占位符残留
     assert.ok(code.includes('buildDeleteImagesRequest'), 'v0.3.0 产物应包含 deleteImages 消息构造');
     assert.ok(code.includes('detectModelReject'), 'v0.3.0 产物应包含模型拒绝判定');
     assert.ok(code.includes('buildTextOnlyContent'), 'v0.3.0 产物应包含纯文本内容重构');
-    assert.ok(code.includes('buildImageFallbackNotice'), 'v0.3.0 产物应包含降级通知构造');
+    assert.ok(code.includes('rewriteRpcId'), 'v0.3.0 产物应包含降级重发响应 rpcId 改写');
     assert.ok(code.includes('copyViaBridge'), '产物应包含 writeText 接管逻辑');
     assert.ok(code.includes('dsh-vscode-bridge'), '产物应包含包名 dsh-vscode-bridge');
     // ③ 不含占位符（替换应已完成）

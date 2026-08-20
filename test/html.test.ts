@@ -115,11 +115,4 @@ test('readyPage 握手脚本携带 imageFallback 开关（v0.3.0）', () => {
   const html2 = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
   assert.ok(html2.includes('IMAGE_FALLBACK = false'));
 });
-test('readyPage 握手脚本包含 imageFallback 通知上行转发（v0.3.0）', () => {
-  const html = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
-  assert.ok(html.includes("kind === 'imageFallback'"), '上行：转发 iframe 的 imageFallback 通知');
-  assert.ok(html.includes("type: 'bridgeImageFallback'"), '上行：向扩展宿主发送 bridgeImageFallback');
-});
-
-
 

@@ -50,7 +50,6 @@ const messages = {
     'bridge.neverAgain': "Don't Show Again",
     'bridge.uninstalled': 'DSH bridge uninstalled. Restart the DSH service for the change to take effect.',
     'bridge.uninstallFailed': 'Failed to uninstall DSH bridge: {message}',
-    'msg.imageFallback': 'The active model does not support image input. The attached images were saved as file paths and sent with the message — use an image tool to inspect them.',
   },
   zh: {
     'panel.loading': '正在启动 DSH 服务…',
@@ -93,7 +92,6 @@ const messages = {
     'bridge.neverAgain': '不再提示',
     'bridge.uninstalled': 'DSH 桥接已卸载，重启 DSH 服务后生效。',
     'bridge.uninstallFailed': '卸载 DSH 桥接失败：{message}',
-    'msg.imageFallback': '当前模型不支持图像输入。图片已保存为文件路径随消息发送——可调用图像识别工具查看。',
   },
 } as const;
 

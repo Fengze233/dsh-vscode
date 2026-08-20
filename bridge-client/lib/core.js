@@ -228,9 +228,12 @@ export function extractPromptText(content) {
     .join('\n');
 }
 
-/** 构造图片指针行（模型应能据此调用图像识别工具查看文件） */
+/**
+ * 构造图片地址行：图片已落盘到 path，把 path 作为「地址」随消息发给模型，
+ * 由模型自行判断/选择图像识别工具查看。文案保持自然，不做"插件风格"解释。
+ */
 export function buildImagePointerLine(path) {
-  return '[图片已保存到: ' + path + ']（模型可用图像识别工具查看该文件）';
+  return '图片：' + path;
 }
 
 /**
@@ -244,10 +247,6 @@ export function buildTextOnlyContent(content, pointerLines) {
   return [{ type: 'text', text: joined }];
 }
 
-/** 构造「图片降级已发生」的通知消息（iframe → 扩展宿主 → 用户可见提示） */
-export function buildImageFallbackNotice(paths) {
-  return { kind: 'imageFallback', paths: Array.isArray(paths) ? paths : [] };
-}
 
 /**
  * 文件指纹（去重键）：name:size:lastModified；关键字段缺失返回 null。
@@ -296,5 +295,27 @@ export function resolveFetchUrl(input) {
     if (typeof input.url === 'string' && input.url !== '') return input.url;   // Request 实例
   }
   return '';
+}
+
+/**
+ * 把 RPC 响应重新打包为「携带指定 rpcId」的新 Response。
+ * 图片降级重发会使用新 rpcId（避免与服务端已处理请求撞车），而重发响应需要以
+ * 「原请求的 rpcId」交回给 DSH 调用方，保持请求-响应关联一致。响应体不是可解析
+ * 的 JSON（或没有 rpcId 字段）时原样返回，不做改写（不向 DSH 造假形状）。
+ */
+export async function rewriteRpcId(response, rpcId) {
+  if (!response || typeof response.clone !== 'function' || typeof response.json !== 'function') return response;
+  let json;
+  try {
+    json = await response.clone().json();
+  } catch {
+    return response;
+  }
+  if (!json || typeof json !== 'object' || typeof json.rpcId !== 'string') return response;
+  return new Response(JSON.stringify({ ...json, rpcId }), {
+    status: response.status,
+    statusText: response.statusText,
+    headers: { 'content-type': response.headers.get('content-type') ?? 'application/json' },
+  });
 }
 
