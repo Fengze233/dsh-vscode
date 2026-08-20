@@ -181,7 +181,7 @@ src/
 - The colored icon on the "Get Started with DSH" walkthrough card comes from Marketplace gallery data and only appears after the extension is published (the card itself works regardless);
 - VS Code platform rule: the left icon opens the left panel, the right icon opens the right panel — the left icon cannot open the right panel.
 - SSH Remote: the extension must also be installed on the remote (VS Code prompts for it); the tunnel appears in the Ports view and can be closed by the user (the plugin re-creates it on the next ready).
-- Image fallback caches the image files under the workspace root; they are removed when the panel closes (best-effort — files added after the last cleanup are kept until the next panel close).
+- Image fallback caches the image files under the **workspace root** — **an open workspace folder is required** (with no folder open, images cannot be cached and no fallback happens). Files are cleaned up on panel close / page unload and when the extension is deactivated (best-effort — files added after the last cleanup are kept until the next cleanup).
 - `--no-open` is passed to `dsh web` by default, unless `dsh.extraArgs` or `dsh.openInBrowser` explicitly opts back in to opening the browser.
 
 ## 🌐 Community
