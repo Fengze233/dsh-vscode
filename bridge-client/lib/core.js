@@ -283,3 +283,18 @@ export function buildTextResendRequest(originalBody, content) {
   };
 }
 
+/**
+ * 从 fetch 的 input 提取 URL 字符串（兼容 string / URL 实例(href) / Request 实例(url) 三种形态）。
+ * 取不到返回 ''，调用方据此放弃重发，避免向非法地址发起无意义请求。
+ * 背景：DSH 的 postJson 传入的是 new URL(...) 实例（只有 .href，没有 .url），
+ * 若按 Request 的 .url 抽取会得到空串导致重发静默失败。
+ */
+export function resolveFetchUrl(input) {
+  if (typeof input === 'string') return input;
+  if (input && typeof input === 'object') {
+    if (typeof input.href === 'string' && input.href !== '') return input.href; // URL 实例
+    if (typeof input.url === 'string' && input.url !== '') return input.url;   // Request 实例
+  }
+  return '';
+}
+

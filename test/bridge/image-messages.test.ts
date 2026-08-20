@@ -17,6 +17,7 @@ import {
   imageCacheKey,
   unwrapRpcPayload,
   buildTextResendRequest,
+  resolveFetchUrl,
 } from '../../bridge-client/lib/core.js';
 
 test('saveImage 请求构造与 ack 解析', () => {
@@ -97,5 +98,14 @@ test('buildTextResendRequest：换新 rpcId、保留 payload 其余字段、cont
   assert.ok(Array.isArray(req.payload.content));
   assert.equal((req.payload.content as unknown[]).length, 1);
 });
+test('resolveFetchUrl：兼容 string / URL(href) / Request(url)，无效输入返回空串', () => {
+  assert.equal(resolveFetchUrl('http://127.0.0.1:3080/api/prompt'), 'http://127.0.0.1:3080/api/prompt');
+  assert.equal(resolveFetchUrl({ href: 'http://127.0.0.1:3080/api/prompt' }), 'http://127.0.0.1:3080/api/prompt');
+  assert.equal(resolveFetchUrl({ url: 'http://127.0.0.1:3080/api/prompt' }), 'http://127.0.0.1:3080/api/prompt');
+  assert.equal(resolveFetchUrl(null), '');
+  assert.equal(resolveFetchUrl(undefined), '');
+  assert.equal(resolveFetchUrl(42), '');
+});
+
 
 

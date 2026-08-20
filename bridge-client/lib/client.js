@@ -543,8 +543,10 @@ window.__ModuleLoader__.load({
           let respJson = null;
           try { respJson = await clone.json(); } catch {}
           if (detectModelReject(respJson) && !fallbackResendInFlight) {
+            // input 多为 URL 实例（.href）；resolveFetchUrl 兼容 string/URL/Request 三种
+            const u = resolveFetchUrl(input);
+            if (u === "") { console.warn("[dsh-vscode-bridge] image fallback: 无法解析请求 URL，跳过自动重发"); return res; }
             fallbackResendInFlight = true;
-            const u = typeof input === "string" ? input : input && typeof input.url === "string" ? input.url : "";
             void handlePromptImageRejected(parsed, u, init, origFetch);
           }
         } catch {}

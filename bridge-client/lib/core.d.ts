@@ -128,3 +128,6 @@ export function buildTextResendRequest(
   content: { type: 'text'; text: string }[],
 ): { rpcId: string; payload: Record<string, unknown> & { content: { type: 'text'; text: string }[] } };
 
+/** 从 fetch 的 input 提取 URL 字符串（string/URL(href)/Request(url)）；取不到返回 '' */
+export function resolveFetchUrl(input: unknown): string;
+
