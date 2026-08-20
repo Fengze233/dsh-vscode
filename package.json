@@ -246,7 +246,7 @@
         },
         "dsh.image.fallback": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "markdownDescription": "%dsh.config.imageFallback%"
         }
       }

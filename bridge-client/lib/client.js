@@ -403,8 +403,10 @@ window.__ModuleLoader__.load({
       // 握手：父页面下发 { kind: 'bridgeHello', token }，校验非空后回执 bridgeAck
       if (d.kind === "bridgeHello" && typeof d.token === "string" && d.token !== "") {
         bridgeToken = d.token;
-        imageFallbackEnabled = d.imageFallback === true; // v0.3.0：非视觉模型图片降级开关（随 hello 下发）
-        // 诊断日志：页面可据此确认握手成功与降级开关状态（排查“图片上传不生效”用）
+        imageFallbackEnabled = d.imageFallback === true; // 图片降级开关（已停用，默认 false）
+        // [已停用] 图片降级仅在此开关为 true 时才挂载捕获/fetch 拦截；默认关闭时零装载、零开销、零行为变化（待删除）
+        if (imageFallbackEnabled) { bindImageCapture(); interceptPromptFetch(); }
+        // 诊断日志：页面可据此确认握手成功与降级开关状态
         console.log("[dsh-vscode-bridge] handshake ok, v0.3.0, imageFallback=" + imageFallbackEnabled);
         // 附件图片捕获已由工厂期常驻绑定（bindImageCapture），此处仅刷新开关即可生效
         // 回执统一用 core.js 的 buildSyncWorkspaceAck 构造，形状与工作区同步回执一致
@@ -531,7 +533,9 @@ window.__ModuleLoader__.load({
     }
 
     // 拦截 prompt RPC：发送含图内容被「模型不支持图像输入」拒绝时，自动降级重发
+    // [已停用] 默认不装载（hello imageFallback=true 才调用）；幂等防重复替换
     function interceptPromptFetch() {
+      if (interceptPromptFetch.bound) return; interceptPromptFetch.bound = true;
       const origFetch = window.fetch.bind(window);
       window.fetch = async (input, init) => {
         const res = await origFetch(input, init);
@@ -568,11 +572,11 @@ window.__ModuleLoader__.load({
       });
     }
 
-    // —— 入口：立即可绑定的拦截先挂载；图片捕获在握手后才绑定 ——
+    // —— 入口：立即可绑定的拦截先挂载 ——
     bindLinkInterception();
-    bindImageCapture(); // 附件图片捕获常驻挂载（未握手/关闭时经 imageFallbackEnabled 过滤，零干扰）
-    interceptPromptFetch(); // fetch 拦截常驻挂载（内部用开关过滤，未握手/关闭时零干扰）
-    bindPageCleanup();
+    bindPageCleanup(); // 仅清理本次已落盘的缓存（未落盘时空操作）
+    // [已停用] 图片捕获(bindImageCapture)与 fetch 拦截(interceptPromptFetch)：
+    //   仅当握手 hello 携带 imageFallback=true 时才由 hello 分支装载；默认(false)完全不装载。
     window.addEventListener("message", onParentMessage);
     window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("contextmenu", onContextMenu, true);

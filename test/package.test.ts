@@ -25,10 +25,10 @@ test('右上角图标命令与 editor/title 菜单（v0.3.0）', () => {
   assert.ok(String(item.group).startsWith('navigation'), '组为 navigation（标签栏右侧图标区）');
 });
 
-test('v0.3.0 设置项：remote.enabled 默认 false、image.fallback 默认 true、openInBrowser 默认 false', () => {
+test('v0.3.0 设置项：remote.enabled 默认 false、image.fallback 默认 false(已停用)、openInBrowser 默认 false', () => {
   const p = pkg();
   const props = p.contributes.configuration.properties;
   assert.equal(props['dsh.remote.enabled'].default, false);
-  assert.equal(props['dsh.image.fallback'].default, true);
+  assert.equal(props['dsh.image.fallback'].default, false); // 图片降级已停用
   assert.equal(props['dsh.openInBrowser'].default, false);
 });

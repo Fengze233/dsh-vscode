@@ -11,7 +11,7 @@ test('合法配置原样通过', () => {
   assert.deepEqual(config, {
     host: 'localhost', port: 4000, autoStart: false, stopOnExit: false, extraArgs: ['--trusted-host', 'x:1'],
     bridgeEnabled: true, workspaceRootIndex: 0, silenceWarning: false, executablePath: '',
-    openInBrowser: false, remoteEnabled: false, imageFallback: true,
+    openInBrowser: false, remoteEnabled: false, imageFallback: false,
   });
 });
 
@@ -96,11 +96,11 @@ test('executablePath：合法值原样通过（含空串）', () => {
 });
 
 // —— v0.3.0 新设置：openInBrowser / remoteEnabled / imageFallback ——
-test('v0.3.0 新设置缺省值：openInBrowser=false / remoteEnabled=false / imageFallback=true', () => {
+test('v0.3.0 新设置缺省值：openInBrowser=false / remoteEnabled=false / imageFallback=false(图片降级已停用)', () => {
   const r = normalizeConfig({});
   assert.equal(r.config.openInBrowser, false);
   assert.equal(r.config.remoteEnabled, false);
-  assert.equal(r.config.imageFallback, true);
+  assert.equal(r.config.imageFallback, false); // 图片降级已停用
   assert.deepEqual(r.config, DEFAULTS);
 });
 
@@ -117,8 +117,9 @@ test('v0.3.0 新设置非布尔值回退默认（不记错误）', () => {
   assert.equal(r2.config.openInBrowser, false);
   const r3 = normalizeConfig({ remoteEnabled: 1 as unknown as boolean });
   assert.equal(r3.config.remoteEnabled, false);
-  const r4 = normalizeConfig({ imageFallback: 0 as unknown as boolean });
-  assert.equal(r4.config.imageFallback, true);
+  // 非布尔回退默认（现默认 false）
+  const r4 = normalizeConfig({ imageFallback: 1 as unknown as boolean });
+  assert.equal(r4.config.imageFallback, false);
   assert.equal(r2.errors.length, 0);
   assert.equal(r3.errors.length, 0);
   assert.equal(r4.errors.length, 0);
