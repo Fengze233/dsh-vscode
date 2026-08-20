@@ -404,6 +404,8 @@ window.__ModuleLoader__.load({
       if (d.kind === "bridgeHello" && typeof d.token === "string" && d.token !== "") {
         bridgeToken = d.token;
         imageFallbackEnabled = d.imageFallback === true; // v0.3.0：非视觉模型图片降级开关（随 hello 下发）
+        // 诊断日志：页面可据此确认握手成功与降级开关状态（排查“图片上传不生效”用）
+        console.log("[dsh-vscode-bridge] handshake ok, v0.3.0, imageFallback=" + imageFallbackEnabled);
         // 附件图片捕获已由工厂期常驻绑定（bindImageCapture），此处仅刷新开关即可生效
         // 回执统一用 core.js 的 buildSyncWorkspaceAck 构造，形状与工作区同步回执一致
         // （{ kind: 'bridgeAck', ok }，不带 token 字段）；顶层 webview 靠 origin + source
@@ -509,7 +511,7 @@ window.__ModuleLoader__.load({
           const p = await saveImageViaBridge(entry.b64, name, "img-" + Date.now() + "-" + i);
           if (p) { savedPaths.push(p); pointerLines.push(buildImagePointerLine(p)); }
         }
-        if (savedPaths.length === 0) return; // 无可用落盘（如无工作区根）：保持原生“发送失败”可见
+        if (savedPaths.length === 0) { console.warn("[dsh-vscode-bridge] image fallback: 没有可落盘的图片缓存（未打开工作区?），保持原生报错"); return; } // 无可用落盘：不作降级
         // 用新 rpcId 以纯文本重发：payload 保留原 sessionId/mode，仅替换 content，避免与已拒请求撞车/重复投递
         const payload = unwrapRpcPayload(parsed);
         const content = buildTextOnlyContent(payload.content, pointerLines);
@@ -518,6 +520,7 @@ window.__ModuleLoader__.load({
         const { signal: _signal, ...initNoSignal } = init || {};
         await origFetch(url, { ...initNoSignal, body: JSON.stringify(resendBody) });
         persistedForCleanup.push(...savedPaths);
+        console.log("[dsh-vscode-bridge] image fallback: 已以纯文本+路径指针重发 via", savedPaths.length + " 张图片");
         parent.postMessage(buildImageFallbackNotice(savedPaths), "*");
       } catch (err) {
         // 降级全程失败：保留可观察的原生错误，绝不吞用户消息
@@ -542,7 +545,9 @@ window.__ModuleLoader__.load({
           const clone = res.clone();
           let respJson = null;
           try { respJson = await clone.json(); } catch {}
-          if (detectModelReject(respJson) && !fallbackResendInFlight) {
+          if (detectModelReject(respJson)) {
+            console.log("[dsh-vscode-bridge] image fallback: 模型不支持图片，尝试自动降级重发");
+            if (fallbackResendInFlight) { console.log("[dsh-vscode-bridge] image fallback: 已有进行中的降级，跳过本次"); return res; }
             // input 多为 URL 实例（.href）；resolveFetchUrl 兼容 string/URL/Request 三种
             const u = resolveFetchUrl(input);
             if (u === "") { console.warn("[dsh-vscode-bridge] image fallback: 无法解析请求 URL，跳过自动重发"); return res; }

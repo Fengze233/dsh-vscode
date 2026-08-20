@@ -16,3 +16,4 @@ tsconfig.json
 .gitignore
 README.zh.md
 CONTRIBUTING.md
+.playwright-mcp
