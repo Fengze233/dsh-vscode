@@ -36,11 +36,20 @@ const ACCEPT_BODY = { rpcId: 'orig-1', result: { ok: true, value: { accepted: tr
 /** 构造并加载桥接工厂，返回可调用的沙箱句柄 */
 function loadBridge(opts: { fetch: (input: unknown, init: any) => Promise<Response> }) {
   const outDir = join(tmpdir(), 'dsh-bridge-it-' + process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8));
-  const built = buildBridgeClient({
-    coreSource: join(process.cwd(), 'bridge-client', 'lib', 'core.js'),
-    clientTemplate: join(process.cwd(), 'bridge-client', 'lib', 'client.js'),
-    outDir,
-  });
+  // 静默构建（buildBridgeClient 会 console.log 一行，避免污染 node --test 的 TAP 流——
+  // 与其它测试并行时可能导致 runner 反序列化失败（Unable to deserialize cloned data））
+  const origLog = console.log;
+  console.log = () => {};
+  let built: string;
+  try {
+    built = buildBridgeClient({
+      coreSource: join(process.cwd(), 'bridge-client', 'lib', 'core.js'),
+      clientTemplate: join(process.cwd(), 'bridge-client', 'lib', 'client.js'),
+      outDir,
+    });
+  } finally {
+    console.log = origLog;
+  }
   const code = readFileSync(built, 'utf8');
 
   // —— 最小浏览器沙箱 ——
@@ -104,7 +113,13 @@ function loadBridge(opts: { fetch: (input: unknown, init: any) => Promise<Respon
     fetch: globalThis.fetch,
     setTimeout,
     clearTimeout,
-    console,
+    // 沙箱内 console：桥接的降级诊断行照常转发到 node console（调试可见），但
+    // 用简单对象包裹，避免跨 realm console 对象参与 runner 的结果序列化
+    console: {
+      log: (...a: unknown[]) => console.log(...a),
+      warn: (...a: unknown[]) => console.warn(...a),
+      error: (...a: unknown[]) => console.error(...a),
+    },
   };
   const ctx = createContext(sandbox);
   runInContext(code, ctx);
@@ -163,11 +178,13 @@ test('被拒（非视觉模型）→ 保存图片、图片改为地址重发、�
 
     // 模拟 DSH 发送含图 prompt（父页面桩会自动回执 saveImageAck）
     const promptBody = JSON.stringify({
+      type: 'client-request',
       rpcId: 'orig-1',
+      method: 'session.prompt',
       payload: {
         sessionId: 's1',
         mode: 'queue',
-        content: [{ type: 'text', text: '这是什么？' }, { type: 'image', image: 'x' }],
+        content: [{ type: 'text', text: '这是什么？' }, { type: 'image', mediaType: 'image/png', data: 'AAAA', name: 'a.png' }],
       },
     });
     const out = await b.window.fetch('http://127.0.0.1:3080/api/prompt', { method: 'POST', body: promptBody, headers: { 'content-type': 'application/json' } });
@@ -184,9 +201,13 @@ test('被拒（非视觉模型）→ 保存图片、图片改为地址重发、�
     const originalBody = JSON.parse(calls[0].init.body);
     const resendBody = JSON.parse(calls[1].init.body);
     // 原始请求不被篡改（仍是原 rpcId + 图片块）
+    assert.equal(originalBody.type, 'client-request');
+    assert.equal(originalBody.method, 'session.prompt');
     assert.equal(originalBody.rpcId, 'orig-1');
     assert.ok(originalBody.payload.content.some((x: any) => x.type === 'image'));
-    // 重发：新 rpcId、保留 sessionId/mode、内容为「原文 + 图片：路径」且不再含图片块
+    // 重发：保留线格式 type/method（否则服务器 bad-request 拒绝）、新 rpcId、保留 sessionId/mode、内容为「原文 + 图片：路径」且不再含图片块
+    assert.equal(resendBody.type, 'client-request', '重发必须保留 type=client-request');
+    assert.equal(resendBody.method, 'session.prompt', '重发必须保留 method=session.prompt');
     assert.match(resendBody.rpcId, /^vsc-fb-/);
     assert.equal(resendBody.payload.sessionId, 's1');
     assert.equal(resendBody.payload.mode, 'queue');
@@ -219,7 +240,7 @@ test('视觉模型（成功响应）→ 原样透传，不重发、不落盘、�
     b.apply();
     b.emitWin('message', { kind: 'bridgeHello', token: 'tok', imageFallback: true });
     const promptBody = JSON.stringify({
-      rpcId: 'orig-9',
+      type: 'client-request', rpcId: 'orig-9', method: 'session.prompt',
       payload: { sessionId: 's2', content: [{ type: 'image' }, { type: 'text', text: '看图' }] },
     });
     const out = await b.window.fetch('/api/prompt', { method: 'POST', body: promptBody });
@@ -240,7 +261,7 @@ test('被拒但无图片缓存（未打开工作区）→ 回退原生被拒响�
     b.emitWin('message', { kind: 'bridgeHello', token: 'tok', imageFallback: true });
     // 未捕获任何图片（imageCache 为空）直接发含图请求
     const promptBody = JSON.stringify({
-      rpcId: 'orig-3',
+      type: 'client-request', rpcId: 'orig-3', method: 'session.prompt',
       payload: { sessionId: 's3', content: [{ type: 'image' }] },
     });
     const out = await b.window.fetch('/api/prompt', { method: 'POST', body: promptBody });

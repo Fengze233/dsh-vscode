@@ -120,11 +120,16 @@ export function imageCacheKey(fileLike: unknown): string | null;
 /** 解包 RPC 请求体 → 业务 payload（兼容 {rpcId,payload} 与直传两种形态） */
 export function unwrapRpcPayload(body: unknown): unknown;
 
-/** 以纯文本内容重构 RPC 请求（原 payload 保留，换新 rpcId） */
+/** 以纯文本内容重构 RPC 请求（保留 type/method 与 payload 其余字段，仅换新 rpcId 与 content） */
 export function buildTextResendRequest(
   originalBody: unknown,
   content: { type: 'text'; text: string }[],
-): { rpcId: string; payload: Record<string, unknown> & { content: { type: 'text'; text: string }[] } };
+): {
+  type?: string;
+  rpcId: string;
+  method?: string;
+  payload: Record<string, unknown> & { content: { type: 'text'; text: string }[] };
+};
 
 /** 从 fetch 的 input 提取 URL 字符串（string/URL(href)/Request(url)）；取不到返回 '' */
 export function resolveFetchUrl(input: unknown): string;

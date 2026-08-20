@@ -271,13 +271,17 @@ export function unwrapRpcPayload(body) {
 }
 
 /**
- * 以纯文本内容重构 RPC 请求：保留原 body 的 rpcId? 不——换新 rpcId（与已拒请求不撞车），
+ * 以纯文本内容重构 RPC 请求：保留 DSH 线格式的 type/method（client-request/session.prompt，
+ * 否则服务器会以 bad-request 拒绝重发），换新 rpcId（与已拒请求不撞车），
  * payload 保留原 sessionId/mode/clientTimeZone 等并把 content 替换为纯文本内容。
  */
 export function buildTextResendRequest(originalBody, content) {
   const payload = unwrapRpcPayload(originalBody);
+  const src = originalBody && typeof originalBody === 'object' ? originalBody : {};
   return {
+    ...(typeof src.type === 'string' ? { type: src.type } : {}),
     rpcId: 'vsc-fb-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    ...(typeof src.method === 'string' ? { method: src.method } : {}),
     payload: { ...payload, content },
   };
 }

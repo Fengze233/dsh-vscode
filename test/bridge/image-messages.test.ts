@@ -87,15 +87,21 @@ test('unwrapRpcPayload：{rpcId,payload} 包裹解包，直传形态原样返回
   assert.equal(unwrapRpcPayload(null), null);
 });
 
-test('buildTextResendRequest：换新 rpcId、保留 payload 其余字段、content 替换为纯文本', () => {
+test('buildTextResendRequest：保留线格式 type/method、换新 rpcId、content 替换为纯文本', () => {
   const content = buildTextOnlyContent([{ type: 'image' }, { type: 'text', text: 'hi' }], [buildImagePointerLine('/w/x.png')]);
-  const body = { rpcId: 'old-1', payload: { sessionId: 's1', mode: 'queue', content: [{ type: 'image' }] } };
+  const body = { type: 'client-request', rpcId: 'old-1', method: 'session.prompt', payload: { sessionId: 's1', mode: 'queue', content: [{ type: 'image', data: 'x' }] } };
   const req = buildTextResendRequest(body, content);
+  assert.equal(req.type, 'client-request', '必须保留 type=client-request，否则服务器 bad-request 拒绝');
+  assert.equal(req.method, 'session.prompt', '必须保留 method=session.prompt');
   assert.notEqual(req.rpcId, 'old-1');
   assert.equal(req.payload.sessionId, 's1');
   assert.equal(req.payload.mode, 'queue');
   assert.ok(Array.isArray(req.payload.content));
   assert.equal((req.payload.content as unknown[]).length, 1);
+  assert.equal(((req.payload.content as unknown[])[0] as { type: string }).type, 'text');
+  // 无 type/method 的简写形态（老测试形态）也应能安全生成
+  const bare = buildTextResendRequest({ rpcId: 'x', payload: { content } }, content);
+  assert.equal(typeof bare.rpcId, 'string');
 });
 test('rewriteRpcId：把响应 rpcId 改写为指定值（降级重发响应交回 DSH 用）', async () => {
   const rpcResp = new Response(JSON.stringify({ rpcId: 'vsc-fb-new', result: { ok: true, value: { accepted: true } } }), {
