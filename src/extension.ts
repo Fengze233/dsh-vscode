@@ -18,6 +18,8 @@ import {
   createNodeFs,
   type BridgeInstallResult,
 } from './bridge/installer';
+import { cleanupAllImageCaches } from './bridge/host';
+import * as nodeFs from 'node:fs/promises';
 import { evaluateBridgeStatus, bridgeWarningText } from './bridge/status';
 
 let manager: ServiceManager | null = null;
@@ -456,6 +458,12 @@ function onConfigChanged(): void {
 
 /** 插件停用：按 stopOnExit 决定是否停止自启服务（只杀插件自启的） */
 export async function deactivate(): Promise<void> {
+  // v0.3.0：图片缓存兜底清理（关闭 VS Code/停用扩展时，页面 pagehide 不必然触发）
+  try {
+    await cleanupAllImageCaches({ writeFile: async () => {}, rmFile: async (p) => { await nodeFs.unlink(p); } });
+  } catch {
+    // 清理失败不影响停用流程
+  }
   const config = readConfig().config;
   if (config.stopOnExit) await manager?.stop();
   manager?.dispose();

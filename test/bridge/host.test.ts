@@ -4,7 +4,7 @@
 // 生产侧接 vscode API，这里注入假实现验证纯逻辑（showWarning 一并注入以断言提示文案）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveBridgePath, handleBridgeMessage, saveImageToCwd, deleteImageFiles, createImageRegistry } from '../../src/bridge/host';
+import { resolveBridgePath, handleBridgeMessage, saveImageToCwd, deleteImageFiles, cleanupAllImageCaches, createImageRegistry } from '../../src/bridge/host';
 
 test('resolveBridgePath 处理绝对/相对/危险协议', () => {
   // 绝对路径直接采用（忽略 cwd 与工作区根）
@@ -116,6 +116,17 @@ test('saveImageToCwd：无 cwd/相对 cwd/穿越文件名/非法扩展名/空数
   assert.equal((await saveImageToCwd(deps, { cwd: '/ws', name: 'dsh-imgcache-a-0.exe', dataB64: 'x' })).ok, false);
   assert.equal((await saveImageToCwd(deps, { cwd: '/ws', name: 'dsh-imgcache-a-0.png', dataB64: '' })).ok, false);
   assert.equal(written.length, 0, '任何拒绝都不落盘');
+});
+
+test('cleanupAllImageCaches：全量删除注册表内所有缓存路径并清空', async () => {
+  const reg = createImageRegistry();
+  reg.add('/ws/dsh-imgcache-a-0.png');
+  reg.add('/ws/dsh-imgcache-a-1.jpg');
+  const deleted: string[] = [];
+  const deps = { writeFile: async () => {}, rmFile: async (p: string) => { deleted.push(p); } };
+  await cleanupAllImageCaches(deps, reg);
+  assert.deepEqual(deleted.sort(), ['/ws/dsh-imgcache-a-0.png', '/ws/dsh-imgcache-a-1.jpg']);
+  assert.equal(reg.all().length, 0, '清理后注册表应清空');
 });
 
 test('deleteImageFiles：只删除注册表中的缓存文件，任意路径被忽略', async () => {

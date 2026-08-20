@@ -18,10 +18,17 @@ export interface ImageRegistry {
   has(p: string): boolean;
   add(p: string): void;
   delete(p: string): void;
+  /** 当前登记的全部路径（供全量清理迭代；返回副本，不暴露内部 Set） */
+  all(): string[];
 }
 export function createImageRegistry(): ImageRegistry {
   const set = new Set<string>();
-  return { has: (p) => set.has(p), add: (p) => set.add(p), delete: (p) => set.delete(p) };
+  return {
+    has: (p) => set.has(p),
+    add: (p) => set.add(p),
+    delete: (p) => set.delete(p),
+    all: () => [...set],
+  };
 }
 const sharedImageRegistry = createImageRegistry();
 
@@ -87,6 +94,23 @@ export async function deleteImageFiles(
   return { ok: true };
 }
 
+/**
+ * 全量清理图片缓存（扩展停用/服务停止时的兜底）：删除注册表中所有已写路径并清空注册表。
+ * 补充 pagehide 清理之外的生命周期缺口（关闭 VS Code/停用扩展时页面不一定会触发 pagehide）。
+ */
+export async function cleanupAllImageCaches(
+  deps: ImageFileDeps,
+  registry: ImageRegistry = sharedImageRegistry,
+): Promise<void> {
+  for (const p of registry.all()) {
+    try {
+      await deps.rmFile(p);
+    } catch {
+      // 忽略个别删除失败
+    }
+    registry.delete(p);
+  }
+}
 
 /** 桥接消息处理依赖（生产接 vscode API，测试注入假实现） */
 export interface BridgeMessageDeps {
