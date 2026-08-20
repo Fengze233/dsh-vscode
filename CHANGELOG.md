@@ -19,6 +19,11 @@
 
 - **dsh 新版默认弹浏览器**：启动 `dsh web` 默认追加 `--no-open`（DSH 上游 `openBrowser` 默认 true），
   不再自动打开浏览器；需要时用 `dsh.openInBrowser=true` 恢复原行为。
+- **兼容不支持 `--no-open` 的旧版 dsh（验收修复）**：启动崩溃并伴随换端口级联的问题根因——旧版 dsh 的
+  commander 不识别 `--no-open`，报 `unknown option` 后退出且被误判为“端口被抢占”。现用 stderr 识别该根因，
+  本次会话自动去掉 `--no-open` 并**原端口**重启，不再陷入换端口级联。
+- **图片自由上传真正生效（验收修复）**：① 桥接包版本升至 `0.3.0`，安装器据此对旧装桥接强制重装（此前版本未变不会刷新页面里的桥接代码）；② RPC 线格式对齐——DSH 请求体为 `{ rpcId, payload }`，拦截改按 `payload.content` 判定并按 `{rpcId, payload}` 重构重发；③ 图片落盘 cwd 增加工作区根兜底（此前未传 cwd 会拒绝写入）。注意：图片降级需在**打开工作区文件夹**的窗口内使用（缓存文件落在工作区根）。
+- **右上角图标改为鲸鱼图标（验收修复）**：`dsh.openFromTitle` 图标由辅助侧边栏 codicon 改为扩展自带 `assets/whale-icon.svg`。
 
 ### 其他
 
