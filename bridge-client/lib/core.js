@@ -261,3 +261,25 @@ export function imageCacheKey(fileLike) {
   return name === '' ? null : name + ':' + size + ':' + lm;
 }
 
+/**
+ * 解包 RPC 请求体 → 业务 payload。
+ * DSH 的 fetch 请求体是 { rpcId, payload }（RpcRequest），content 等业务字段在 payload 下；
+ * 兼容「直传 payload」的测试形态。v0.3.0 图片降级的拦截/重发都要经它对齐线格式。
+ */
+export function unwrapRpcPayload(body) {
+  if (body && typeof body === 'object' && body.payload && typeof body.payload === 'object') return body.payload;
+  return body;
+}
+
+/**
+ * 以纯文本内容重构 RPC 请求：保留原 body 的 rpcId? 不——换新 rpcId（与已拒请求不撞车），
+ * payload 保留原 sessionId/mode/clientTimeZone 等并把 content 替换为纯文本内容。
+ */
+export function buildTextResendRequest(originalBody, content) {
+  const payload = unwrapRpcPayload(originalBody);
+  return {
+    rpcId: 'vsc-fb-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    payload: { ...payload, content },
+  };
+}
+

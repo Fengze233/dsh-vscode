@@ -128,6 +128,21 @@ test('deleteImageFiles：只删除注册表中的缓存文件，任意路径被�
   assert.ok(!reg.has('/ws/dsh-imgcache-a-0.png'), '删除后移出注册表');
 });
 
+test('handleBridgeMessage bridgeSaveImage：无 sessionCwd 时回退到 workspaceRoot', async () => {
+  const acks: unknown[] = [];
+  await handleBridgeMessage({ type: 'bridgeSaveImage', requestId: 's9', name: 'dsh-imgcache-a-0.png', dataB64: 'AAAA' }, {
+    openExternal: async () => true,
+    openTextDocument: async () => {},
+    showWarning: () => {},
+    workspaceRoot: '/root',
+    writeFile: async () => {},
+    rmFile: async () => {},
+    reply: async (m: unknown) => { acks.push(m); },
+  });
+  assert.equal(acks.length, 1);
+  assert.equal((acks[0] as { type: string; ok: boolean; path: string }).path, '/root/dsh-imgcache-a-0.png');
+});
+
 test('handleBridgeMessage 处理 bridgeSaveImage：回执 saveImageAck（ok+path）', async () => {
   const acks: unknown[] = [];
   await handleBridgeMessage({ type: 'bridgeSaveImage', requestId: 's1', name: 'dsh-imgcache-a-0.png', dataB64: 'AAAA', sessionCwd: '/ws' }, {

@@ -510,12 +510,13 @@ window.__ModuleLoader__.load({
           if (p) { savedPaths.push(p); pointerLines.push(buildImagePointerLine(p)); }
         }
         if (savedPaths.length === 0) return; // 无可用落盘（如无工作区根）：保持原生“发送失败”可见
-        // 用新 rpcId 以纯文本重发，避免与已拒请求撞车/重复投递
-        const content = buildTextOnlyContent(parsed.content, pointerLines);
-        const payload = { ...parsed, rpcId: "vsc-fb-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8), content };
+        // 用新 rpcId 以纯文本重发：payload 保留原 sessionId/mode，仅替换 content，避免与已拒请求撞车/重复投递
+        const payload = unwrapRpcPayload(parsed);
+        const content = buildTextOnlyContent(payload.content, pointerLines);
+        const resendBody = buildTextResendRequest(parsed, content);
         // 重发时剥离原请求的 signal：避免复用可能已中止/中止中的 AbortSignal 导致重发被中途取消
         const { signal: _signal, ...initNoSignal } = init || {};
-        await origFetch(url, { ...initNoSignal, body: JSON.stringify(payload) });
+        await origFetch(url, { ...initNoSignal, body: JSON.stringify(resendBody) });
         persistedForCleanup.push(...savedPaths);
         parent.postMessage(buildImageFallbackNotice(savedPaths), "*");
       } catch (err) {
@@ -535,7 +536,9 @@ window.__ModuleLoader__.load({
           if (!imageFallbackEnabled || bridgeToken === "") return res;
           if (!init || init.method !== "POST" || typeof init.body !== "string" || init.body === "") return res;
           const parsed = JSON.parse(init.body);
-          if (!parsed || !Array.isArray(parsed.content) || !isPromptWithImages(parsed.content)) return res;
+          // DSH 线格式：请求体为 { rpcId, payload }，业务 content 在 payload 下（payload 透传形态也兼容）
+          const payload = unwrapRpcPayload(parsed);
+          if (!payload || !Array.isArray(payload.content) || !isPromptWithImages(payload.content)) return res;
           const clone = res.clone();
           let respJson = null;
           try { respJson = await clone.json(); } catch {}

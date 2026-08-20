@@ -18,7 +18,7 @@ test('右上角图标命令与 editor/title 菜单（v0.3.0）', () => {
   const p = pkg();
   const cmd = p.contributes.commands.find((c: { command: string }) => c.command === 'dsh.openFromTitle');
   assert.ok(cmd, '存在 dsh.openFromTitle 命令');
-  assert.ok(cmd.icon, '命令带图标');
+  assert.ok(typeof cmd.icon === 'string' && cmd.icon.startsWith('assets/'), '命令图标应为扩展内资源路径（鲸鱼图标）');
   const menu: { command: string; group?: string }[] = p.contributes.menus['editor/title'] || [];
   const item = menu.find((m) => m.command === 'dsh.openFromTitle');
   assert.ok(item, 'editor/title 菜单包含该命令');

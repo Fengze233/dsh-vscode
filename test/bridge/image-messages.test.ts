@@ -15,6 +15,8 @@ import {
   buildTextOnlyContent,
   buildImageFallbackNotice,
   imageCacheKey,
+  unwrapRpcPayload,
+  buildTextResendRequest,
 } from '../../bridge-client/lib/core.js';
 
 test('saveImage 请求构造与 ack 解析', () => {
@@ -74,4 +76,26 @@ test('buildImageFallbackNotice / imageCacheKey', () => {
   assert.equal(imageCacheKey({ name: '', size: 1, lastModified: 2 }), null);
   assert.equal(imageCacheKey(null), null);
 });
+test('unwrapRpcPayload：{rpcId,payload} 包裹解包，直传形态原样返回', () => {
+  const payload = { sessionId: 's1', content: [{ type: 'image' }] };
+  const wrapped = { rpcId: 'r1', payload };
+  assert.equal(unwrapRpcPayload(wrapped), payload, '包裹形态应返回 payload');
+  const direct = { content: [{ type: 'text', text: 'hi' }] };
+  assert.equal(unwrapRpcPayload(direct), direct, '直传形态应原样返回');
+  const empty = {};
+  assert.equal(unwrapRpcPayload(empty), empty);
+  assert.equal(unwrapRpcPayload(null), null);
+});
+
+test('buildTextResendRequest：换新 rpcId、保留 payload 其余字段、content 替换为纯文本', () => {
+  const content = buildTextOnlyContent([{ type: 'image' }, { type: 'text', text: 'hi' }], [buildImagePointerLine('/w/x.png')]);
+  const body = { rpcId: 'old-1', payload: { sessionId: 's1', mode: 'queue', content: [{ type: 'image' }] } };
+  const req = buildTextResendRequest(body, content);
+  assert.notEqual(req.rpcId, 'old-1');
+  assert.equal(req.payload.sessionId, 's1');
+  assert.equal(req.payload.mode, 'queue');
+  assert.ok(Array.isArray(req.payload.content));
+  assert.equal((req.payload.content as unknown[]).length, 1);
+});
+
 

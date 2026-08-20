@@ -70,6 +70,10 @@ export class ServiceManager {
   private stopRequested = false;
   /** 插件自己启动的子进程（复用外部服务时为 null） */
   private child: ChildProcessLike | null = null;
+  /** 旧版 dsh 不支持 --no-open：本次会话检测到后置 true，后续启动一律去掉该参数 */
+  private noOpenDisabled = false;
+  /** 最近一次启动子进程的 stderr 缓冲（有界，用于识别 "unknown option '--no-open'" 崩溃根因） */
+  private childStderr = '';
   private disposed = false;
   /** 父进程退出时杀掉子进程，防止僵尸（stopOnExit=false 时移除） */
   private parentExitHook = (): void => {
@@ -228,7 +232,8 @@ export class ServiceManager {
           extraArgs: this.opts.extraArgs,
           cwd: cwdForSpawn,
           executablePath: this.opts.executablePath,
-          openInBrowser: this.opts.openInBrowser,
+          // noOpenDisabled 后视为"用户要求弹浏览器"（即不追加 --no-open），兼容旧版 dsh
+          openInBrowser: this.noOpenDisabled ? true : this.opts.openInBrowser,
         });
         break; // spawn 成功（未同步抛异常），跳出重试循环继续等待就绪
       } catch (err) {
@@ -260,6 +265,7 @@ export class ServiceManager {
       }
     }
     this.child = child;
+    this.childStderr = ''; // 新一轮启动重置 stderr 缓冲（供 --no-open 崩溃识别）
     // 记录实际执行的启动命令（含解析出的 node 路径与全部参数），供问题排查对照环境差异
     const lastStart = this.deps.processRunner.lastStart;
     if (lastStart) {
@@ -292,7 +298,15 @@ export class ServiceManager {
       this.handleUnexpectedExit(child);
     });
     child.stdout?.on('data', (chunk) => this.deps.log(`[stdout] ${chunk.toString().trimEnd()}`));
-    child.stderr?.on('data', (chunk) => this.deps.log(`[stderr] ${chunk.toString().trimEnd()}`));
+    child.stderr?.on('data', (chunk) => {
+      const text = chunk.toString();
+      // 有界缓冲最近一次启动的 stderr（用于识别 --no-open 不支持导致的启动崩溃）
+      if (this.childStderr.length < 4096) {
+        this.childStderr += text;
+        if (this.childStderr.length > 8192) this.childStderr = this.childStderr.slice(-4096);
+      }
+      this.deps.log(`[stderr] ${text.trimEnd()}`);
+    });
 
     // 等待就绪：轮询探测直到 ready / 子进程退出 / 超时
     this.set({ state: 'waiting' });
@@ -302,6 +316,19 @@ export class ServiceManager {
       if (spawnFailed) return this.getSnapshot(); // 已置为 failed（err.dshNotFound）
       if (this.stopRequested) return this.getSnapshot(); // 等待阶段被叫停（先于 childExited 判定）
       if (childExited) {
+        // 兼容旧版 dsh：不支持 --no-open 时 commander 报 "unknown option '--no-open'" 后退出。
+        // 这是参数问题而非端口占用，必须识别出来并去掉该参数**原端口**重启，
+        // 否则会被当成"启动期间端口被抢占"而陷入换端口级联（实测踩坑）。
+        if (!this.opts.openInBrowser && !this.noOpenDisabled) {
+          // 给 stderr 一点冲刷时间，避免 'exit' 早于 'data' 的竞态导致漏判
+          await new Promise((resolve) => setTimeout(resolve, 60));
+          if (/unknown option/.test(this.childStderr) && /no-open/.test(this.childStderr)) {
+            this.deps.log('[process] 当前 dsh 版本不支持 --no-open，本次会话自动去掉该参数后原端口重启');
+            this.noOpenDisabled = true;
+            this.child = null;
+            return this.doStart(portFallbackRounds); // 原端口重试（不递增换端口轮数）
+          }
+        }
         // 子进程没撑到就绪就退出：两类场景——
         // 1) 残留 dsh 实例占着端口，新实例因 EADDRINUSE 崩溃；
         // 2) 启动期间端口被其他程序抢占（如 WSL 与 Windows 共享 localhost 端口，

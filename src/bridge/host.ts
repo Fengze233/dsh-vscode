@@ -170,9 +170,10 @@ export async function handleBridgeMessage(msg: PanelMessage, deps: BridgeMessage
   }
   if (msg.type === 'bridgeSaveImage') {
     // 图片缓存落盘：白名单校验 + 路径安全由 saveImageToCwd 保证；回执 success/路径给 iframe
+    // cwd 兜底：客户端通常不传会话 cwd（DSH 无轻量接口可取），回退到工作区根目录（=dsh 会话 cwd 的常用值）
     const r = await saveImageToCwd(
       { writeFile: deps.writeFile ?? (async () => {}), rmFile: deps.rmFile ?? (async () => {}) },
-      { cwd: msg.sessionCwd, name: msg.name, dataB64: msg.dataB64 },
+      { cwd: msg.sessionCwd ?? deps.workspaceRoot, name: msg.name, dataB64: msg.dataB64 },
     );
     await deps.reply?.({
       type: 'bridgeSaveImageAck',

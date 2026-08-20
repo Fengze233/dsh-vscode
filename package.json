@@ -136,7 +136,7 @@
       {
         "command": "dsh.openFromTitle",
         "title": "%dsh.cmd.openFromTitle.title%",
-        "icon": "$(layout-sidebar-right)"
+        "icon": "assets/whale-icon.svg"
       }
     ],
     "menus": {

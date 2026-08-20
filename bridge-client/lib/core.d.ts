@@ -119,3 +119,12 @@ export function buildImageFallbackNotice(paths: string[]): { kind: 'imageFallbac
 /** 文件指纹（去重键）；关键字段缺失返回 null */
 export function imageCacheKey(fileLike: unknown): string | null;
 
+/** 解包 RPC 请求体 → 业务 payload（兼容 {rpcId,payload} 与直传两种形态） */
+export function unwrapRpcPayload(body: unknown): unknown;
+
+/** 以纯文本内容重构 RPC 请求（原 payload 保留，换新 rpcId） */
+export function buildTextResendRequest(
+  originalBody: unknown,
+  content: { type: 'text'; text: string }[],
+): { rpcId: string; payload: Record<string, unknown> & { content: { type: 'text'; text: string }[] } };
+

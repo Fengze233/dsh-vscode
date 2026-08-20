@@ -12,7 +12,10 @@ class FakeChild implements ChildProcessLike {
   exitCbs: ((code: number | null) => void)[] = [];
   errorCbs: ((err: Error) => void)[] = [];
   stdout = { on: (_e: 'data', _cb: (chunk: Buffer) => void) => {} };
-  stderr = { on: (_e: 'data', _cb: (chunk: Buffer) => void) => {} };
+  stderrDataCb: ((chunk: Buffer) => void) | null = null;
+  stderr = { on: (_e: 'data', _cb: (chunk: Buffer) => void): void => {
+    if (_e === 'data') this.stderrDataCb = _cb;
+  } };
   on(event: 'exit' | 'error', cb: (...args: never[]) => void): void {
     if (event === 'exit') this.exitCbs.push(cb as (code: number | null) => void);
     else this.errorCbs.push(cb as (err: Error) => void);
@@ -24,6 +27,9 @@ class FakeChild implements ChildProcessLike {
   emitExit(code: number | null = null): void {
     for (const cb of [...this.exitCbs]) cb(code);
   }
+  emitStderr(text: string): void {
+    this.stderrDataCb?.(Buffer.from(text));
+  }
 }
 
 interface Harness {
@@ -31,8 +37,9 @@ interface Harness {
   probeQueue: ProbeResult[];   // 探测结果队列，取完后循环最后一个
   child: FakeChild | null;
   spawnCount: number;
-  probeCount: number;          // 探测调用次数，用于断言定时器已清理
-  states: string[];            // 记录状态变化序列
+  spawnOpenInBrowser: boolean[]; // 每次 startDsh 传入的 openInBrowser（用于断言 --no-open 兜底）
+  probeCount: number;           // 探测调用次数，用于断言定时器已清理
+  states: string[];             // 记录状态变化序列
 }
 
 function makeHarness(opts?: Partial<Parameters<ServiceManager['reconfigure']>[0]>, depsOpts?: Partial<ManagerDeps>): Harness {
@@ -41,6 +48,7 @@ function makeHarness(opts?: Partial<Parameters<ServiceManager['reconfigure']>[0]
     probeQueue: [],
     child: null,
     spawnCount: 0,
+    spawnOpenInBrowser: [],
     probeCount: 0,
     states: [],
   };
@@ -49,8 +57,9 @@ function makeHarness(opts?: Partial<Parameters<ServiceManager['reconfigure']>[0]
     return h.probeQueue.length > 1 ? h.probeQueue.shift()! : h.probeQueue[0];
   };
   const processRunner: ProcessRunner = {
-    startDsh: () => {
+    startDsh: (o) => {
       h.spawnCount += 1;
+      h.spawnOpenInBrowser.push(o?.openInBrowser ?? false);
       h.child = new FakeChild();
       return h.child;
     },
@@ -441,3 +450,27 @@ test('复用外部服务 stop()：清理健康定时器并回到 idle', async ()
   assert.equal(h.probeCount, probesBefore); // 无新增探测 = 定时器已清理
   h.manager.dispose();
 });
+test('旧版 dsh 不支持 --no-open：识别 stderr 后去掉该参数原端口重启（不级联换端口）', async () => {
+  const h = makeHarness({ openInBrowser: false, pollMs: 1 });
+  // 探测队列：先给足 'down' 让首次启动进入 waiting（不提前命中 dsh），崩溃后二次启动再命中 'dsh'
+  h.probeQueue = ['down', 'down', 'down', 'down', 'down', 'down', 'down', 'down', 'dsh'];
+  const done = h.manager.ensureRunning();
+
+  // 轮询等待首次 spawn（最长 500ms），确保已进入 waiting 且子进程处理器已挂载
+  const deadline = Date.now() + 500;
+  while (h.spawnCount < 1 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  assert.equal(h.spawnCount, 1, '首次应启动子进程');
+  assert.equal(h.spawnOpenInBrowser[0], false, '首次传 openInBrowser=false → 追加 --no-open');
+  // stderr 先到（commander 报错），随后子进程退出 —— 模拟真实崩溃顺序
+  h.child?.emitStderr("error: unknown option '--no-open'");
+  h.child?.emitExit(1);
+
+  const s = await done;
+  assert.equal(s.state, 'ready', '应自动去掉 --no-open 后原端口重启并就绪');
+  assert.equal(h.spawnCount, 2, '应恰好重试一次（第二次不再带 --no-open）');
+  assert.equal(h.spawnOpenInBrowser[1], true, '重试时 openInBrowser=true → 不追加 --no-open');
+  h.manager.dispose();
+});
+
