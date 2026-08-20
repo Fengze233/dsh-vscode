@@ -1,7 +1,7 @@
 // test/manager.test.ts — 服务管理器状态机的单元测试（假探测 + 假子进程）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ServiceManager, type ManagerDeps } from '../src/service/manager';
+import { ServiceManager, isNoOpenStderr, type ManagerDeps } from '../src/service/manager';
 import type { ProbeResult } from '../src/service/detect';
 import type { ChildProcessLike, ProcessRunner } from '../src/service/process';
 
@@ -473,4 +473,13 @@ test('旧版 dsh 不支持 --no-open：识别 stderr 后去掉该参数原端口
   assert.equal(h.spawnOpenInBrowser[1], true, '重试时 openInBrowser=true → 不追加 --no-open');
   h.manager.dispose();
 });
+test('isNoOpenStderr：仅当 stderr 含 "unknown option" 且 "-no-open" 时判定为 --no-open 不支持（纯函数）', () => {
+  assert.equal(isNoOpenStderr("error: unknown option '--no-open'"), true, '旧版 dsh 崩溃文本应命中');
+  assert.equal(isNoOpenStderr("Error: listen EADDRINUSE: address already in use"), false, '真实端口占用不误判');
+  assert.equal(isNoOpenStderr("dsh: 服务启动失败"), false, '无关报错不误判');
+  assert.equal(isNoOpenStderr(""), false);
+  assert.equal(isNoOpenStderr("--other --option --no-open is fine"), false, '需同时含 unknown option 才是崩溃标记');
+});
+
+
 

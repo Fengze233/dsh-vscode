@@ -38,6 +38,14 @@ export interface ManagerOptions {
   openInBrowser?: boolean;
 }
 
+/**
+ * 判断子进程崩溃是否因 --no-open 参数不被 dsh 支持（stderr 含 "unknown option" 与 "no-open"）。
+ * 纯函数：把"是否走 --no-open 兜底重启"的判定显式化，便于单测与回溯。
+ */
+export function isNoOpenStderr(stderr: string): boolean {
+  return /unknown option/.test(stderr) && /no-open/.test(stderr);
+}
+
 /** 注入依赖 */
 export interface ManagerDeps {
   probeService: (host: string, port: number, timeoutMs?: number) => Promise<ProbeResult>;
@@ -322,7 +330,7 @@ export class ServiceManager {
         if (!this.opts.openInBrowser && !this.noOpenDisabled) {
           // 给 stderr 一点冲刷时间，避免 'exit' 早于 'data' 的竞态导致漏判
           await new Promise((resolve) => setTimeout(resolve, 60));
-          if (/unknown option/.test(this.childStderr) && /no-open/.test(this.childStderr)) {
+          if (isNoOpenStderr(this.childStderr)) {
             this.deps.log('[process] 当前 dsh 版本不支持 --no-open，本次会话自动去掉该参数后原端口重启');
             this.noOpenDisabled = true;
             this.child = null;
