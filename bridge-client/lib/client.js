@@ -441,6 +441,7 @@ window.__ModuleLoader__.load({
     const imageCache = new Map(); // key(imageCacheKey) -> { name, b64, mime }（当前待用的捕获，用后即消费移除）
     let fallbackResendInFlight = false; // 幂等：一个被拒只触发一次重发
     let lastSeenSessionId = ""; // 最近一次对话(session) id，用于会话切换时判定上一对话终止
+    let imgNameSeq = 0; // 图片文件名全局递增序号：保证同一毫秒内落盘的多批图片也不重名（防覆盖）
 
     // —— 临时图片「模型看完即删」生命周期 ——
     // 模型在回合内通过图像工具按路径读取文件，文件必须存活到读取完成。因此每条消息的
@@ -551,7 +552,7 @@ window.__ModuleLoader__.load({
         for (let i = 0; i < used.length; i++) {
           const entry = used[i];
           const ext = "." + (entry.mime ? entry.mime.split("/")[1].toLowerCase() : "png");
-          const name = imageCacheFilename(String(Date.now()), i, ext);
+          const name = imageCacheFilename(String(Date.now()) + "-" + (imgNameSeq++), i, ext);
           if (!name) continue; // 扩展名不在白名单：跳过该张
           const p = await saveImageViaBridge(entry.b64, name, "img-" + Date.now() + "-" + i);
           if (p) { savedPaths.push(p); pointerLines.push(buildImagePointerLine(p, i + 1)); }
