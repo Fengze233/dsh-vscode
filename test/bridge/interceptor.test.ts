@@ -90,6 +90,8 @@ function loadBridge(opts: { fetch: (input: unknown, init: any) => Promise<Respon
     getSelection() { return null; },
     innerWidth: 1280,
     innerHeight: 800,
+    // 测试默认把「模型看完即删」的 TTL 设为 30ms：批次自动快速删除，避免测试结束时残留定时器
+    __dshBridgeImageTtlMs: 30,
   };
   const fakeDocument: Record<string, any> = {
     addEventListener(type: string, fn: (...a: any[]) => void) {
@@ -347,6 +349,9 @@ test('会话新建/切换时删除上一对话已落盘的临时图片（对话�
   };
   const b = loadBridge({ fetch: fakeRealFetch });
   try {
+    // TTL 放大（须在工厂执行前设置，工厂在 apply 时读取该覆盖值），
+    // 避免测试期间定时器自动删除干扰「会话新建触发删除」的计数断言
+    b.window.__dshBridgeImageTtlMs = 60000;
     b.apply();
     b.emitWin('message', { kind: 'bridgeHello', token: 'tok', imageFallback: true });
     // 会话 s1：发一张图 → 被拒 → 落盘 1 张到工作区
@@ -371,6 +376,63 @@ test('会话新建/切换时删除上一对话已落盘的临时图片（对话�
     const dels = b.parentMessages.filter((m) => m.kind === 'deleteImages');
     assert.equal(dels.length, 1, '会话新建时应发起一次删除清理');
     assert.ok(Array.isArray(dels[0].paths) && dels[0].paths.includes(savedPath), '应删除上一对话落盘的临时图片 ' + savedPath);
+  } finally {
+    rmSync(b.outDir, { recursive: true, force: true });
+  }
+});
+
+test('模型看完即删：同会话下一条消息立即删除上一批；TTL 到期自动删除', async () => {
+  const calls: { input: unknown; init: any }[] = [];
+  const fakeRealFetch = async (input: unknown, init: any) => {
+    calls.push({ input, init });
+    let body: any = {};
+    try { body = JSON.parse(init.body || '{}'); } catch {}
+    const content = body.payload && body.payload.content;
+    const hasImage = Array.isArray(content) && content.some((c: any) => c && c.type === 'image');
+    return jsonResponse(hasImage ? REJECT_BODY : ACCEPT_BODY);
+  };
+  const b = loadBridge({ fetch: fakeRealFetch });
+  try {
+    // 本用例把 TTL 放大到 300ms（须在工厂执行前设置），既验证 TTL 自动删，又避免与断言竞态
+    b.window.__dshBridgeImageTtlMs = 300;
+    b.apply();
+    b.emitWin('message', { kind: 'bridgeHello', token: 'tok', imageFallback: true });
+    const mkFile = (name: string) => ({ name, size: 3, lastModified: 7, type: 'image/png', arrayBuffer: async () => new Uint8Array([1, 2, 3]) });
+    b.emitDoc('change', { target: { files: [mkFile('m1.png')] } });
+    await new Promise((r) => setTimeout(r, 20));
+    // 发送消息 1（含图）→ 落盘 1 张
+    const body1 = JSON.stringify({
+      type: 'client-request', rpcId: 'q1', method: 'session.prompt',
+      payload: { sessionId: 's9', content: [{ type: 'image', name: 'm1.png', data: 'x' }] },
+    });
+    const out1 = await b.window.fetch('/api/prompt', { method: 'POST', body: body1 });
+    assert.equal((await out1.json()).result.ok, true);
+    const saves1 = b.parentMessages.filter((m) => m.kind === 'saveImage');
+    assert.equal(saves1.length, 1);
+    const p1 = '/ws/' + saves1[0].name;
+    // 发送消息 2（纯文本，同一会话）→ 模型已读完消息 1 的图 → 立即删除，无需等 TTL
+    const body2 = JSON.stringify({
+      type: 'client-request', rpcId: 'q2', method: 'session.prompt',
+      payload: { sessionId: 's9', content: [{ type: 'text', text: '继续' }] },
+    });
+    await b.window.fetch('/api/prompt', { method: 'POST', body: body2 });
+    const dels1 = b.parentMessages.filter((m) => m.kind === 'deleteImages');
+    assert.ok(dels1.length >= 1 && dels1.some((d) => d.paths.includes(p1)), '下一条消息应立即删除上一批临时图 ' + p1);
+    // 消息 3（含图）→ 落盘新一批；TTL(30ms) 到期后应自动删除
+    b.emitDoc('change', { target: { files: [mkFile('m2.png')] } });
+    await new Promise((r) => setTimeout(r, 20));
+    const body3 = JSON.stringify({
+      type: 'client-request', rpcId: 'q3', method: 'session.prompt',
+      payload: { sessionId: 's9', content: [{ type: 'image', name: 'm2.png', data: 'y' }] },
+    });
+    const out3 = await b.window.fetch('/api/prompt', { method: 'POST', body: body3 });
+    assert.equal((await out3.json()).result.ok, true);
+    const saves3 = b.parentMessages.filter((m) => m.kind === 'saveImage');
+    const p3 = '/ws/' + saves3[saves3.length - 1].name;
+    assert.ok(!b.parentMessages.some((m) => m.kind === 'deleteImages' && m.paths.includes(p3)), '刚落盘的批次不应被立即删除');
+    // 等待 TTL（300ms）到期 → 自动删除
+    await new Promise((r) => setTimeout(r, 700));
+    assert.ok(b.parentMessages.some((m) => m.kind === 'deleteImages' && m.paths.includes(p3)), 'TTL 到期应自动删除临时图 ' + p3);
   } finally {
     rmSync(b.outDir, { recursive: true, force: true });
   }

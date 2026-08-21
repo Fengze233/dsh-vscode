@@ -405,7 +405,7 @@ window.__ModuleLoader__.load({
         bridgeToken = d.token;
         imageFallbackEnabled = d.imageFallback === true; // v0.3.0：非视觉模型图片降级开关（随 hello 下发）
         // 诊断日志：页面可据此确认握手成功与降级开关状态（排查“图片上传不生效”用）
-        console.log("[dsh-vscode-bridge] handshake ok, v0.3.2, imageFallback=" + imageFallbackEnabled);
+        console.log("[dsh-vscode-bridge] handshake ok, v0.3.3, imageFallback=" + imageFallbackEnabled);
         // 附件图片捕获已由工厂期常驻绑定（bindImageCapture），此处仅刷新开关即可生效
         // 回执统一用 core.js 的 buildSyncWorkspaceAck 构造，形状与工作区同步回执一致
         // （{ kind: 'bridgeAck', ok }，不带 token 字段）；顶层 webview 靠 origin + source
@@ -440,19 +440,44 @@ window.__ModuleLoader__.load({
     let imageFallbackEnabled = false; // 是否允许非视觉模型图片降级
     const imageCache = new Map(); // key(imageCacheKey) -> { name, b64, mime }（当前待用的捕获，用后即消费移除）
     let fallbackResendInFlight = false; // 幂等：一个被拒只触发一次重发
-    const persistedForCleanup = []; // 本次已落盘路径（对话结束/pagehide 时删除）
     let lastSeenSessionId = ""; // 最近一次对话(session) id，用于会话切换时判定上一对话终止
 
-    // 对话终止（新建/删除/切换会话）→ 删除本页已落盘的临时图片并清偿缓存。
+    // —— 临时图片「模型看完即删」生命周期 ——
+    // 模型在回合内通过图像工具按路径读取文件，文件必须存活到读取完成。因此每条消息的
+    // 临时图按「批次」管理：① 同会话发出下一条消息时立即删除（模型已读完上一条并给出回答）；
+    // ② 若不再发消息，TTL（默认 2 分钟，测试可经 window.__dshBridgeImageTtlMs 覆盖）兜底自动删；
+    // ③ 会话新建/删除/切换、页面卸载、扩展停用、手动命令等既有触发全部保留。
+    const IMAGE_TTL_MS =
+      typeof window.__dshBridgeImageTtlMs === "number" && window.__dshBridgeImageTtlMs > 0
+        ? window.__dshBridgeImageTtlMs
+        : 120000;
+    const pendingBatches = []; // { paths: string[], timer }：已落盘、尚未删除的临时图批次
+
+    // 删除一个批次：从待删表移除（幂等）、清定时器、向扩展宿主发 deleteImages 并从落盘表摘除
+    function deleteBatch(batch) {
+      const idx = pendingBatches.indexOf(batch);
+      if (idx < 0) return;
+      pendingBatches.splice(idx, 1);
+      if (batch.timer) { clearTimeout(batch.timer); batch.timer = null; }
+      if (batch.paths.length === 0) return;
+      parent.postMessage(buildDeleteImagesRequest("imgused-" + Date.now(), batch.paths), "*");
+      console.log("[dsh-vscode-bridge] image fallback: 临时图片已用完，删除 " + batch.paths.length + " 张: " + batch.paths.join(", "));
+    }
+
+    // 立即删除全部待删批次（下一条消息/会话结束/页面卸载等场景）
+    function flushAllBatches(reason) {
+      if (pendingBatches.length === 0) return;
+      const count = pendingBatches.reduce((n, b) => n + b.paths.length, 0);
+      for (const batch of [...pendingBatches]) deleteBatch(batch);
+      console.log("[dsh-vscode-bridge] image fallback: " + reason + "，立即删除已用完的临时图片 " + count + " 张");
+    }
+
+    // 对话终止（新建/删除/切换会话）→ 立即删除已落盘临时图片并清偿缓存。
     // clearCaptures=true 仅用于明确的「新建/删除会话」：此刻尚未进入新会话的输入，
     // 缓存的旧字节不会再被使用；会话切换(仅 prompt 观测)不清 imageCache，
     // 避免误删当前消息刚捕获、正要用于降级的图片。
     function handleConversationEnd(reason, clearCaptures) {
-      if (persistedForCleanup.length > 0) {
-        console.log("[dsh-vscode-bridge] image fallback: 会话" + reason + "，清理已落盘临时图片 " + persistedForCleanup.length + " 张");
-        parent.postMessage(buildDeleteImagesRequest("convend-" + Date.now(), persistedForCleanup.slice()), "*");
-        persistedForCleanup.length = 0;
-      }
+      flushAllBatches("会话" + reason);
       if (clearCaptures && imageCache.size > 0) imageCache.clear();
     }
 
@@ -544,8 +569,11 @@ window.__ModuleLoader__.load({
         // 重发时剥离原请求的 signal：避免复用可能已中止/中止中的 AbortSignal 导致重发被中途取消
         const { signal: _signal, ...initNoSignal } = init || {};
         const resp = await origFetch(url, { ...initNoSignal, body: JSON.stringify(resendBody) });
-        persistedForCleanup.push(...savedPaths);
-        console.log("[dsh-vscode-bridge] image fallback: 已把图片改为地址随消息重发（" + savedPaths.length + " 张）: " + savedPaths.join(", "));
+        // 登记本批临时图：模型在回合内读取；下一条消息发出时立即删除，TTL 兜底自动删
+        const batch = { paths: savedPaths.slice(), timer: null };
+        batch.timer = setTimeout(() => deleteBatch(batch), IMAGE_TTL_MS);
+        pendingBatches.push(batch);
+        console.log("[dsh-vscode-bridge] image fallback: 已把图片改为地址随消息重发（" + savedPaths.length + " 张）: " + savedPaths.join(", ") + "（模型读完后即删）");
         return resp;
       } catch (err) {
         // 降级全程失败：返回 null，由调用方回退原生被拒响应（绝不吞用户消息）
@@ -578,6 +606,8 @@ window.__ModuleLoader__.load({
             handleConversationEnd("切换", false); // 保留当前消息刚捕获的图片（不清 imageCache）
           }
           if (sessionId !== "") lastSeenSessionId = sessionId;
+          // 同会话继续发送消息：上一条消息的临时图模型已读完并已回答，立即删除（TTL 无需等待）
+          if (method === "session.prompt" && sessionId !== "") flushAllBatches("下一条消息");
           if (!payload || !Array.isArray(payload.content) || !isPromptWithImages(payload.content)) return res;
           const clone = res.clone();
           let respJson = null;
@@ -604,9 +634,7 @@ window.__ModuleLoader__.load({
     // 页面卸载清理：删除本次已由本页落盘的缓存图片（避免长期占用工作区存储）
     function bindPageCleanup() {
       window.addEventListener("pagehide", () => {
-        if (persistedForCleanup.length === 0) return;
-        parent.postMessage(buildDeleteImagesRequest("cleanup-" + Date.now(), persistedForCleanup.slice()), "*");
-        persistedForCleanup.length = 0;
+        flushAllBatches("页面卸载");
       });
     }
 
