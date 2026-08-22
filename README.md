@@ -97,6 +97,7 @@ After installation, the extension installs its own bridge package `dsh-vscode-br
 - 🔗 **External links**: clicking a link in the panel opens it in your system browser (instead of being trapped inside the iframe);
 - 📂 **File jumps**: clicking a file path in the panel opens the file in VS Code;
 - 📋 **Clipboard copy**: copy buttons inside DSH (such as code-block copy) are routed through the extension host, working around VS Code's clipboard permission block for cross-origin iframes inside webviews.
+- ↩️ **Undo/redo (macOS Cmd+Z / Cmd+Shift+Z, Windows Ctrl+Z / Ctrl+Y)**: VS Code swallows standard shortcuts in nested iframes, and DSH's input is a React-controlled field whose native undo stack is empty, so `execCommand('undo')` no-ops. After handshake the bridge keeps a **manual undo/redo stack** per editable element (consecutive typing grouped into one step per 400ms) — native undo is preferred when it works, manual fallback otherwise (fixes issue #6 "Cmd+Z undo doesn't work").
 
 ### Install / uninstall mechanism (transparency disclosure)
 

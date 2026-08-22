@@ -184,6 +184,92 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // —— 撤销/重做（Cmd/Ctrl+Z、Cmd+Shift+Z / Ctrl+Y） ——
+    // 背景：VS Code 会吞掉 iframe 内快捷键（本桥接在 keydown 捕获阶段接管）；
+    // 且 DSH 输入框为 React 受控组件，其「原生撤销栈」通常为空，document.execCommand('undo')
+    // 会返回 false 且无效果（issue #6：macOS 无法 Cmd+Z 撤销）。因此握手后为每个可编辑元素
+    // 维护手动撤销/重做栈：原生 execCommand 生效时优先用原生，失败时用手动栈兜底。
+    const inputHistory = new Map(); // el -> { undo: string[], redo: string[], last: string, lastTs: number }
+    const UNDO_GROUP_MS = 400; // 连续输入归组窗口：窗口内的输入合并为一条撤销记录
+    const UNDO_MAX = 100; // 每元素撤销栈上限（防无限增长）
+    let programmaticWrite = false; // 我们自己的 writeEditableValue 期间抑制输入历史跟踪
+
+    // 跟踪可编辑元素的输入：beforeinput 在改动前触发，可拿到「改动前值」压入撤销栈
+    function bindUndoTracking() {
+      if (bindUndoTracking.bound) return; bindUndoTracking.bound = true;
+      document.addEventListener("beforeinput", (e) => {
+        if (bridgeToken === "" || programmaticWrite) return;
+        const el = e.target;
+        if (!isEditableElement(el) || typeof el.value !== "string") return;
+        const now = Date.now();
+        const rec = inputHistory.get(el);
+        if (!rec) {
+          // 首次输入：把「改动前值」（含空串）作为第一条撤销记录，保证能一步退回输入前
+          inputHistory.set(el, { undo: [el.value], redo: [], last: el.value, lastTs: now });
+          return;
+        }
+        if (now - rec.lastTs > UNDO_GROUP_MS) {
+          rec.undo.push(rec.last);
+          if (rec.undo.length > UNDO_MAX) rec.undo.shift();
+          rec.redo.length = 0; // 新输入使重做历史失效
+        }
+        rec.lastTs = now;
+      }, true);
+      document.addEventListener("input", (e) => {
+        if (bridgeToken === "" || programmaticWrite) return;
+        const el = e.target;
+        if (!isEditableElement(el) || typeof el.value !== "string") return;
+        const rec = inputHistory.get(el);
+        if (rec) rec.last = el.value;
+        else inputHistory.set(el, { undo: [el.value], redo: [], last: el.value, lastTs: Date.now() });
+      }, true);
+    }
+
+    // 清理已脱离文档的元素历史（防 Map 无限增长）
+    function pruneInputHistory() {
+      for (const [el] of inputHistory) {
+        if (el.isConnected === false) inputHistory.delete(el);
+      }
+    }
+
+    // 手动撤销：弹出撤销栈恢复值（原生 execCommand 失败时的兜底）
+    function manualUndo() {
+      const el = focusedEditable();
+      if (!el || typeof el.value !== "string") return false;
+      const rec = inputHistory.get(el);
+      if (!rec || rec.undo.length === 0) return false;
+      const prev = rec.undo.pop();
+      rec.redo.push(el.value);
+      programmaticWrite = true;
+      try {
+        writeEditableValue(el, prev);
+      } finally {
+        programmaticWrite = false;
+      }
+      rec.last = prev;
+      pruneInputHistory();
+      return true;
+    }
+
+    // 手动重做（Cmd+Shift+Z / Ctrl+Y 兜底）
+    function manualRedo() {
+      const el = focusedEditable();
+      if (!el || typeof el.value !== "string") return false;
+      const rec = inputHistory.get(el);
+      if (!rec || rec.redo.length === 0) return false;
+      const next = rec.redo.pop();
+      rec.undo.push(el.value);
+      programmaticWrite = true;
+      try {
+        writeEditableValue(el, next);
+      } finally {
+        programmaticWrite = false;
+      }
+      rec.last = next;
+      pruneInputHistory();
+      return true;
+    }
+
     // 执行一条被仿真的编辑命令（异步，粘贴/复制兜底需要桥接往返）
     async function handleEditCommand(cmd) {
       switch (cmd) {
@@ -241,10 +327,11 @@ window.__ModuleLoader__.load({
           tryExecCommand("selectAll");
           break;
         case "undo":
-          tryExecCommand("undo");
+          // 优先原生撤销（内容最完整）；React 受控输入框原生撤销栈为空时用手动栈兜底
+          if (!tryExecCommand("undo")) manualUndo();
           break;
         case "redo":
-          tryExecCommand("redo");
+          if (!tryExecCommand("redo")) manualRedo();
           break;
       }
     }
@@ -405,7 +492,7 @@ window.__ModuleLoader__.load({
         bridgeToken = d.token;
         imageFallbackEnabled = d.imageFallback === true; // v0.3.0：非视觉模型图片降级开关（随 hello 下发）
         // 诊断日志：页面可据此确认握手成功与降级开关状态（排查“图片上传不生效”用）
-        console.log("[dsh-vscode-bridge] handshake ok, v0.3.4, imageFallback=" + imageFallbackEnabled);
+        console.log("[dsh-vscode-bridge] handshake ok, v0.3.5, imageFallback=" + imageFallbackEnabled);
         // 附件图片捕获已由工厂期常驻绑定（bindImageCapture），此处仅刷新开关即可生效
         // 回执统一用 core.js 的 buildSyncWorkspaceAck 构造，形状与工作区同步回执一致
         // （{ kind: 'bridgeAck', ok }，不带 token 字段）；顶层 webview 靠 origin + source
@@ -643,6 +730,7 @@ window.__ModuleLoader__.load({
     // —— 入口：立即可绑定的拦截先挂载；图片捕获在握手后才绑定 ——
     bindLinkInterception();
     bindImageCapture(); // 附件图片捕获常驻挂载（未握手/关闭时经 imageFallbackEnabled 过滤，零干扰）
+    bindUndoTracking(); // 撤销/重做历史跟踪常驻挂载（未握手时零干扰）
     interceptPromptFetch(); // fetch 拦截常驻挂载（内部用开关过滤，未握手/关闭时零干扰）
     bindPageCleanup();
     window.addEventListener("message", onParentMessage);

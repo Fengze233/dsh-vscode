@@ -98,7 +98,8 @@ function loadBridge(opts: { fetch: (input: unknown, init: any) => Promise<Respon
       (docListeners.get(type) ?? (docListeners.set(type, new Set()).get(type)!)).add(fn);
     },
     activeElement: null,
-    execCommand() { return true; },
+    // undo/redo 返回 false：模拟「React 受控输入框原生撤销栈为空」，强制走桥接手动手栈
+    execCommand(cmd: string) { return cmd !== 'undo' && cmd !== 'redo'; },
     createElement() { return { textContent: '', style: {}, append() {}, setAttribute() {}, addEventListener() {} }; },
     head: { append() {} },
     body: { append() {} },
@@ -115,6 +116,22 @@ function loadBridge(opts: { fetch: (input: unknown, init: any) => Promise<Respon
     fetch: globalThis.fetch,
     setTimeout,
     clearTimeout,
+    // —— 撤销/重做测试用 DOM 桩 ——
+    Event: class { type: string; bubbles: boolean; constructor(type: string, opts?: { bubbles?: boolean }) { this.type = type; this.bubbles = !!(opts && opts.bubbles); } },
+    HTMLTextAreaElement: {
+      prototype: (() => {
+        const proto: any = {};
+        Object.defineProperty(proto, 'value', { get() { return this._v; }, set(v: string) { this._v = v; } });
+        return proto;
+      })(),
+    },
+    HTMLInputElement: {
+      prototype: (() => {
+        const proto: any = {};
+        Object.defineProperty(proto, 'value', { get() { return this._v; }, set(v: string) { this._v = v; } });
+        return proto;
+      })(),
+    },
     // 沙箱内 console：桥接的降级诊断行照常转发到 node console（调试可见），但
     // 用简单对象包裹，避免跨 realm console 对象参与 runner 的结果序列化
     console: {
@@ -133,6 +150,7 @@ function loadBridge(opts: { fetch: (input: unknown, init: any) => Promise<Respon
   return {
     outDir,
     window: fakeWindow,
+    document: fakeDocument,
     windowListeners,
     docListeners,
     parentMessages,
@@ -433,6 +451,60 @@ test('模型看完即删：同会话下一条消息立即删除上一批；TTL �
     // 等待 TTL（300ms）到期 → 自动删除
     await new Promise((r) => setTimeout(r, 700));
     assert.ok(b.parentMessages.some((m) => m.kind === 'deleteImages' && m.paths.includes(p3)), 'TTL 到期应自动删除临时图 ' + p3);
+  } finally {
+    rmSync(b.outDir, { recursive: true, force: true });
+  }
+});
+
+test('issue #6：Cmd+Z 撤销 / Cmd+Shift+Z 重做（原生 execCommand 失效时用手动栈兜底）', async () => {
+  const fakeRealFetch = async (_input: unknown, _init: any) => jsonResponse(ACCEPT_BODY);
+  const b = loadBridge({ fetch: fakeRealFetch });
+  try {
+    b.apply();
+    b.emitWin('message', { kind: 'bridgeHello', token: 'tok', imageFallback: true });
+
+    // 假输入框（React 受控 textarea 的简化）：值存 _v，由桥接的 value setter 写入
+    const ta: any = {
+      tagName: 'TEXTAREA',
+      _v: '',
+      isContentEditable: false,
+      isConnected: true,
+      selectionStart: 0,
+      selectionEnd: 0,
+      setSelectionRange() {},
+      dispatchEvent() {},
+    };
+    Object.defineProperty(ta, 'value', {
+      get() { return this._v; },
+      set(v: string) { this._v = v; },
+    });
+    b.document.activeElement = ta;
+
+    // 模拟输入两段文本（第二段与第一段间隔 > 归组窗口，产生两条撤销记录）。
+    // 时序对齐真实浏览器：beforeinput 在改动前触发（此时 value 还是旧值），随后再应用改动。
+    const type = (text: string) => {
+      b.emitDoc('beforeinput', { target: ta }); // 改动前：此时 _v 为旧值，记录撤销点
+      ta._v = text;                             // 应用改动
+      b.emitDoc('input', { target: ta });       // 改动后：更新 last
+    };
+    type('hello');
+    await new Promise((r) => setTimeout(r, 600)); // 超过 400ms 归组窗口
+    type('hello world');
+
+    const keydown = (k: any) => b.windowListeners.get('keydown')?.forEach((fn) => fn(k));
+
+    // Cmd+Z：原生 execCommand('undo') 返回 false → 手动栈撤销一步 → hello
+    keydown({ key: 'z', metaKey: true, ctrlKey: false, shiftKey: false, preventDefault() {}, stopPropagation() {} });
+    assert.equal(ta._v, 'hello', '第一次撤销应回到 hello');
+    // 再 Cmd+Z：回到输入前空串
+    keydown({ key: 'z', metaKey: true, ctrlKey: false, shiftKey: false, preventDefault() {}, stopPropagation() {} });
+    assert.equal(ta._v, '', '第二次撤销应回到输入前空串');
+    // Cmd+Shift+Z：重做一步 → hello
+    keydown({ key: 'z', metaKey: true, ctrlKey: false, shiftKey: true, preventDefault() {}, stopPropagation() {} });
+    assert.equal(ta._v, 'hello', '重做应恢复 hello');
+    // 重做第二段 → hello world
+    keydown({ key: 'z', metaKey: true, ctrlKey: false, shiftKey: true, preventDefault() {}, stopPropagation() {} });
+    assert.equal(ta._v, 'hello world', '再次重做应恢复 hello world');
   } finally {
     rmSync(b.outDir, { recursive: true, force: true });
   }

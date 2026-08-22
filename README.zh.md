@@ -97,6 +97,7 @@ npm run package        # 产出 dsh-vscode.vsix，再按方式二安装
 - 🔗 **外链跳转**：面板内点击外链，在系统默认浏览器中打开（而非被困在 iframe 内）；
 - 📂 **文件跳转**：点击面板内的文件路径，在 VS Code 中打开对应文件；
 - 📋 **剪贴板复制**：面板内 DSH 的复制按钮（如代码块复制）改由扩展宿主写入系统剪贴板，绕开 VS Code 对 webview 内跨源 iframe 的剪贴板权限拦截。
+- ↩️ **撤销/重做（macOS Cmd+Z / Cmd+Shift+Z，Windows Ctrl+Z / Ctrl+Y）**：VS Code 会吞掉嵌套 iframe 内的标准快捷键；且 DSH 输入框为 React 受控组件、其原生撤销栈为空，`execCommand('undo')` 会失效。桥接在握手后为输入框维护**手动撤销/重做栈**（连续输入按 400ms 归组为一条记录），原生撤销可用时优先原生、失败时手动兜底——修复 issue #6「无法 Cmd+Z 撤销」。
 
 ### 安装与卸载机制（透明披露）
 
