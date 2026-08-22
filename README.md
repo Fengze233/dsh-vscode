@@ -126,7 +126,7 @@ The bridge only works inside the panel. If it is inactive (e.g. you open the DSH
 
 ## 🆕 What's new in v0.3.0
 
-- **Top-right DSH icon**: the whale icon in the editor title bar opens the right-side panel (command `DSH: Open Right Panel`).
+- **Top-right DSH icon**: the whale button in the editor title bar opens the right-side panel (command `DSH: Open Right Panel`). The icon is the **original whale on a white background** (`whale-icon-bg.svg`), clearly visible in both dark and light themes; the activity bar and secondary sidebar keep the original whale icon.
 - **SSH Remote**: with `dsh.remote.enabled` on, the extension runs on the remote host, starts/reuses `dsh` there, and shows the panel through a VS Code tunnel — your local VS Code window stays clean and the remote service stays on `127.0.0.1`.
 - **Image upload works seamlessly even for non-vision models**: attach images freely in the dialog. When the active model has no image input, the image is saved into your workspace and the message is sent back out as the original text plus a `image: <absolute-path>` reference — no error, no popup; the model inspects the file with its own image tool and answers normally. Vision-capable models keep the native image upload untouched.
 - **No browser auto-open**: `dsh web` is started with `--no-open`, so the plugin no longer pops a browser window; turn that back on with `dsh.openInBrowser`.
