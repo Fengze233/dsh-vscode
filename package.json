@@ -39,14 +39,14 @@
         {
           "id": "dsh",
           "title": "%dsh.container.title%",
-          "icon": "assets/whale-icon.svg"
+          "icon": { "light": "assets/whale-icon-light.svg", "dark": "assets/whale-icon-dark.svg" }
         }
       ],
       "secondarySidebar": [
         {
           "id": "dsh-secondary",
           "title": "%dsh.container.title%",
-          "icon": "assets/whale-icon.svg"
+          "icon": { "light": "assets/whale-icon-light.svg", "dark": "assets/whale-icon-dark.svg" }
         }
       ]
     },
@@ -143,7 +143,7 @@
       {
         "command": "dsh.openFromTitle",
         "title": "%dsh.cmd.openFromTitle.title%",
-        "icon": "assets/whale-icon.svg"
+        "icon": { "light": "assets/whale-icon-light.svg", "dark": "assets/whale-icon-dark.svg" }
       }
     ],
     "menus": {

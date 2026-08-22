@@ -2,6 +2,7 @@
 
 ### 变更
 
+- **右上角/活动栏鲸鱼图标改为明暗双主题变体**：原图标为纯黑填充（`#000000`），在深色主题的编辑器标题栏与活动栏上几乎不可见。现新增 `whale-icon-dark.svg`（浅蓝，深色主题用）与 `whale-icon-light.svg`（深灰，浅色主题用），`dsh.openFromTitle`、活动栏与辅助侧边栏容器图标统一切换为 `{ light, dark }` 双主题配置。
 - **卸载扩展时自动清理桥接**：`package.json` 新增 `uninstall` 钩子（`node ./out/uninstall.js`），VS Code 卸载扩展时自动从 DSH 用户目录移除桥接包并按 begin/end 标记还原 `cordis.patch.yml`（尽力而为，不影响卸载流程；仍可用 `DSH: 卸载桥接` 手动移除）。
 - **桥接版本与插件版本统一**：二者始终一致（一同随插件包发布到商城），新增回归测试防漂移（bridge-client 版本 === 插件版本，且握手日志随版本号）。
 

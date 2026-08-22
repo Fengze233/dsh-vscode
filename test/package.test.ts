@@ -18,7 +18,12 @@ test('右上角图标命令与 editor/title 菜单（v0.3.0）', () => {
   const p = pkg();
   const cmd = p.contributes.commands.find((c: { command: string }) => c.command === 'dsh.openFromTitle');
   assert.ok(cmd, '存在 dsh.openFromTitle 命令');
-  assert.ok(typeof cmd.icon === 'string' && cmd.icon.startsWith('assets/'), '命令图标应为扩展内资源路径（鲸鱼图标）');
+  // 图标为明暗双主题变体（深色主题用浅色鲸鱼、浅色主题用深色鲸鱼，避免黑色图标融入深色背景）
+  const icon = cmd.icon as { light: string; dark: string };
+  assert.ok(typeof icon === 'object' && typeof icon.light === 'string' && icon.light.startsWith('assets/'), '应有 light 主题图标');
+  assert.ok(typeof icon.dark === 'string' && icon.dark.startsWith('assets/'), '应有 dark 主题图标');
+  assert.ok(existsSync(join(__dirname, '..', '..', icon.light)), 'light 图标文件应存在: ' + icon.light);
+  assert.ok(existsSync(join(__dirname, '..', '..', icon.dark)), 'dark 图标文件应存在: ' + icon.dark);
   const menu: { command: string; group?: string }[] = p.contributes.menus['editor/title'] || [];
   const item = menu.find((m) => m.command === 'dsh.openFromTitle');
   assert.ok(item, 'editor/title 菜单包含该命令');
@@ -31,6 +36,15 @@ test('存在手动清理图片缓存命令 dsh.cleanupImageCache', () => {
   assert.ok(cmd, '存在 dsh.cleanupImageCache 命令');
   assert.ok(String(cmd.title).includes('dsh.cmd.cleanupImageCache.title'), '命令标题走本地化');
   assert.ok(Array.isArray(p.activationEvents) && p.activationEvents.includes('onCommand:dsh.cleanupImageCache'), '需声明激活事件');
+});
+
+test('活动栏/辅助侧边栏容器图标同样使用明暗双主题鲸鱼图标', () => {
+  const p = pkg();
+  for (const container of [...p.contributes.viewsContainers.activitybar, ...p.contributes.viewsContainers.secondarySidebar]) {
+    const icon = container.icon as { light: string; dark: string };
+    assert.ok(icon && typeof icon.light === 'string' && icon.light.startsWith('assets/'), container.id + ' 应有 light 图标');
+    assert.ok(icon && typeof icon.dark === 'string' && icon.dark.startsWith('assets/'), container.id + ' 应有 dark 图标');
+  }
 });
 
 test('v0.3.0 设置项：remote.enabled 默认 false、image.fallback 默认 true、openInBrowser 默认 false', () => {
