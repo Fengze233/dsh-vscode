@@ -405,7 +405,7 @@ window.__ModuleLoader__.load({
         bridgeToken = d.token;
         imageFallbackEnabled = d.imageFallback === true; // v0.3.0：非视觉模型图片降级开关（随 hello 下发）
         // 诊断日志：页面可据此确认握手成功与降级开关状态（排查“图片上传不生效”用）
-        console.log("[dsh-vscode-bridge] handshake ok, v0.3.3, imageFallback=" + imageFallbackEnabled);
+        console.log("[dsh-vscode-bridge] handshake ok, v0.3.4, imageFallback=" + imageFallbackEnabled);
         // 附件图片捕获已由工厂期常驻绑定（bindImageCapture），此处仅刷新开关即可生效
         // 回执统一用 core.js 的 buildSyncWorkspaceAck 构造，形状与工作区同步回执一致
         // （{ kind: 'bridgeAck', ok }，不带 token 字段）；顶层 webview 靠 origin + source
@@ -446,12 +446,13 @@ window.__ModuleLoader__.load({
     // —— 临时图片「模型看完即删」生命周期 ——
     // 模型在回合内通过图像工具按路径读取文件，文件必须存活到读取完成。因此每条消息的
     // 临时图按「批次」管理：① 同会话发出下一条消息时立即删除（模型已读完上一条并给出回答）；
-    // ② 若不再发消息，TTL（默认 2 分钟，测试可经 window.__dshBridgeImageTtlMs 覆盖）兜底自动删；
+    // ② 若不再发消息，TTL（默认 45 秒，测试可经 window.__dshBridgeImageTtlMs 覆盖）兜底自动删——
+    //    模型回合内通常数秒即完成图片读取，45 秒既覆盖读取又贴近"看完即删"；
     // ③ 会话新建/删除/切换、页面卸载、扩展停用、手动命令等既有触发全部保留。
     const IMAGE_TTL_MS =
       typeof window.__dshBridgeImageTtlMs === "number" && window.__dshBridgeImageTtlMs > 0
         ? window.__dshBridgeImageTtlMs
-        : 120000;
+        : 45000;
     const pendingBatches = []; // { paths: string[], timer }：已落盘、尚未删除的临时图批次
 
     // 删除一个批次：从待删表移除（幂等）、清定时器、向扩展宿主发 deleteImages 并从落盘表摘除
