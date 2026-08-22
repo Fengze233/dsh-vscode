@@ -18,12 +18,12 @@ test('右上角图标命令与 editor/title 菜单（v0.3.0）', () => {
   const p = pkg();
   const cmd = p.contributes.commands.find((c: { command: string }) => c.command === 'dsh.openFromTitle');
   assert.ok(cmd, '存在 dsh.openFromTitle 命令');
-  // 图标为明暗双主题变体（深色主题用浅色鲸鱼、浅色主题用深色鲸鱼，避免黑色图标融入深色背景）
-  const icon = cmd.icon as { light: string; dark: string };
-  assert.ok(typeof icon === 'object' && typeof icon.light === 'string' && icon.light.startsWith('assets/'), '应有 light 主题图标');
-  assert.ok(typeof icon.dark === 'string' && icon.dark.startsWith('assets/'), '应有 dark 主题图标');
-  assert.ok(existsSync(join(__dirname, '..', '..', icon.light)), 'light 图标文件应存在: ' + icon.light);
-  assert.ok(existsSync(join(__dirname, '..', '..', icon.dark)), 'dark 图标文件应存在: ' + icon.dark);
+  // 右上角图标：原鲸鱼 + 白底（明暗主题都清晰可见），不再用明暗双主题变体
+  assert.equal(cmd.icon, 'assets/whale-icon-bg.svg', '右上角命令图标应为白底鲸鱼');
+  assert.ok(existsSync(join(__dirname, '..', '..', 'assets', 'whale-icon-bg.svg')), '白底鲸鱼图标文件应存在');
+  const bg = readFileSync(join(__dirname, '..', '..', 'assets', 'whale-icon-bg.svg'), 'utf8');
+  assert.ok(bg.includes('#FFFFFF'), '白底图标应含白色背景');
+  assert.ok(bg.includes('#000000'), '白底图标应保留原黑色鲸鱼路径');
   const menu: { command: string; group?: string }[] = p.contributes.menus['editor/title'] || [];
   const item = menu.find((m) => m.command === 'dsh.openFromTitle');
   assert.ok(item, 'editor/title 菜单包含该命令');
@@ -38,13 +38,12 @@ test('存在手动清理图片缓存命令 dsh.cleanupImageCache', () => {
   assert.ok(Array.isArray(p.activationEvents) && p.activationEvents.includes('onCommand:dsh.cleanupImageCache'), '需声明激活事件');
 });
 
-test('活动栏/辅助侧边栏容器图标同样使用明暗双主题鲸鱼图标', () => {
+test('活动栏/辅助侧边栏容器图标保持原始鲸鱼图标（assets/whale-icon.svg）', () => {
   const p = pkg();
   for (const container of [...p.contributes.viewsContainers.activitybar, ...p.contributes.viewsContainers.secondarySidebar]) {
-    const icon = container.icon as { light: string; dark: string };
-    assert.ok(icon && typeof icon.light === 'string' && icon.light.startsWith('assets/'), container.id + ' 应有 light 图标');
-    assert.ok(icon && typeof icon.dark === 'string' && icon.dark.startsWith('assets/'), container.id + ' 应有 dark 图标');
+    assert.equal(container.icon, 'assets/whale-icon.svg', container.id + ' 应保持原始鲸鱼图标');
   }
+  assert.ok(existsSync(join(__dirname, '..', '..', 'assets', 'whale-icon.svg')), '原始鲸鱼图标文件应存在');
 });
 
 test('v0.3.0 设置项：remote.enabled 默认 false、image.fallback 默认 true、openInBrowser 默认 false', () => {
