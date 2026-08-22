@@ -27,6 +27,13 @@ const ext = {
   ...common,
 };
 
+// 卸载钩子入口：VS Code 卸载扩展时执行（node ./out/uninstall.js），随扩展包分发
+const uninstall = {
+  entryPoints: ['src/uninstall.ts'],
+  outfile: 'out/uninstall.js',
+  ...common,
+};
+
 // 测试入口：递归收集 test 目录下的 *.test.ts
 const testEntries = readdirSync('test', { recursive: true })
   .filter((f) => f.endsWith('.test.ts'))
@@ -52,7 +59,7 @@ const bridgeBuildOpts = {
 // 避免 node --test 收集到失效产物导致测试数虚高（历史教训：88 vs 75）。
 rmSync(join(process.cwd(), 'out'), { recursive: true, force: true });
 
-const configs = testOnly ? [tests] : [ext, tests];
+const configs = testOnly ? [tests, uninstall] : [ext, tests, uninstall];
 if (watch) {
   await Promise.all(configs.map((c) => context(c).then((ctx) => ctx.watch())));
   // 监听模式下桥接客户端仅构建一次（未对 core.js/client.js 挂 watcher，改动需重启 watch）

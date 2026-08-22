@@ -106,7 +106,11 @@ npm run package        # 产出 dsh-vscode.vsix，再按方式二安装
 1. 在你的 DSH 用户目录（`$DSH_HOME/profiles/web`，默认 `~/.dsh/profiles/web`）安装本扩展的桥接包 `dsh-vscode-bridge`（经 DSH 官方客户端插件扩展点安装）；
 2. 在 `cordis.patch.yml` 中写入一段带 `# dsh-vscode-bridge: begin` / `# dsh-vscode-bridge: end` 标记的 `insert:` 条目，把桥接包注册为 DSH 的官方 client 插件（只写用户目录，绝不触碰 DSH 安装目录）。
 
-如需移除：执行命令 `DSH: 卸载桥接`，插件会按标记精确删除写入的条目并删除桥接目录，自动还原 `cordis.patch.yml` 原文件（你原有的内容不受影响）。
+如需移除，两种方式任选：
+   - **卸载插件**：VS Code 卸载本扩展时会自动执行 `uninstall` 钩子，同样按标记精确删除条目并删除桥接目录（尽力而为，不影响卸载流程）；
+   - **仅移除桥接**：执行命令 `DSH: 卸载桥接`，效果相同。
+
+> 版本说明：桥接包版本与插件版本**始终一致**（二者一同随插件包发布到商城），安装器按「版本不一致 → 强制重装」保证逻辑更新触达。
 
 ### 桥接相关设置（`dsh.*`）
 

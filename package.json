@@ -17,6 +17,7 @@
     "Other"
   ],
   "main": "./out/extension.js",
+  "uninstall": "node ./out/uninstall.js",
   "activationEvents": [
     "onView:dsh.panel",
     "onView:dsh.panel.secondary",

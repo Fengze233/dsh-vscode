@@ -1,5 +1,10 @@
 ## [0.3.0] - 2026-08-20
 
+### 变更
+
+- **卸载扩展时自动清理桥接**：`package.json` 新增 `uninstall` 钩子（`node ./out/uninstall.js`），VS Code 卸载扩展时自动从 DSH 用户目录移除桥接包并按 begin/end 标记还原 `cordis.patch.yml`（尽力而为，不影响卸载流程；仍可用 `DSH: 卸载桥接` 手动移除）。
+- **桥接版本与插件版本统一**：二者始终一致（一同随插件包发布到商城），新增回归测试防漂移（bridge-client 版本 === 插件版本，且握手日志随版本号）。
+
 ### 修复
 
 - **修复 issue #6：macOS 无法 Cmd+Z 撤销**。根因：VS Code 吞掉嵌套 iframe 内快捷键，且 DSH 输入框为 React 受控组件、原生撤销栈为空，`document.execCommand('undo')` 失效且按键已被桥接接管。桥接现为每个可编辑元素维护**手动撤销/重做栈**（`beforeinput` 记录改动前值、连续输入按 400ms 归组为一条记录，上限 100 条；原生撤销可用时优先原生、失败时手动兜底），并覆盖 Cmd+Shift+Z / Ctrl+Y 重做。配套桥接升至 `0.3.5`（触发强制重装），握手诊断 `handshake ok, v0.3.5`。

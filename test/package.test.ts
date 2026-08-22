@@ -1,7 +1,7 @@
 // test/package.test.ts — package.json 静态贡献与设置的回归校验（v0.3.0）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 function pkg() {
@@ -39,4 +39,18 @@ test('v0.3.0 设置项：remote.enabled 默认 false、image.fallback 默认 tru
   assert.equal(props['dsh.remote.enabled'].default, false);
   assert.equal(props['dsh.image.fallback'].default, true);
   assert.equal(props['dsh.openInBrowser'].default, false);
+});
+
+test('桥接版本与插件版本统一（一同随包发布），且卸载钩子自动清理桥接', () => {
+  const p = pkg();
+  // ① 卸载钩子：VS Code 卸载扩展时执行 node ./out/uninstall.js
+  assert.equal(p.uninstall, 'node ./out/uninstall.js', 'package.json 应声明 uninstall 钩子');
+  // ② 版本统一：bridge-client 版本 === 插件版本（防止日后漂移）
+  const bridge = JSON.parse(readFileSync(join(__dirname, '..', '..', 'bridge-client', 'package.json'), 'utf8'));
+  assert.equal(bridge.version, p.version, '桥接包版本必须与插件版本一致（一同被上传到商城）');
+  // ③ 握手诊断日志随版本号（DevTools 排查依据）
+  const client = readFileSync(join(__dirname, '..', '..', 'bridge-client', 'lib', 'client.js'), 'utf8');
+  assert.ok(client.includes('handshake ok, v' + p.version + ','), '握手日志应同步版本号 v' + p.version);
+  // ④ 构建产物应包含卸载脚本（build.mjs 在两种模式下都会构建 out/uninstall.js）
+  assert.ok(existsSync(join(__dirname, '..', 'uninstall.js')), '构建产物应包含 out/uninstall.js');
 });
