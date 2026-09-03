@@ -11,7 +11,10 @@ class FakeChild implements ChildProcessLike {
   killed: string[] = [];
   exitCbs: ((code: number | null) => void)[] = [];
   errorCbs: ((err: Error) => void)[] = [];
-  stdout = { on: (_e: 'data', _cb: (chunk: Buffer) => void) => {} };
+  stdoutDataCb: ((chunk: Buffer) => void) | null = null;
+  stdout = { on: (_e: 'data', _cb: (chunk: Buffer) => void): void => {
+    if (_e === 'data') this.stdoutDataCb = _cb;
+  } };
   stderrDataCb: ((chunk: Buffer) => void) | null = null;
   stderr = { on: (_e: 'data', _cb: (chunk: Buffer) => void): void => {
     if (_e === 'data') this.stderrDataCb = _cb;
@@ -26,6 +29,9 @@ class FakeChild implements ChildProcessLike {
   }
   emitExit(code: number | null = null): void {
     for (const cb of [...this.exitCbs]) cb(code);
+  }
+  emitStdout(text: string): void {
+    this.stdoutDataCb?.(Buffer.from(text));
   }
   emitStderr(text: string): void {
     this.stderrDataCb?.(Buffer.from(text));
@@ -481,5 +487,111 @@ test('isNoOpenStderr：仅当 stderr 含 "unknown option" 且 "-no-open" 时判�
   assert.equal(isNoOpenStderr("--other --option --no-open is fine"), false, '需同时含 unknown option 才是崩溃标记');
 });
 
+test('探测到已有认证 DSH：没有 token URL 时显示认证错误且不假装就绪', async () => {
+  const h = makeHarness();
+  h.probeQueue = ['auth'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.authRequired');
+  assert.equal(s.url, null);
+  assert.equal(s.owned, false);
+  assert.equal(h.spawnCount, 0);
+  h.manager.dispose();
+});
+
+test('自启认证 DSH：跨 stdout chunk 捕获 token URL，日志不泄露 token', async () => {
+  const logs: string[] = [];
+  const h = makeHarness({ pollMs: 1 }, { log: (line) => logs.push(line) });
+  h.probeQueue = ['down', 'auth'];
+  const done = h.manager.ensureRunning();
+  while (!h.child) await new Promise((r) => setTimeout(r, 1));
+  h.child.emitStdout('dsh web: http://127.0.0.1:3080/?tok');
+  h.child.emitStdout('en=secret-value\nLAN: http://192.168.1.2:3080/?token=other\n');
+  const s = await done;
+  assert.equal(s.state, 'ready');
+  assert.equal(s.owned, true);
+  assert.equal(s.url, 'http://127.0.0.1:3080/?token=secret-value');
+  assert.ok(logs.every((line) => !line.includes('secret-value') && !line.includes('token=other')));
+  assert.ok(logs.some((line) => line.includes('token=[redacted]')));
+  h.manager.dispose();
+});
+
+test('自启认证 DSH：接受 loopback 别名与有效端口，拒绝不安全 token URL', async () => {
+  const invalid = [
+    'https://127.0.0.1:3080/?token=https',
+    'http://user@127.0.0.1:3080/?token=credentials',
+    'http://127.0.0.1:3081/?token=wrong-port',
+    'http://127.0.0.1:3080/sub/?token=wrong-path',
+    'http://192.168.1.2:3080/?token=lan',
+    'http://127.0.0.1:3080/',
+  ];
+  for (const host of ['localhost', '[::1]']) {
+    const h = makeHarness({ pollMs: 1 });
+    h.probeQueue = ['down', 'auth'];
+    const done = h.manager.ensureRunning();
+    while (!h.child) await new Promise((r) => setTimeout(r, 1));
+    for (const url of invalid) h.child.emitStdout(`dsh web: ${url}\n`);
+    h.child.emitStdout(`dsh web: http://${host}:3080/?token=right\n`);
+    const s = await done;
+    assert.equal(s.url, `http://${host}:3080/?token=right`);
+    h.manager.dispose();
+  }
+});
+
+test('自启服务要求认证但未输出 token URL：不标记 ready 并显示认证错误', async () => {
+  const h = makeHarness({ pollMs: 1 });
+  h.probeQueue = ['down', 'auth'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.authRequired');
+  assert.equal(s.url, null);
+  h.manager.dispose();
+});
+
+test('token URL 使用 HTTP 默认有效端口', async () => {
+  const h = makeHarness({ host: 'localhost', port: 80, pollMs: 1 });
+  h.probeQueue = ['down', 'auth'];
+  const done = h.manager.ensureRunning();
+  while (!h.child) await new Promise((r) => setTimeout(r, 1));
+  h.child.emitStdout('dsh web: http://127.0.0.1/?token=default-port\n');
+  assert.equal((await done).url, 'http://127.0.0.1/?token=default-port');
+  h.manager.dispose();
+});
+
+test('子进程退出时冲刷无换行 stdout，并保留有效 token URL', async () => {
+  const logs: string[] = [];
+  const h = makeHarness({ pollMs: 1 }, { log: (line) => logs.push(line) });
+  h.probeQueue = ['down', 'down', 'auth'];
+  const done = h.manager.ensureRunning();
+  while (!h.child) await new Promise((r) => setTimeout(r, 1));
+  h.child.emitStdout('dsh web: http://localhost:3080/?token=exit-secret');
+  h.child.emitExit(1);
+  const s = await done;
+  assert.equal(s.state, 'ready');
+  assert.equal(s.owned, false);
+  assert.equal(s.url, 'http://localhost:3080/?token=exit-secret');
+  assert.ok(logs.some((line) => line.includes('token=[redacted]')));
+  assert.ok(logs.every((line) => !line.includes('exit-secret')));
+  h.manager.dispose();
+});
+
+test('启动命令、stdout、stderr 与错误日志一致隐藏 token', async () => {
+  const logs: string[] = [];
+  const h = makeHarness({ pollMs: 1 }, { log: (line) => logs.push(line) });
+  h.manager.reconfigure({ host: '127.0.0.1', port: 3080, extraArgs: ['--token', 'command-secret'], autoStart: true, timeoutMs: 100, pollMs: 1 });
+  h.probeQueue = ['down', 'dsh'];
+  const done = h.manager.ensureRunning();
+  while (!h.child) await new Promise((r) => setTimeout(r, 1));
+  h.child.emitStdout('url http://localhost:3080/?token=stdout-secret\n');
+  h.child.emitStderr('bad --token stderr-secret\n');
+  const err = Object.assign(new Error('failed --token=error-secret'), { code: 'OTHER' });
+  for (const cb of h.child.errorCbs) cb(err);
+  await done;
+  assert.ok(logs.some((line) => line.includes('参数已隐藏')));
+  for (const secret of ['command-secret', 'stdout-secret', 'stderr-secret', 'error-secret']) {
+    assert.ok(logs.every((line) => !line.includes(secret)), `日志泄露 ${secret}`);
+  }
+  h.manager.dispose();
+});
 
 

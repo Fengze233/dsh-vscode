@@ -2,7 +2,7 @@
 // 纯模块：不依赖 vscode，可用 node:test 直接单测。
 
 /** 探测结果 */
-export type ProbeResult = 'dsh' | 'foreign' | 'down';
+export type ProbeResult = 'dsh' | 'auth' | 'foreign' | 'down';
 
 /** DSH 首页的稳定识别特征（首页 HTML 内联了 window.__DSH_BOOT__ 启动数据，已实测确认） */
 const DSH_MARKER = '__DSH_BOOT__';
@@ -10,6 +10,7 @@ const DSH_MARKER = '__DSH_BOOT__';
 /**
  * 探测 host:port 上运行的服务：
  * - 200 且首页含 DSH 标记 → 'dsh'
+ * - 401/403 且正文含 DSH 认证提示 → 'auth'
  * - 有 HTTP 响应但不是 DSH → 'foreign'（端口被其他程序占用）
  * - 连接失败/超时/拒绝 → 'down'（视为未运行）
  */
@@ -26,8 +27,9 @@ export async function probeService(
       signal: controller.signal,
       redirect: 'manual',
     });
-    if (!res.ok) return 'foreign';
     const body = await res.text();
+    if ((res.status === 401 || res.status === 403) && body.includes('dsh web authentication required')) return 'auth';
+    if (!res.ok) return 'foreign';
     return body.includes(DSH_MARKER) ? 'dsh' : 'foreign';
   } catch {
     // 网络错误 / 超时中断：一律视为未运行
@@ -61,6 +63,7 @@ export async function findFreePort(
     const candidate = startPort + offset;
     if (candidate > 65535) break; // 超出合法端口范围，停止
     const result = await probeImpl(host, candidate, timeoutMs);
+    // 只有明确连接失败才视为空闲；auth 表示端口上已有 DSH 服务。
     if (result === 'down') return candidate;
   }
   return null;

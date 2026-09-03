@@ -31,6 +31,25 @@ test('首页含 __DSH_BOOT__ 标记 → dsh', async () => {
   }
 });
 
+test('401/403 且含认证标记 → auth', async () => {
+  for (const status of [401, 403]) {
+    const { server, port } = await serve((_req, res) => {
+      res.writeHead(status, { 'content-type': 'text/plain' });
+      res.end('dsh web authentication required');
+    });
+    try {
+      assert.equal(await probeService('127.0.0.1', port, 1000), 'auth');
+    } finally {
+      server.close();
+    }
+  }
+});
+
+test('findFreePort：auth 服务不是空闲端口', async () => {
+  const results: import('../src/service/detect').ProbeResult[] = ['auth', 'down'];
+  assert.equal(await findFreePort('127.0.0.1', 3080, 2, async () => results.shift()!), 3082);
+});
+
 test('有响应但不是 DSH → foreign', async () => {
   const { server, port } = await serve((_req, res) => {
     res.writeHead(200, { 'content-type': 'text/html' });

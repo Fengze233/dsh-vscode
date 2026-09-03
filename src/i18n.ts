@@ -25,6 +25,7 @@ const messages = {
     'err.startTimeout': 'Service did not become ready within {seconds}s. See the DSH log for details.',
     'err.startCrashed': 'The DSH service exited unexpectedly. See the DSH log for details.',
     'err.notRunning': 'DSH service is not running and auto-start is disabled.',
+    'err.authRequired': 'A running DSH service requires authentication, but its token URL is unavailable. Restart it from this extension or open its original token URL.',
     'err.loadFailed': 'Unable to load the DSH page.',
     // 状态栏
     'status.running': 'DSH: Running',
@@ -72,6 +73,7 @@ const messages = {
     'err.startTimeout': '服务在 {seconds} 秒内未就绪，详见 DSH 日志。',
     'err.startCrashed': 'DSH 服务异常退出，详见 DSH 日志。',
     'err.notRunning': 'DSH 服务未运行，且已关闭自动启动。',
+    'err.authRequired': '正在运行的 DSH 服务需要认证，但无法获取其令牌网址。请从本扩展重启服务，或打开原始令牌网址。',
     'err.loadFailed': '无法加载 DSH 页面。',
     'status.running': 'DSH: 运行中',
     'status.starting': 'DSH: 启动中',

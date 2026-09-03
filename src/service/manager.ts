@@ -123,6 +123,36 @@ export class ServiceManager {
     return `http://${this.opts.host}:${this.opts.port}/`;
   }
 
+  /** 校验完整 stdout 行，仅返回当前启动目标的 loopback token URL。 */
+  private startupTokenUrl(line: string): string | null {
+    const loopbackHosts = new Set(['127.0.0.1', 'localhost', '[::1]']);
+    for (const match of line.matchAll(/dsh web:\s*(https?:\/\/[^\s]+)/gi)) {
+      const raw = match[1];
+      try {
+        const candidate = new URL(raw);
+        const target = new URL(this.url());
+        const candidatePort = candidate.port || (candidate.protocol === 'http:' ? '80' : '443');
+        const targetPort = target.port || '80';
+        if (candidate.protocol === 'http:' && !candidate.username && !candidate.password &&
+            loopbackHosts.has(candidate.hostname.toLowerCase()) && loopbackHosts.has(target.hostname.toLowerCase()) &&
+            candidatePort === targetPort && candidate.pathname === '/' &&
+            candidate.searchParams.get('token')) {
+          return candidate.href;
+        }
+      } catch {
+        // 忽略 stdout 中格式错误的类 URL 文本。
+      }
+    }
+    return null;
+  }
+
+  /** 认证 token 不得写入扩展输出通道。 */
+  private redactTokens(text: string): string {
+    return text
+      .replace(/([?&]token=)[^&\s]+/gi, '$1[redacted]')
+      .replace(/(--token(?:=|\s+))[^\s]+/gi, '$1[redacted]');
+  }
+
   /** 确保服务就绪：复用已有 / 自动启动（幂等：并发调用共享同一次流程） */
   ensureRunning(): Promise<ServiceSnapshot> {
     if (this.op) return this.op;
@@ -186,10 +216,16 @@ export class ServiceManager {
     this.set({ state: 'detecting', error: null });
     const probe = await this.deps.probeService(this.opts.host, this.opts.port, this.opts.timeoutMs);
     if (probe === 'dsh') {
-      // 已有服务在跑：直接复用
+      // 已有无需认证的服务在跑：直接复用。
       if (this.stopRequested) return this.getSnapshot(); // 探测期间被叫停，不覆盖用户的停止意图
       this.set({ state: 'ready', url: this.url(), owned: false });
       this.startHealthWatch(); // 复用外部服务也要周期探测，失联时回 idle
+      return this.getSnapshot();
+    }
+    if (probe === 'auth') {
+      // 外部认证服务没有可恢复的 token URL，不能把不可用的裸地址伪装成 ready。
+      if (this.stopRequested) return this.getSnapshot();
+      this.set({ state: 'failed', url: null, owned: false, error: 'err.authRequired' });
       return this.getSnapshot();
     }
     if (probe === 'foreign') {
@@ -246,11 +282,11 @@ export class ServiceManager {
         break; // spawn 成功（未同步抛异常），跳出重试循环继续等待就绪
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
-        this.deps.log(`[process] 启动失败: ${String(err)} (code=${code}, cwd=${cwdForSpawn ?? ''})`);
+        this.deps.log(`[process] 启动失败: ${this.redactTokens(String(err))} (code=${code}, cwd=${cwdForSpawn ?? ''})`);
         // EINVAL + 带 cwd 且尚未重试过：这是 Node/Windows 上 .cmd 带 cwd 的已知兼容问题，
         // 去掉 cwd 重试一次，而不是直接报失败（直接报错会把参数问题误报成启动失败）。
         if (code === 'EINVAL' && cwdForSpawn !== undefined && !retried) {
-          this.deps.log(`[process] spawn EINVAL（工作目录参数在 Windows 上不可用），已自动回退为不带 cwd 重试: ${String(err)}`);
+          this.deps.log(`[process] spawn EINVAL（工作目录参数在 Windows 上不可用），已自动回退为不带 cwd 重试: ${this.redactTokens(String(err))}`);
           cwdForSpawn = undefined; // 去掉 cwd 降级重试
           retried = true;
           continue;
@@ -274,10 +310,10 @@ export class ServiceManager {
     }
     this.child = child;
     this.childStderr = ''; // 新一轮启动重置 stderr 缓冲（供 --no-open 崩溃识别）
-    // 记录实际执行的启动命令（含解析出的 node 路径与全部参数），供问题排查对照环境差异
+    // extraArgs 可能携带 token；只记录可执行文件与参数数量，不输出完整命令行。
     const lastStart = this.deps.processRunner.lastStart;
     if (lastStart) {
-      this.deps.log(`[process] 启动命令: ${lastStart.command} ${lastStart.args.join(' ')}`);
+      this.deps.log(`[process] 启动命令: ${lastStart.command}（${lastStart.args.length} 个参数，参数已隐藏）`);
     }
 
     // spawn 的 ENOENT 通过 'error' 事件异步到达，用标志位让等待循环立即失败
@@ -286,7 +322,7 @@ export class ServiceManager {
     let childExited = false;
     child.on('error', (err) => {
       const code = (err as NodeJS.ErrnoException).code;
-      this.deps.log(`[process] ${err.message} (code=${code}, cwd=${this.opts.cwd ?? ''})`);
+      this.deps.log(`[process] ${this.redactTokens(err.message)} (code=${code}, cwd=${this.opts.cwd ?? ''})`);
       // EINVAL（Windows 上非法的 spawn 参数，如 UNC/无效 cwd）与 ENOENT（命令缺失）
       // 同等对待：立即置为 failed，避免走「等待超时」路径误导用户。
       if (code === 'EINVAL') {
@@ -301,11 +337,38 @@ export class ServiceManager {
         this.set({ state: 'failed', error: 'err.dshNotFound' });
       }
     });
+    let stdoutBuffer = '';
+    let stderrLogBuffer = '';
+    let tokenUrl: string | null = null;
+    const consumeStdoutLine = (line: string): void => {
+      tokenUrl ??= this.startupTokenUrl(line);
+      this.deps.log(`[stdout] ${this.redactTokens(line)}`);
+    };
     child.on('exit', () => {
+      // stdout 可能不以换行结尾；等待循环处理退出前先冲刷尾部。
+      if (stdoutBuffer) {
+        consumeStdoutLine(stdoutBuffer);
+        stdoutBuffer = '';
+      }
+      if (stderrLogBuffer) {
+        this.deps.log(`[stderr] ${this.redactTokens(stderrLogBuffer)}`);
+        stderrLogBuffer = '';
+      }
       childExited = true;
       this.handleUnexpectedExit(child);
     });
-    child.stdout?.on('data', (chunk) => this.deps.log(`[stdout] ${chunk.toString().trimEnd()}`));
+    child.stdout?.on('data', (chunk) => {
+      stdoutBuffer += chunk.toString();
+      // 启动输出可能在任意字节处分块；只解析完整行，避免接受截断 token，并限制尾部长度。
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() ?? '';
+      if (stdoutBuffer.length > 8192) {
+        // 不保留或记录任意后缀：它可能是被拆分的 token 值。
+        stdoutBuffer = '';
+        this.deps.log('[stdout] [unterminated line omitted]');
+      }
+      for (const line of lines) consumeStdoutLine(line);
+    });
     child.stderr?.on('data', (chunk) => {
       const text = chunk.toString();
       // 有界缓冲最近一次启动的 stderr（用于识别 --no-open 不支持导致的启动崩溃）
@@ -313,7 +376,14 @@ export class ServiceManager {
         this.childStderr += text;
         if (this.childStderr.length > 8192) this.childStderr = this.childStderr.slice(-4096);
       }
-      this.deps.log(`[stderr] ${text.trimEnd()}`);
+      stderrLogBuffer += text;
+      const lines = stderrLogBuffer.split(/\r?\n/);
+      stderrLogBuffer = lines.pop() ?? '';
+      if (stderrLogBuffer.length > 8192) {
+        stderrLogBuffer = '';
+        this.deps.log('[stderr] [unterminated line omitted]');
+      }
+      for (const line of lines) this.deps.log(`[stderr] ${this.redactTokens(line)}`);
     });
 
     // 等待就绪：轮询探测直到 ready / 子进程退出 / 超时
@@ -355,6 +425,15 @@ export class ServiceManager {
           this.startHealthWatch();
           return this.getSnapshot();
         }
+        if (reuse === 'auth') {
+          if (tokenUrl) {
+            this.set({ state: 'ready', url: tokenUrl, owned: false });
+            this.startHealthWatch();
+          } else {
+            this.set({ state: 'failed', url: null, owned: false, error: 'err.authRequired' });
+          }
+          return this.getSnapshot();
+        }
         // 换端口重启：端口在启动期间被抢占，自动改用第一个空闲端口（仅本次会话，
         // 弹窗告知）；带轮数上限防死循环（每次崩溃都换新端口重启，最多 3 轮）。
         if (this.opts.autoStart && portFallbackRounds < PORT_FALLBACK_MAX_ROUNDS) {
@@ -372,19 +451,23 @@ export class ServiceManager {
         return this.getSnapshot();
       }
       const result = await this.deps.probeService(this.opts.host, this.opts.port, this.opts.timeoutMs);
-      if (result === 'dsh') {
-        this.set({ state: 'ready', url: this.url(), owned: true });
+      if (result === 'dsh' || (result === 'auth' && tokenUrl !== null)) {
+        this.set({ state: 'ready', url: result === 'auth' ? tokenUrl : this.url(), owned: true });
         this.startHealthWatch();
         return this.getSnapshot();
       }
       // 'foreign' 表示子进程没能绑定端口（被占）——继续等待会让用户困惑，
       // 但可能只是服务尚未就绪的瞬间，保守起见继续轮询直到超时。
       if (Date.now() >= deadline) {
-        this.set({
-          state: 'failed',
-          error: 'err.startTimeout',
-          errorVars: { seconds: Math.round(startTimeoutMs / 1000) },
-        });
+        if (result === 'auth') {
+          this.set({ state: 'failed', url: null, owned: false, error: 'err.authRequired' });
+        } else {
+          this.set({
+            state: 'failed',
+            error: 'err.startTimeout',
+            errorVars: { seconds: Math.round(startTimeoutMs / 1000) },
+          });
+        }
         return this.getSnapshot();
       }
       await new Promise((r) => setTimeout(r, this.opts.pollMs));
@@ -408,7 +491,7 @@ export class ServiceManager {
     if (interval <= 0) return;
     this.healthTimer = setInterval(() => {
       void this.deps.probeService(this.opts.host, this.opts.port, this.opts.timeoutMs).then((result) => {
-        if (result !== 'dsh' && this.snapshot.state === 'ready') {
+        if (result !== 'dsh' && result !== 'auth' && this.snapshot.state === 'ready') {
           this.clearHealthWatch(); // 已回 idle，定时器自清理，不空转
           this.set({ state: 'idle', url: null, owned: false, error: null });
         }
