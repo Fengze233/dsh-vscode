@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import http from 'node:http';
 import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { probeService } from '../../src/service/detect';
@@ -49,6 +50,22 @@ function usable(): boolean {
 }
 
 const skipReason = usable() ? false : '需要 PATH 上的 dsh 与可写 DSH_HOME（真机跑法见 dsh.test.ts 头注释），跳过';
+
+/** 原始 HTTP 请求（可设置 Origin / Sec-Fetch-* 等 fetch 会过滤的头），只取状态码 */
+function rawStatus(url: string, headers: Record<string, string>): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = http.request(
+      { hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: 'GET', headers },
+      (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode ?? 0));
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 test(
   '真实 dsh 0.1.2 鉴权全链路：启动→解析启动网址→兑换→代理访问 200（直连 401）',
@@ -119,6 +136,16 @@ test(
         assert.equal(viaProxy.status, 200, '经代办访问应拿到 DSH 首页');
         const html = await viaProxy.text();
         assert.ok(html.includes('<!doctype html') || html.includes('<html'), '应返回真实 HTML 页面');
+
+        // 4.5) 浏览器式 /api 请求（Origin=代理 origin + Sec-Fetch-Site=cross-site）必须通过
+        // DSH 的 browser-trust fence：403 是拦截信号（用户实测「加载提供方目录失败…HTTP 403」），
+        // 404 表示已放行到路由层（本用例只验证未拦截）。
+        const apiStatus = await rawStatus(`${proxy.baseUrl}api/whatever`, {
+          origin: proxy.baseUrl.slice(0, -1),
+          'sec-fetch-site': 'cross-site',
+        });
+        assert.notEqual(apiStatus, 403, '代办必须让 /api 通过 DSH 的 browser-trust fence（403 回归）');
+        assert.equal(apiStatus, 404, '无匹配路由时应为 404（说明已通过 fence）');
       } finally {
         await proxy.stop();
       }

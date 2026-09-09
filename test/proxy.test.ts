@@ -8,14 +8,21 @@ import type { Duplex } from 'node:stream';
 import { createDshProxy, type ProxyTarget } from '../src/service/proxy';
 
 /** 启动假上游（模拟 DSH：记录请求头、按路径回响应；upgrade 连接登记以便清理） */
+type SeenHeaders = { host?: string; cookie?: string; origin?: string; secFetchSite?: string; referer?: string };
 async function serveUpstream(
   handler: http.RequestListener,
   onUpgrade?: (req: http.IncomingMessage, socket: Duplex, head: Buffer) => void,
-): Promise<{ server: http.Server; port: number; seen: { host?: string; cookie?: string }[]; upgradeSockets: Duplex[] }> {
-  const seen: { host?: string; cookie?: string }[] = [];
+): Promise<{ server: http.Server; port: number; seen: SeenHeaders[]; upgradeSockets: Duplex[] }> {
+  const seen: SeenHeaders[] = [];
   const upgradeSockets: Duplex[] = [];
   const server = http.createServer((req, res) => {
-    seen.push({ host: req.headers.host, cookie: req.headers.cookie });
+    seen.push({
+      host: req.headers.host,
+      cookie: req.headers.cookie,
+      origin: req.headers.origin,
+      secFetchSite: req.headers['sec-fetch-site'] as string | undefined,
+      referer: req.headers.referer,
+    });
     handler(req, res);
   });
   // upgrade 连接不归 closeAllConnections 管（Node 语义：升级后由用户负责），登记以便 closeUp 清理
@@ -56,7 +63,9 @@ test('转发：Host 重写为上游、注入会话 cookie，路径/查询/方法
     assert.ok(body.includes('cookie=dsh-auth-x=v1'), '应注入会话 cookie');
     assert.ok(body.includes('url=/some/path?a=1'), '路径查询应原样透传');
     // 上游视角只收到一次请求，且 Host 是上游地址（不是代办端口）
-    assert.deepEqual(up.seen, [{ host: `127.0.0.1:${up.port}`, cookie: 'dsh-auth-x=v1' }]);
+    assert.equal(up.seen.length, 1);
+    assert.equal(up.seen[0].host, `127.0.0.1:${up.port}`);
+    assert.equal(up.seen[0].cookie, 'dsh-auth-x=v1');
   } finally {
     await proxy.stop();
     closeUp(up);
@@ -102,6 +111,46 @@ test('目标未就绪（getTarget=null）→ 503', async () => {
     assert.equal(res.status, 503);
   } finally {
     await proxy.stop();
+  }
+});
+
+test('剥离浏览器来源头（Origin/Sec-Fetch-Site/Referer）：DSH browser-trust fence 403 修复', async () => {
+  // 用户实测回归：DSH 的 /api fence 要求 Origin.host === Host 且 Sec-Fetch-Site != cross-site；
+  // 经代理后 Host 是真实 DSH 端口、Origin 是代理端口 → 403（设置页「加载提供方目录失败」、
+  // 工作区/会话列表空白）。代理必须剥离这些头，让 fence 按「无来源信息请求」放行。
+  const up = await serveUpstream((_req, res) => {
+    res.writeHead(200);
+    res.end('ok');
+  });
+  const { proxy, base } = await startProxy(() => ({ url: `http://127.0.0.1:${up.port}`, cookie: 'dsh-auth-x=v1' }));
+  try {
+    // 用原始 http.request 才能设置这些头（fetch 会过滤 forbidden headers）
+    await new Promise<void>((resolve, reject) => {
+      const u = new URL(base);
+      const req = http.request(
+        {
+          hostname: u.hostname, port: u.port, path: '/api/whatever', method: 'GET',
+          headers: {
+            origin: base.slice(0, -1),
+            'sec-fetch-site': 'cross-site',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-dest': 'empty',
+            referer: `${base}index.html`,
+          },
+        },
+        (res) => { res.resume(); res.on('end', () => resolve()); },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+    assert.equal(up.seen.length, 1);
+    assert.equal(up.seen[0].host, `127.0.0.1:${up.port}`, 'Host 仍应重写为上游 authority');
+    assert.equal(up.seen[0].origin, undefined, 'Origin 必须被剥离（否则 fence 403）');
+    assert.equal(up.seen[0].secFetchSite, undefined, 'Sec-Fetch-Site 必须被剥离（cross-site 会被 fence 拒绝）');
+    assert.equal(up.seen[0].referer, undefined, 'Referer 一并剥离');
+  } finally {
+    await proxy.stop();
+    closeUp(up);
   }
 });
 

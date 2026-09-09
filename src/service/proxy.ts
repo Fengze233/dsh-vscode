@@ -60,6 +60,15 @@ export interface DshProxy {
 /** 剥离的 hop-by-hop/代管头（转发时移除，由本层重建） */
 const STRIP_REQUEST_HEADERS = new Set([
   'host', 'connection', 'cookie', 'content-length', 'transfer-encoding', 'upgrade',
+  // —— 浏览器来源头（DSH /api browser-trust fence 适配，实测必需）——
+  // dsh-client-connection 的 isTrustedApiRequest 要求「Origin 的 host === Host 头」且
+  // 「Sec-Fetch-Site 不得为 cross-site」。经本代理后：Host 被重写为真实 DSH authority，
+  // 而浏览器的 Origin 是代理 origin（端口不同）、Sec-Fetch-Site 因顶层为 vscode-webview://
+  // 被标为 cross-site —— 两者都会让 fence 回 403（用户实测：设置页「加载提供方目录失败…
+  // HTTP 403」、工作区/会话列表空白）。本代理是同一台机器上持有会话 cookie 的受信中介，
+  // 剥离这些头后 fence 视作「无来源信息请求」直接放行（与浏览器直连 DSH 页面等价语义）。
+  // 若上游 fence 未来新增浏览器语义检查，需在此同步适配。
+  'origin', 'sec-fetch-site', 'sec-fetch-mode', 'sec-fetch-dest', 'referer',
 ]);
 /** 响应头中剥离的字段：set-cookie 不落 iframe jar（见头注释）；connection 等 hop-by-hop 由本层管理 */
 const STRIP_RESPONSE_HEADERS = new Set(['set-cookie', 'connection', 'keep-alive', 'transfer-encoding']);
