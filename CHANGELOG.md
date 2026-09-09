@@ -1,4 +1,9 @@
-## [0.4.0] - 2026-09-08
+## [0.4.0] - 2026-09-10
+
+### 修复
+
+- **图片降级（模型不支持图像输入时自动改为路径转发）在 DSH ≥0.1.2 上失效**（用户实测：无法发送图片、只在页面弹「当前模型不支持图片」）。根因是 0.1.2 的三处线格式变更让桥接的拦截条件全部不命中：① RPC 端点由点分改为斜杠（`session.prompt` → `session/prompt`）；② 业务字段由 `payload.content` 改到 `payload.args.<参数名>`（prompt 的参数名是 `request`，list 是 `_request`）；③ 拒绝码由 `attachment-error` 改为 `session/attachment-invalid`（子代理为 `subagent/attachment-invalid`），`details.reason` 仍是 `MODEL_DOES_NOT_SUPPORT_IMAGES`。
+  修复：桥接新增**端点名归一化**与**两代请求解包**（自动定位 `payload.args.request.content`），拒绝判定兼容三种错误码且要求 reason 精确匹配（不误判图片超限等其它附件错误），重发时**原位写回** `args.request.content` 并保留 `requestId`/`sessionId`/`mode`/`clientTimeZone`（不改动原请求体对象）。已用真实 dsh 0.1.2-rc.1 验证：新格式重发请求被服务端正确解析（返回 `session/not-found` 业务错误而非 400/404），旧点分端点已 404。
 
 ### 新增
 

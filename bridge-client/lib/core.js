@@ -198,10 +198,17 @@ export function parseDeleteImagesAck(data, expectedRequestId) {
 }
 
 // —— v0.3.0 图片自由上传降级：模型拒绝判定 / 内容重构 / 指纹 / 指针行 ——
+/** 「模型不支持图像输入」的拒绝码集合：≤0.1.1 与 ≥0.1.2 两代线格式都认 */
+const MODEL_REJECT_CODES = new Set(['attachment-error', 'session/attachment-invalid', 'subagent/attachment-invalid']);
+
 /**
  * 判定一次 prompt RPC 响应是否为「模型不支持图像输入」而被拒。
  * 兼容三种形状：wire 包 ({ result:{ ok:false, error } })、flat ({ ok:false, error })、
  * 裸错误 ({ code, details })，便于单测与线上解析复用。
+ * 拒绝码两代都认：≤0.1.1 的 attachment-error 与 ≥0.1.2 的 session/attachment-invalid
+ * （服务端 dsh-api-session-controller 抛 RemoteError('session/attachment-invalid', …,
+ * { reason:'MODEL_DOES_NOT_SUPPORT_IMAGES' })）；reason 必须精确匹配，避免把图片超限
+ * 等其它附件错误误判成模型不支持。
  */
 export function detectModelReject(data) {
   if (!data || typeof data !== 'object') return false;
@@ -211,7 +218,7 @@ export function detectModelReject(data) {
     : data.error && typeof data.error === 'object'
       ? data.error
       : data;
-  if (error.code !== 'attachment-error') return false;
+  if (!MODEL_REJECT_CODES.has(error.code)) return false;
   return !!(error.details && typeof error.details === 'object' && error.details.reason === 'MODEL_DOES_NOT_SUPPORT_IMAGES');
 }
 
@@ -311,18 +318,62 @@ export function unwrapRpcPayload(body) {
 }
 
 /**
- * 以纯文本内容重构 RPC 请求：保留 DSH 线格式的 type/method（client-request/session.prompt，
- * 否则服务器会以 bad-request 拒绝重发），换新 rpcId（与已拒请求不撞车），
- * payload 保留原 sessionId/mode/clientTimeZone 等并把 content 替换为纯文本内容。
+ * 端点方法名归一化：DSH ≥0.1.2 把点分端点换成斜杠端点（session.prompt → session/prompt），
+ * 统一转成点分形式做比较，两代线格式共用同一套判断。
+ */
+export function normalizeRpcMethod(method) {
+  return typeof method === 'string' ? method.replace(/\//g, '.') : '';
+}
+
+/**
+ * 解包 RPC 请求体 → 业务请求对象（含 content/sessionId/mode 等真正业务字段）。
+ * - ≤0.1.1：payload 直挂业务字段（{ rpcId, method:'session.prompt', payload:{ sessionId, content } }）；
+ * - ≥0.1.2：payload.args.<参数名>（{ type:'client-request', rpcId, method:'session/prompt',
+ *   payload:{ args:{ request:{ requestId, sessionId, mode, content } } } }，参数名按控制器 TS 形参
+ *   命名——prompt 是 request、list 是 _request），故取 args 下第一个对象值。
+ * 两代都要支持：图片降级的「识别含图 prompt / 取 sessionId / 重写 content」都依赖它。
+ */
+export function unwrapRpcRequest(body) {
+  const payload = unwrapRpcPayload(body);
+  if (payload && typeof payload === 'object' && payload.args && typeof payload.args === 'object' && !Array.isArray(payload.args)) {
+    const args = payload.args;
+    if (args.request && typeof args.request === 'object') return args.request;       // prompt / create / …
+    if (args._request && typeof args._request === 'object') return args._request;    // list / search 等
+    const first = Object.values(args).find((v) => v && typeof v === 'object' && !Array.isArray(v));
+    return first === undefined ? args : first;
+  }
+  return payload;
+}
+
+/**
+ * 以纯文本内容重构 RPC 请求：保留 DSH 线格式的 type/method（client-request/session.prompt 或
+ * 0.1.2 的 client-request/session/prompt，否则服务器会以 bad-request 拒绝重发），换新 rpcId
+ * （与已拒请求不撞车），业务对象保留原 sessionId/mode/requestId/clientTimeZone 等字段并把
+ * content 替换为纯文本内容——0.1.2 的 content 位于 payload.args.<参数名> 内，须原位写回。
+ * 返回新对象，绝不就地修改原请求体（DSH 可能仍持有引用）。
  */
 export function buildTextResendRequest(originalBody, content) {
-  const payload = unwrapRpcPayload(originalBody);
   const src = originalBody && typeof originalBody === 'object' ? originalBody : {};
+  const payload = unwrapRpcPayload(src);
+  let nextPayload;
+  if (payload && typeof payload === 'object' && payload.args && typeof payload.args === 'object' && !Array.isArray(payload.args)) {
+    // 0.1.2：找到 args 下真正承载 content 的那个参数对象（prompt 为 request）并原位替换
+    const args = { ...payload.args };
+    const key = Object.keys(args).find((k) => {
+      const v = args[k];
+      return v && typeof v === 'object' && !Array.isArray(v) && 'content' in v;
+    });
+    if (key !== undefined) {
+      args[key] = { ...args[key], content };
+      nextPayload = { ...payload, args };
+    }
+  }
+  if (nextPayload === undefined) nextPayload = { ...(payload && typeof payload === 'object' ? payload : {}), content };
   return {
     ...(typeof src.type === 'string' ? { type: src.type } : {}),
     rpcId: 'vsc-fb-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
     ...(typeof src.method === 'string' ? { method: src.method } : {}),
-    payload: { ...payload, content },
+    payload: nextPayload,
   };
 }
 

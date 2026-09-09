@@ -18,6 +18,8 @@ import {
   buildTextOnlyContent,
   imageCacheKey,
   unwrapRpcPayload,
+  unwrapRpcRequest,
+  normalizeRpcMethod,
   buildTextResendRequest,
   resolveFetchUrl,
   rewriteRpcId,
@@ -57,6 +59,76 @@ test('detectModelReject：识别 MODEL_DOES_NOT_SUPPORT_IMAGES（兼容三种形
   assert.equal(detectModelReject({ code: 'attachment-error', details: { reason: 'IMAGE_TOO_LARGE' } }), false);
   assert.equal(detectModelReject({}), false);
   assert.equal(detectModelReject(null), false);
+});
+
+test('detectModelReject：DSH ≥0.1.2 新错误码 session/attachment-invalid（服务端拒绝码已改）', () => {
+  // 服务端 dsh-api-session-controller：RemoteError('session/attachment-invalid', …, { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' })
+  const wire = {
+    type: 'server-response',
+    rpcId: 'r1',
+    result: { ok: false, error: { code: 'session/attachment-invalid', message: 'Model "x" does not support image input.', details: { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' } } },
+  };
+  assert.equal(detectModelReject(wire), true, '0.1.2 的 /api 响应必须能识别');
+  // 子代理场景的码也要认
+  assert.equal(detectModelReject({ result: { ok: false, error: { code: 'subagent/attachment-invalid', details: { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' } } } }), true);
+  // 同码但别的原因（例如图片超限）不得误判
+  assert.equal(detectModelReject({ result: { ok: false, error: { code: 'session/attachment-invalid', details: { reason: 'IMAGE_DIMENSION_TOO_LARGE' } } } }), false);
+});
+
+test('normalizeRpcMethod：斜杠端点（0.1.2）与点分端点（≤0.1.1）统一为点分', () => {
+  assert.equal(normalizeRpcMethod('session/prompt'), 'session.prompt');
+  assert.equal(normalizeRpcMethod('session.prompt'), 'session.prompt');
+  assert.equal(normalizeRpcMethod('session/create'), 'session.create');
+  assert.equal(normalizeRpcMethod(undefined), '');
+  assert.equal(normalizeRpcMethod(123), '');
+});
+
+test('unwrapRpcRequest：0.1.2 的 payload.args.<参数名> 解包为业务请求对象（兼容旧版）', () => {
+  // 0.1.2：{type,rpcId,method,payload:{args:{request:{…}}}}（prompt 的参数名是 request）
+  const modern = {
+    type: 'client-request', rpcId: 'r1', method: 'session/prompt',
+    payload: { args: { request: { requestId: 'p1', sessionId: 's1', mode: 'queue', content: [{ type: 'image', data: 'AA', name: 'a.png' }] } } },
+  };
+  const req = unwrapRpcRequest(modern) as { sessionId?: string; mode?: string; content?: unknown[] };
+  assert.equal(req.sessionId, 's1');
+  assert.equal(req.mode, 'queue');
+  assert.equal(Array.isArray(req.content), true);
+  // session/list 的参数名是 _request（同样解包）
+  assert.deepEqual(unwrapRpcRequest({ payload: { args: { _request: { beforeSeq: 1 } } } }), { beforeSeq: 1 });
+  // 旧版：payload 直挂业务字段
+  const legacy = { rpcId: 'r2', method: 'session.prompt', payload: { sessionId: 's2', content: [{ type: 'text', text: 'hi' }] } };
+  assert.equal((unwrapRpcRequest(legacy) as { sessionId?: string }).sessionId, 's2');
+  // 无 payload 的裸形态
+  assert.deepEqual(unwrapRpcRequest({ sessionId: 's3' }), { sessionId: 's3' });
+  assert.equal(unwrapRpcRequest(null), null);
+});
+
+test('buildTextResendRequest：0.1.2 斜杠端点 + args 包装下仍能替换 content 并保留其它字段', () => {
+  const content = buildTextOnlyContent(
+    [{ type: 'image', data: 'AA', name: 'a.png' }, { type: 'text', text: '看看这张' }],
+    [buildImagePointerLine('/w/x.png', 1)],
+  );
+  const body = {
+    type: 'client-request', rpcId: 'old-1', method: 'session/prompt',
+    payload: { args: { request: { requestId: 'p1', sessionId: 's1', mode: 'queue', content: [{ type: 'image', data: 'AA' }], clientTimeZone: 'Asia/Shanghai' } } },
+  };
+  const req = buildTextResendRequest(body, content) as {
+    type?: string; rpcId?: string; method?: string;
+    payload: { args: { request: Record<string, unknown> } };
+  };
+  assert.equal(req.type, 'client-request');
+  assert.equal(req.method, 'session/prompt', '必须保留斜杠端点（0.1.2）');
+  assert.notEqual(req.rpcId, 'old-1', '必须换新 rpcId');
+  const request = req.payload.args.request;
+  assert.equal(request.sessionId, 's1', '业务字段应保留');
+  assert.equal(request.requestId, 'p1');
+  assert.equal(request.mode, 'queue');
+  assert.equal(request.clientTimeZone, 'Asia/Shanghai');
+  assert.equal(Array.isArray(request.content), true);
+  assert.equal((request.content as unknown[]).length, 1);
+  assert.equal((request.content as { type: string }[])[0].type, 'text');
+  // 原请求体不得被就地修改（避免影响 DSH 自身持有的引用）
+  assert.equal((body.payload.args.request.content as { type: string }[])[0].type, 'image');
 });
 
 test('isPromptWithImages / extractPromptText / buildTextOnlyContent', () => {

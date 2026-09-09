@@ -132,7 +132,20 @@ export function imageCacheKey(fileLike: unknown): string | null;
 /** 解包 RPC 请求体 → 业务 payload（兼容 {rpcId,payload} 与直传两种形态） */
 export function unwrapRpcPayload(body: unknown): unknown;
 
-/** 以纯文本内容重构 RPC 请求（保留 type/method 与 payload 其余字段，仅换新 rpcId 与 content） */
+/**
+ * 端点方法名归一化：斜杠端点（DSH ≥0.1.2 的 session/prompt）与点分端点（≤0.1.1 的
+ * session.prompt）统一为点分，便于两代共用同一套判断。非字符串返回空串。
+ */
+export function normalizeRpcMethod(method: unknown): string;
+
+/**
+ * 解包 RPC 请求体 → 业务请求对象（含 content/sessionId/mode 等）。
+ * ≤0.1.1：payload 直挂业务字段；≥0.1.2：payload.args.<参数名>（prompt 为 request、
+ * list 为 _request）。找不到业务对象时原样返回 payload/body。
+ */
+export function unwrapRpcRequest(body: unknown): unknown;
+
+/** 以纯文本内容重构 RPC 请求（保留 type/method 与业务字段，仅换新 rpcId 与 content） */
 export function buildTextResendRequest(
   originalBody: unknown,
   content: { type: 'text'; text: string }[],
@@ -140,7 +153,7 @@ export function buildTextResendRequest(
   type?: string;
   rpcId: string;
   method?: string;
-  payload: Record<string, unknown> & { content: { type: 'text'; text: string }[] };
+  payload: Record<string, unknown>;
 };
 
 /** 从 fetch 的 input 提取 URL 字符串（string/URL(href)/Request(url)）；取不到返回 '' */

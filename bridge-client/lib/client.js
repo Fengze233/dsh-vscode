@@ -634,7 +634,8 @@ window.__ModuleLoader__.load({
     // 任何一步失败或无法落盘时返回 null（调用方回退原生被拒响应，绝不吞用户消息）。
     async function handlePromptImageRejected(parsed, url, init, origFetch) {
       try {
-        const payload = unwrapRpcPayload(parsed);
+        // 两代线格式统一解包（≤0.1.1 payload.content；≥0.1.2 payload.args.request.content）
+        const payload = unwrapRpcRequest(parsed);
         // 按消息内的顺序把图片块映射到已捕获缓存（匹配 name/data），只取本条消息实际用到的图片
         const used = matchCapturedImages(payload.content,
           Array.from(imageCache.entries()).map(([key, v]) => ({ key, ...v })));
@@ -687,10 +688,15 @@ window.__ModuleLoader__.load({
           if (!imageFallbackEnabled || bridgeToken === "") return res;
           if (!init || init.method !== "POST" || typeof init.body !== "string" || init.body === "") return res;
           const parsed = JSON.parse(init.body);
-          // DSH 线格式：请求体为 { type, method, rpcId, payload }，业务 content 在 payload 下（payload 透传形态也兼容）
-          const payload = unwrapRpcPayload(parsed);
+          // DSH 线格式两代兼容：
+          //  - ≤0.1.1：{ type, method:'session.prompt', rpcId, payload:{ sessionId, content } }
+          //  - ≥0.1.2：{ type:'client-request', method:'session/prompt', rpcId,
+          //              payload:{ args:{ request:{ requestId, sessionId, mode, content } } } }
+          // unwrapRpcRequest 负责把两代都还原成「业务请求对象」，normalizeRpcMethod 把
+          // 斜杠端点归一成点分（session/prompt → session.prompt）供下方判断复用。
+          const payload = unwrapRpcRequest(parsed);
           // —— 对话生命周期：新建/删除会话或 prompt 观测到会话 id 变更 → 上一对话终止，清理临时图片 ——
-          const method = parsed && typeof parsed.method === "string" ? parsed.method : "";
+          const method = normalizeRpcMethod(parsed && parsed.method);
           const sessionId = payload && typeof payload.sessionId === "string" ? payload.sessionId : "";
           if (method === "session.create") handleConversationEnd("新建", true);
           else if (method === "session.delete") handleConversationEnd("删除", true);
