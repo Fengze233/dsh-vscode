@@ -67,6 +67,28 @@ function rawStatus(url: string, headers: Record<string, string>): Promise<number
   });
 }
 
+/** 原始 POST（RPC envelope），返回状态码与响应体文本 */
+function rawPost(url: string, body: unknown, headers: Record<string, string>): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const data = JSON.stringify(body);
+    const req = http.request(
+      {
+        hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: 'POST',
+        headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data), ...headers },
+      },
+      (res) => {
+        let out = '';
+        res.on('data', (d) => (out += d));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: out }));
+      },
+    );
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
 test(
   '真实 dsh 0.1.2 鉴权全链路：启动→解析启动网址→兑换→代理访问 200（直连 401）',
   { skip: skipReason },
@@ -146,6 +168,19 @@ test(
         });
         assert.notEqual(apiStatus, 403, '代办必须让 /api 通过 DSH 的 browser-trust fence（403 回归）');
         assert.equal(apiStatus, 404, '无匹配路由时应为 404（说明已通过 fence）');
+
+        // 4.6) 会话列表可读（用户症状「主页面看不到之前的工作区和对话」）：
+        // 0.1.2 的 RPC 走 /api/<channel>/<method> 斜杠端点 + {type,rpcId,method,payload:{args:{…}}} envelope，
+        // session/list 的参数名是 _request（不可省略，否则 gateway/arguments-invalid）。
+        const list = await rawPost(
+          `${proxy.baseUrl}api/session/list`,
+          { type: 'client-request', rpcId: 'it-1', method: 'session/list', payload: { args: { _request: {} } } },
+          { origin: proxy.baseUrl.slice(0, -1), 'sec-fetch-site': 'cross-site' },
+        );
+        assert.equal(list.status, 200, '会话列表接口应可达');
+        const parsed = JSON.parse(list.body) as { result?: { ok?: boolean; value?: { items?: unknown[] } } };
+        assert.equal(parsed.result?.ok, true, `会话列表应返回成功（响应：${list.body.slice(0, 200)}）`);
+        assert.ok(Array.isArray(parsed.result?.value?.items), '会话列表应包含 items 数组');
       } finally {
         await proxy.stop();
       }
