@@ -10,6 +10,8 @@
 
 Use the [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) web UI right inside VS Code: click a sidebar icon to embed DSH, which auto-starts (or reuses) the `dsh web` service — code and AI interface side by side, no more switching between terminal, browser, and IDE.
 
+Works with **DSH 0.1.2 and newer**, including its one-time-token browser authentication (auto sign-in, no manual step) — see [DSH ≥0.1.2 authentication](#-dsh-012-authentication--the-local-relay). Older DSH (≤ 0.1.1, no auth) keeps working unchanged.
+
 ## 📸 Screenshot
 
 ![DSH for VS Code screenshot](docs/screenshots/overview.png)
@@ -32,6 +34,7 @@ Use the [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness
 - 📋 **Copy/Paste/Context menu, works out of the box**: fixes the macOS webview quirk where `Cmd+C` / `Cmd+V` and the right-click menu silently fail inside the embedded DSH page — the panel ships its own standard edit shortcut simulation and a context menu (Copy/Paste/Cut/Select All/Undo/Redo), while plain-browser usage and every existing feature stay untouched;
 - 🧹 **Clean exit**: closing the window stops the auto-started service, no zombie processes; manually started services are never touched;
 - 🔒 **Security boundary**: loopback addresses only (127.0.0.1 / localhost / [::1]); no credentials are read.
+- 🔐 **DSH 0.1.2 auth-aware**: the extension parses the one-time launch URL from the service log, exchanges it for DSH's signed browser cookie (valid 30 days, survives service restarts) and serves the panel through a local loopback relay that presents that session for the iframe — so the embedded UI keeps working even though DSH's `SameSite=Strict` cookie can never be used inside a cross-site iframe. A session that expires is re-acquired automatically (a self-started service) or after one paste (an externally started service);
 - 🔝 **Editor title-bar icon**: a DSH whale button sits in the top-right of the editor tab bar (like Claude Code) — one click opens the right-side DSH panel;
 - 🌐 **SSH Remote (opt-in)**: when connected to a remote host, run dsh on the remote and open the panel through a VS Code tunnel (`dsh.remote.enabled`, off by default);
 - 🖼️ **Free image upload**: send images even when the active model has no vision — the image is cached in the workspace and dispatched as a file-path reference, letting the model inspect it with an image tool (files are cleaned up when the panel closes; opt-out via `dsh.image.fallback`);
@@ -90,6 +93,30 @@ npm run package        # produces dsh-vscode.vsix, then install as in Option 2
 | `DSH: Retry Bridge Install` | Reinstall the bridge and restart the service |
 | `DSH: Uninstall Bridge` | Remove the bridge package and restore `cordis.patch.yml` |
 
+## 🔐 DSH ≥0.1.2 authentication & the local relay
+
+DSH 0.1.2 introduced mandatory browser authentication. On startup `dsh web` prints a one-time launch URL:
+
+```
+dsh web: http://127.0.0.1:3080/?token=<one-time token>
+```
+
+Visiting it returns `303` plus a signed session cookie (`HttpOnly; SameSite=Strict`, bound to the request `Host`, 30-day lifetime). Every page and every `/api` call then requires that cookie; without it DSH answers `401 dsh web authentication required`.
+
+**Why a relay is needed.** The panel is a cross-site iframe (its top-level document is `vscode-webview://…`), and browsers never send a `SameSite=Strict` cookie in that context — verified empirically with three different top-level document shapes. So the iframe cannot log itself in, no matter what URL it loads.
+
+**What the extension does** (all automatic for a service it started itself):
+
+1. Recognizes `401/403` with a `dsh web` body marker as *“DSH is running and needs a login”* instead of *“port occupied”* (this is what previously produced the confusing “service not ready within 15s / port occupied” loops);
+2. Parses the launch URL from the child process output (token masked in the log, never echoed in errors);
+3. Exchanges it once for the session cookie and stores it in the extension's private storage, keyed by `host:port` (30 days; a service restart does not invalidate it);
+4. Runs a **loopback relay** (random port on `127.0.0.1`): the panel iframe loads the relay, which forwards all traffic to `dsh web` while injecting the session cookie and rewriting `Host`, and adapts DSH's `/api` browser-trust fence (the fence requires `Origin.host === Host` and rejects `Sec-Fetch-Site: cross-site`, neither of which can hold behind a relay — the relay strips those browser-origin headers, acting as the trusted local intermediary it is). Uploads, SSE streams and WebSocket upgrades are forwarded as streams;
+5. If the session ever expires (or DSH's credentials are reset), the relay reports the `401` upstream and the extension re-acquires the session automatically (self-started service) or shows the sign-in page again.
+
+**If you start DSH yourself** (systemd, a terminal), the extension cannot read that process's log, so the panel shows a one-time **sign-in page**: paste the launch URL from the service log (e.g. `journalctl -u dsh -n 100`). One paste lasts up to 30 days, and a service restart does *not* require pasting again. You can also paste a bare `http://127.0.0.1:3080/` address — for a DSH ≤ 0.1.1 (no auth) service that is enough.
+
+**Exposure of the relay**: it listens on `127.0.0.1` only and holds a 30-day session, so any local process (including other local users) that finds the port can drive that session — the same exposure as a DSH ≤ 0.1.1 service listening on `127.0.0.1:3080` with no authentication at all, and narrower in practice (the port is random and must be scanned). 0.1.2's authentication protects against network exposure and cross-site browser contexts; the relay does not reintroduce network exposure.
+
 ## 🔗 Bridge integration
 
 After installation, the extension installs its own bridge package `dsh-vscode-bridge` into DSH's official client-plugin extension point under your DSH user directory, enabling three integrations:
@@ -123,6 +150,15 @@ To remove, either way works:
 ### Degradation behavior
 
 The bridge only works inside the panel. If it is inactive (e.g. you open the DSH page in a browser, or the install failed), the panel remains **fully usable** — only the three integrations above are unavailable; a one-time startup warning (with "Retry Install" / "Don't Show Again") is shown.
+
+## 🆕 What's new in v0.4.0
+
+- **DSH 0.1.2 support (browser authentication)**: automatic sign-in (launch-URL capture → session exchange → 30-day cookie) plus a loopback relay so the embedded panel keeps working under DSH's `SameSite=Strict` session model; externally started services get a one-time paste page. See [DSH ≥0.1.2 authentication](#-dsh-012-authentication--the-local-relay).
+- **Fixed the “service not ready within 15s / port occupied” loop** on DSH 0.1.2: an authenticated `401` is now recognized as *DSH is running and needs a login* instead of a foreign program squatting the port.
+- **Fixed `/api` 403 inside the panel** (“failed to load provider catalog”, empty workspace/session lists): the relay adapts DSH's browser-trust fence (`Origin`/`Sec-Fetch-*`) as a trusted local intermediary.
+- **Fixed image fallback on DSH 0.1.2** (images could not be sent at all): the bridge now speaks both RPC dialects — slash endpoints (`session/prompt`), `payload.args.request` wrapping, and the `session/attachment-invalid` rejection code.
+- **WSL Remote fixes** (issue #13): handshake no longer depends on the iframe `load` event, `postMessage` uses `'*'` (the webview service worker rewrites the iframe origin), CSP `frame-src` is derived from the final frame URL only, WSL is classified separately from SSH-style remotes (localhost direct, no tunnel) and the handshake timeout is widened per remote class.
+- **Environment header now shows the dsh version on Linux/macOS too** (symbolic-link aware package lookup).
 
 ## 🆕 What's new in v0.3.0
 
@@ -187,7 +223,9 @@ src/
 - VS Code platform rule: the left icon opens the left panel, the right icon opens the right panel — the left icon cannot open the right panel.
 - SSH Remote: the extension must also be installed on the remote (VS Code prompts for it); the tunnel appears in the Ports view and can be closed by the user (the plugin re-creates it on the next ready).
 - Image fallback caches the image files under the **workspace root** — **an open workspace folder is required** (with no folder open, images cannot be cached and no fallback happens). **Temp images are deleted as soon as the model has seen them**: the previous batch is removed the moment the next message is sent in the same session (the model already read it and answered); if no further message comes, a ~2-minute TTL auto-deletes them; conversation create/switch/delete, panel close, page unload and extension deactivate also clean up (best-effort). On activation the extension additionally sweeps any orphaned `dsh-imgcache-*` files left by an earlier session (VS Code restarts lose the in-memory registry), and you can always run the **`DSH: Clean Up Image Cache`** command to purge them manually.
-- **Verifying the bridge was updated**: in the DSH panel DevTools console you should see `[dsh-vscode-bridge] handshake ok, **v0.3.2**, imageFallback=true` and, after sending an image, `image fallback: 已把图片改为地址随消息重发（N 张）: …`. If it still shows an older version, the bridge was not reinstalled — restart the DSH service (the new vsix ships bridge `0.3.2`; the installer force-reinstalls on version mismatch).
+- **Verifying the bridge was updated**: in the DSH panel DevTools console you should see `[dsh-vscode-bridge] handshake ok, **v0.4.0**, imageFallback=true` and, after sending an image, `image fallback: 已把图片改为地址随消息重发（N 张）: …`. If it still shows an older version, the bridge was not reinstalled — restart the DSH service (the vsix ships bridge `0.4.0`; the installer force-reinstalls on version mismatch **or on a `client.js` content difference**, so same-version repackaging also refreshes it).
+- **Externally started DSH (≥ 0.1.2)**: the extension cannot read another process's log, so the first sign-in needs one paste of the launch URL (then 30 days, no repeats) — see [DSH ≥0.1.2 authentication](#-dsh-012-authentication--the-local-relay).
+- **Narrow-viewport CJK caret (upstream)**: in a ~300–400px wide panel the text caret can land inside the last CJK character. This is a DSH web-frontend issue (tracked as [issue #9](https://github.com/Fengze233/dsh-vscode/issues/9)); the composer was rewritten upstream in 0.1.2, and this extension cannot patch DSH's page code — the investigation is documented in that issue.
 - `--no-open` is passed to `dsh web` by default, unless `dsh.extraArgs` or `dsh.openInBrowser` explicitly opts back in to opening the browser.
 
 ## 🌐 Community

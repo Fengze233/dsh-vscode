@@ -179,6 +179,26 @@ test('imageBlocksOf / matchCapturedImages：按本条消息顺序只取实际包
   assert.deepEqual(used3.map((e) => e.key), ['k1']);
 });
 
+test('matchCapturedImages：字节精确匹配优先于同名（防止同名旧缓存顶替新图）', () => {
+  // 场景（code review Critical）：同会话先传过 a.png（旧内容），缓存未清；再传同名 a.png（新内容）
+  const content = [{ type: 'image', name: 'a.png', data: 'NEWBYTES' }];
+  const entries = [
+    { key: 'k-old', name: 'a.png', b64: 'OLDBYTES', mime: 'image/png' },
+    { key: 'k-new', name: 'a.png', b64: 'NEWBYTES', mime: 'image/png' },
+  ];
+  const used = matchCapturedImages(content, entries);
+  assert.equal(used.length, 1);
+  assert.equal(used[0].key, 'k-new', '必须按 base64 精确匹配，绝不能命中同名旧条目');
+
+  // 旧版（≤0.1.1）图片块只带 name 时，退回按文件名匹配
+  const legacy = matchCapturedImages([{ type: 'image', name: 'b.png' }], [{ key: 'k-b', name: 'b.png', b64: 'X' }]);
+  assert.equal(legacy[0].key, 'k-b');
+
+  // 既无 data 也无 name 命中 → 按序兜底取第一个未占用
+  const fallback = matchCapturedImages([{ type: 'image' }], [{ key: 'k-1', name: 'x', b64: 'A' }]);
+  assert.equal(fallback[0].key, 'k-1');
+});
+
 test('imageCacheKey', () => {
   assert.equal(imageCacheKey({ name: 'x.png', size: 10, lastModified: 5 }), 'x.png:10:5');
   assert.equal(imageCacheKey({ name: '', size: 1, lastModified: 2 }), null);

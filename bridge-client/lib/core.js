@@ -236,8 +236,11 @@ export function imageBlocksOf(content) {
 /**
  * 把「本条消息的图片块」按顺序映射到已捕获缓存，返回有序子集。
  * 只引用本条消息实际包含的图片，不再重复引用全部历史缓存（修复"一直重复引用
- * 根目录临时图片"）。匹配优先级：① 文件名相同；② base64 数据相同；③ 按序取
- * 首个未占用（尽力而为兜底）。entries 为 { key?, name?, b64?, mime? } 数组。
+ * 根目录临时图片"）。
+ * 匹配优先级：① **base64 数据精确相同**（DSH ≥0.1.2 的图片块自带 data，最可靠——
+ * 避免同会话重复上传同名文件时命中陈旧条目、把旧图字节落盘发给模型）；② 文件名
+ * 相同（≤0.1.1 的图片块可能只带 name）；③ 按序取首个未占用（尽力而为兜底）。
+ * entries 为 { key?, name?, b64?, mime? } 数组。
  */
 export function matchCapturedImages(content, entries) {
   const blocks = imageBlocksOf(content);
@@ -247,8 +250,8 @@ export function matchCapturedImages(content, entries) {
     let hit = null;
     const name = typeof block.name === 'string' && block.name !== '' ? block.name : '';
     const data = typeof block.data === 'string' ? block.data.trim() : '';
-    if (name) hit = remaining.find((e) => e && e.name === name) || null;
-    if (!hit && data) hit = remaining.find((e) => e && typeof e.b64 === 'string' && e.b64.trim() === data) || null;
+    if (data) hit = remaining.find((e) => e && typeof e.b64 === 'string' && e.b64.trim() === data) || null;
+    if (!hit && name) hit = remaining.find((e) => e && e.name === name) || null;
     if (!hit) hit = remaining[0] || null; // 兜底：按序取第一个未占用
     if (hit) {
       used.push(hit);

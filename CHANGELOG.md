@@ -2,6 +2,7 @@
 
 ### 修复
 
+- **代码评审修复（合并前，桥接侧）**：① **同名图片旧缓存顶替新图**（Critical）——图片块与缓存的匹配改为「base64 精确匹配优先、文件名次之」，且视觉模型成功路径立即消费本条消息的缓存，杜绝同会话重复上传同名文件时把旧图字节落盘、静默发错图；② **排队场景误删图片**——下一条消息只删除「更早批次」、保留最新一批（DSH ≥0.1.2 的 queue 模式允许模型仍在跑时继续发消息，全删会删掉模型尚未读取的图），TTL 由 45 秒放宽到 5 分钟兜底；③ **重发失败不再丢缓存**——缓存消费移到重发成功之后，用户重试仍可降级；④ **Windows 卸载残留**——卸载钩子补传 npm 全局 node_modules，清理 `%APPDATA%\npm\node_modules\dsh-vscode-bridge`；⑤ globalState 写入失败兜底（不再产生未处理拒绝）。新增 3 组回归测试（0.1.2 线格式全链路、同名旧缓存顶替、批次保留最新），并更新「看完即删」用例语义。
 - **图片降级（模型不支持图像输入时自动改为路径转发）在 DSH ≥0.1.2 上失效**（用户实测：无法发送图片、只在页面弹「当前模型不支持图片」）。根因是 0.1.2 的三处线格式变更让桥接的拦截条件全部不命中：① RPC 端点由点分改为斜杠（`session.prompt` → `session/prompt`）；② 业务字段由 `payload.content` 改到 `payload.args.<参数名>`（prompt 的参数名是 `request`，list 是 `_request`）；③ 拒绝码由 `attachment-error` 改为 `session/attachment-invalid`（子代理为 `subagent/attachment-invalid`），`details.reason` 仍是 `MODEL_DOES_NOT_SUPPORT_IMAGES`。
   修复：桥接新增**端点名归一化**与**两代请求解包**（自动定位 `payload.args.request.content`），拒绝判定兼容三种错误码且要求 reason 精确匹配（不误判图片超限等其它附件错误），重发时**原位写回** `args.request.content` 并保留 `requestId`/`sessionId`/`mode`/`clientTimeZone`（不改动原请求体对象）。已用真实 dsh 0.1.2-rc.1 验证：新格式重发请求被服务端正确解析（返回 `session/not-found` 业务错误而非 400/404），旧点分端点已 404。
 

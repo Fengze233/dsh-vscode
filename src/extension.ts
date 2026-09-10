@@ -325,11 +325,12 @@ export function activate(context: vscode.ExtensionContext): void {
   let launchGraceUsed = false;
   const panels: DshPanelProvider[] = [];
 
-  /** 会话存储适配：VS Code globalState（按 authority 分条，支持多 DSH 实例） */
+  /** 会话存储适配：VS Code globalState（按 authority 分条，支持多 DSH 实例）。
+   * 写入为 fire-and-forget，但必须兜底 rejection——Memento 写入失败不应变成未处理拒绝。 */
   const sessionStore: SessionStore = {
     get: (key) => context.globalState.get<StoredSession>(key),
-    set: (key, value) => void context.globalState.update(key, value),
-    delete: (key) => void context.globalState.update(key, undefined),
+    set: (key, value) => void context.globalState.update(key, value).then(undefined, () => {}),
+    delete: (key) => void context.globalState.update(key, undefined).then(undefined, () => {}),
   };
 
   /** 当前服务 authority（host:port；会话 cookie 与代理 Host 重写都以它为准） */

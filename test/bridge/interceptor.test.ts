@@ -399,13 +399,14 @@ test('会话新建/切换时删除上一对话已落盘的临时图片（对话�
   }
 });
 
-test('模型看完即删：同会话下一条消息立即删除上一批；TTL 到期自动删除', async () => {
+test('模型看完即删：下一条消息只删除更早批次（保留最新批）；TTL 到期自动删除', async () => {
   const calls: { input: unknown; init: any }[] = [];
   const fakeRealFetch = async (input: unknown, init: any) => {
     calls.push({ input, init });
     let body: any = {};
     try { body = JSON.parse(init.body || '{}'); } catch {}
-    const content = body.payload && body.payload.content;
+    // 两代线格式都要能识别含图请求（≤0.1.1 payload.content / ≥0.1.2 payload.args.request.content）
+    const content = body?.payload?.args?.request?.content ?? body?.payload?.content;
     const hasImage = Array.isArray(content) && content.some((c: any) => c && c.type === 'image');
     return jsonResponse(hasImage ? REJECT_BODY : ACCEPT_BODY);
   };
@@ -415,42 +416,149 @@ test('模型看完即删：同会话下一条消息立即删除上一批；TTL �
     b.window.__dshBridgeImageTtlMs = 300;
     b.apply();
     b.emitWin('message', { kind: 'bridgeHello', token: 'tok', imageFallback: true });
-    const mkFile = (name: string) => ({ name, size: 3, lastModified: 7, type: 'image/png', arrayBuffer: async () => new Uint8Array([1, 2, 3]) });
-    b.emitDoc('change', { target: { files: [mkFile('m1.png')] } });
+    const mkFile = (name: string, size: number) => ({ name, size, lastModified: 7, type: 'image/png', arrayBuffer: async () => new Uint8Array(size) });
+    const sendImage = async (rpcId: string, name: string, data: string) => {
+      const body = JSON.stringify({
+        type: 'client-request', rpcId, method: 'session.prompt',
+        payload: { sessionId: 's9', content: [{ type: 'image', name, data }] },
+      });
+      const out = await b.window.fetch('/api/prompt', { method: 'POST', body });
+      assert.equal((await out.json()).result.ok, true);
+      const saves = b.parentMessages.filter((m) => m.kind === 'saveImage');
+      return '/ws/' + saves[saves.length - 1].name;
+    };
+    // 批 1
+    b.emitDoc('change', { target: { files: [mkFile('m1.png', 3)] } });
     await new Promise((r) => setTimeout(r, 20));
-    // 发送消息 1（含图）→ 落盘 1 张
-    const body1 = JSON.stringify({
-      type: 'client-request', rpcId: 'q1', method: 'session.prompt',
-      payload: { sessionId: 's9', content: [{ type: 'image', name: 'm1.png', data: 'x' }] },
-    });
-    const out1 = await b.window.fetch('/api/prompt', { method: 'POST', body: body1 });
-    assert.equal((await out1.json()).result.ok, true);
-    const saves1 = b.parentMessages.filter((m) => m.kind === 'saveImage');
-    assert.equal(saves1.length, 1);
-    const p1 = '/ws/' + saves1[0].name;
-    // 发送消息 2（纯文本，同一会话）→ 模型已读完消息 1 的图 → 立即删除，无需等 TTL
-    const body2 = JSON.stringify({
-      type: 'client-request', rpcId: 'q2', method: 'session.prompt',
-      payload: { sessionId: 's9', content: [{ type: 'text', text: '继续' }] },
-    });
-    await b.window.fetch('/api/prompt', { method: 'POST', body: body2 });
-    const dels1 = b.parentMessages.filter((m) => m.kind === 'deleteImages');
-    assert.ok(dels1.length >= 1 && dels1.some((d) => d.paths.includes(p1)), '下一条消息应立即删除上一批临时图 ' + p1);
-    // 消息 3（含图）→ 落盘新一批；TTL(30ms) 到期后应自动删除
-    b.emitDoc('change', { target: { files: [mkFile('m2.png')] } });
+    const p1 = await sendImage('q1', 'm1.png', 'x');
+    // 批 2
+    b.emitDoc('change', { target: { files: [mkFile('m2.png', 4)] } });
     await new Promise((r) => setTimeout(r, 20));
+    const p2 = await sendImage('q2', 'm2.png', 'y');
+    // 消息 3（纯文本）→ 删除更早批次（批 1），保留最新批（批 2）：
+    // DSH ≥0.1.2 的 queue 模式允许模型仍在跑时继续发消息，最新批可能仍在被读取
     const body3 = JSON.stringify({
       type: 'client-request', rpcId: 'q3', method: 'session.prompt',
-      payload: { sessionId: 's9', content: [{ type: 'image', name: 'm2.png', data: 'y' }] },
+      payload: { sessionId: 's9', content: [{ type: 'text', text: '继续' }] },
     });
-    const out3 = await b.window.fetch('/api/prompt', { method: 'POST', body: body3 });
-    assert.equal((await out3.json()).result.ok, true);
-    const saves3 = b.parentMessages.filter((m) => m.kind === 'saveImage');
-    const p3 = '/ws/' + saves3[saves3.length - 1].name;
-    assert.ok(!b.parentMessages.some((m) => m.kind === 'deleteImages' && m.paths.includes(p3)), '刚落盘的批次不应被立即删除');
-    // 等待 TTL（300ms）到期 → 自动删除
+    await b.window.fetch('/api/prompt', { method: 'POST', body: body3 });
+    const dels = b.parentMessages.filter((m) => m.kind === 'deleteImages');
+    assert.ok(dels.some((d) => d.paths.includes(p1)), '更早批次应被删除 ' + p1);
+    assert.ok(!dels.some((d) => d.paths.includes(p2)), '最新批必须保留（可能仍在被模型读取）' + p2);
+    // TTL（300ms）到期 → 最新批自动删除
     await new Promise((r) => setTimeout(r, 700));
-    assert.ok(b.parentMessages.some((m) => m.kind === 'deleteImages' && m.paths.includes(p3)), 'TTL 到期应自动删除临时图 ' + p3);
+    assert.ok(
+      b.parentMessages.some((m) => m.kind === 'deleteImages' && m.paths.includes(p2)),
+      'TTL 到期应自动删除最新批 ' + p2,
+    );
+  } finally {
+    rmSync(b.outDir, { recursive: true, force: true });
+  }
+});
+
+test('DSH ≥0.1.2 线格式全链路：payload.args.request.content + session/attachment-invalid 拒绝码 → 落盘并重发（新格式）', async () => {
+  const calls: { input: unknown; init: any }[] = [];
+  const MODERN_REJECT = {
+    type: 'server-response',
+    rpcId: 'orig-1',
+    result: {
+      ok: false,
+      error: {
+        code: 'session/attachment-invalid',
+        message: 'Model "x" does not support image input.',
+        details: { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' },
+      },
+    },
+  };
+  const fakeRealFetch = async (input: unknown, init: any) => {
+    calls.push({ input, init });
+    let body: any = {};
+    try { body = JSON.parse(init.body || '{}'); } catch {}
+    const content = body?.payload?.args?.request?.content;
+    const hasImage = Array.isArray(content) && content.some((c: any) => c && c.type === 'image');
+    return jsonResponse(hasImage ? MODERN_REJECT : { type: 'server-response', rpcId: 'x', result: { ok: true, value: { accepted: true } } });
+  };
+  const b = loadBridge({ fetch: fakeRealFetch });
+  try {
+    b.apply();
+    b.emitWin('message', { kind: 'bridgeHello', token: 'tok', imageFallback: true });
+    const imgB64 = Buffer.from([9, 8, 7]).toString('base64');
+    b.emitDoc('change', {
+      target: { files: [{ name: 'modern.png', size: 3, lastModified: 11, type: 'image/png', arrayBuffer: async () => new Uint8Array([9, 8, 7]) }] },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    // 0.1.2 请求：斜杠端点 + payload.args.request
+    const promptBody = JSON.stringify({
+      type: 'client-request', rpcId: 'modern-1', method: 'session/prompt',
+      payload: { args: { request: {
+        requestId: 'req-1', sessionId: 's-modern', mode: 'queue',
+        content: [{ type: 'image', mediaType: 'image/png', data: imgB64, name: 'modern.png' }, { type: 'text', text: '看看这张' }],
+      } } },
+    });
+    const out = await b.window.fetch('/api/session/prompt', { method: 'POST', body: promptBody });
+    const json = await out.json();
+    assert.equal(json.result.ok, true, '应返回重发成功响应（DSH 视为发送成功）');
+    assert.equal(json.rpcId, 'modern-1', '响应 rpcId 应改写回原请求');
+    assert.equal(calls.length, 2, '应触发一次重发');
+    // 落盘：内容应为捕获到的图片字节
+    const saves = b.parentMessages.filter((m) => m.kind === 'saveImage');
+    assert.equal(saves.length, 1, '0.1.2 格式的图片应被落盘');
+    assert.equal(saves[0].dataB64, imgB64, '落盘内容应为本条消息的图片字节');
+    // 重发体：仍是斜杠端点 + args.request，content 替换为纯文本（含图片路径），其余字段保留
+    const resent = JSON.parse(calls[1].init.body);
+    assert.equal(resent.method, 'session/prompt', '重发必须保留 0.1.2 的斜杠端点');
+    assert.equal(resent.payload.args.request.sessionId, 's-modern', '业务字段应保留');
+    assert.equal(resent.payload.args.request.requestId, 'req-1', 'requestId 必须保留（DSH 靠它观测 echo）');
+    assert.equal(resent.payload.args.request.mode, 'queue');
+    assert.equal(resent.payload.args.request.content.length, 1);
+    assert.equal(resent.payload.args.request.content[0].type, 'text');
+    assert.ok(resent.payload.args.request.content[0].text.includes('/ws/'), '重发文本应包含落盘路径');
+  } finally {
+    rmSync(b.outDir, { recursive: true, force: true });
+  }
+});
+
+test('Critical 回归：视觉成功路径消费缓存后，同名新图不会被旧缓存顶替（静默发错图）', async () => {
+  const calls: { input: unknown; init: any }[] = [];
+  const fakeRealFetch = async (input: unknown, init: any) => {
+    calls.push({ input, init });
+    let body: any = {};
+    try { body = JSON.parse(init.body || '{}'); } catch {}
+    const content = body?.payload?.content ?? body?.payload?.args?.request?.content;
+    const hasImage = Array.isArray(content) && content.some((c: any) => c && c.type === 'image');
+    // 第一条（视觉模型）：成功；第二条（切到非视觉模型）：拒绝
+    return jsonResponse(hasImage && calls.length > 1 ? REJECT_BODY : ACCEPT_BODY);
+  };
+  const b = loadBridge({ fetch: fakeRealFetch });
+  try {
+    b.apply();
+    b.emitWin('message', { kind: 'bridgeHello', token: 'tok', imageFallback: true });
+    const OLD = Buffer.from([1, 1, 1]).toString('base64');
+    const NEW = Buffer.from([2, 2, 2, 2]).toString('base64');
+    // 第一次上传 dup.png（旧内容）→ 视觉模型成功 → 缓存应被消费
+    b.emitDoc('change', {
+      target: { files: [{ name: 'dup.png', size: 3, lastModified: 1, type: 'image/png', arrayBuffer: async () => new Uint8Array([1, 1, 1]) }] },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    const first = JSON.stringify({
+      type: 'client-request', rpcId: 'd1', method: 'session.prompt',
+      payload: { sessionId: 's-dup', content: [{ type: 'image', name: 'dup.png', data: OLD }] },
+    });
+    assert.equal((await (await b.window.fetch('/api/prompt', { method: 'POST', body: first })).json()).result.ok, true);
+    // 第二次上传同名 dup.png（新内容，size 不同）→ 非视觉模型被拒 → 落盘内容必须是「新内容」
+    b.emitDoc('change', {
+      target: { files: [{ name: 'dup.png', size: 4, lastModified: 2, type: 'image/png', arrayBuffer: async () => new Uint8Array([2, 2, 2, 2]) }] },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    const second = JSON.stringify({
+      type: 'client-request', rpcId: 'd2', method: 'session.prompt',
+      payload: { sessionId: 's-dup', content: [{ type: 'image', name: 'dup.png', data: NEW }] },
+    });
+    const out2 = await b.window.fetch('/api/prompt', { method: 'POST', body: second });
+    assert.equal((await out2.json()).result.ok, true, '第二次应走降级重发');
+    const saves = b.parentMessages.filter((m) => m.kind === 'saveImage');
+    assert.equal(saves.length, 1, '只应落盘一次（第二次的新图）');
+    assert.equal(saves[0].dataB64, NEW, '必须落盘新图片字节，绝不能命中同名旧缓存（静默发错图）');
   } finally {
     rmSync(b.outDir, { recursive: true, force: true });
   }

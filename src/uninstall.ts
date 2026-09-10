@@ -12,8 +12,15 @@ function main(): void {
   const dshHome = process.env.DSH_HOME ?? join(homedir(), '.dsh');
   // 随附桥接包目录：本脚本编译产物位于 <扩展目录>/out/uninstall.js，桥接在 out/bridge-client
   const bridgeSourceDir = join(__dirname, 'bridge-client');
+  // npm 全局 node_modules（仅 Windows）：扩展安装桥接时会额外写入
+  // %APPDATA%\npm\node_modules\dsh-vscode-bridge（扩展宿主 ESM 解析可达位置），
+  // 卸载时必须一并清理，否则残留（与 extension.ts 的安装目标保持一致；code review 发现）。
+  const npmGlobalNodeModules =
+    process.platform === 'win32' && process.env.APPDATA
+      ? join(process.env.APPDATA, 'npm', 'node_modules')
+      : undefined;
   try {
-    uninstallBridge({ dshHome, bridgeSourceDir, fs: createNodeFs() });
+    uninstallBridge({ dshHome, bridgeSourceDir, fs: createNodeFs(), npmGlobalNodeModules });
     console.log('[dsh-uninstall] 已清理 DSH profile 中的桥接包（若存在）');
   } catch (err) {
     // 卸载钩子失败不应阻塞 VS Code 卸载流程：打印诊断后静默退出
