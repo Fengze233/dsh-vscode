@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { initI18n, t } from './i18n';
 import { readConfig, type DshConfig } from './config';
 import { probeService } from './service/detect';
-import { createProcessRunner, findInPath } from './service/process';
+import { createProcessRunner, findInPath, findInPathPosix, resolveDshPackageJsonPath } from './service/process';
 import { ServiceManager, type ManagerOptions } from './service/manager';
 import { DshPanelProvider } from './panel/provider';
 import { StatusBarController } from './statusbar';
@@ -103,36 +103,38 @@ function resolveNpmGlobalNodeModules(config: DshConfig): string | undefined {
 }
 
 /**
- * 定位 dsh 可执行文件并读取其版本（Windows 由 dsh.cmd 推导 bin.js 后读包内 package.json）。
+ * 定位 dsh 可执行文件并读取其版本（跨平台）。
+ * Windows：dsh.cmd → 推导 bin.js → 读包内 package.json；
+ * Linux/macOS：PATH 找 dsh shim（或用户显式 executablePath）→ 解析符号链接/向上查找
+ * 包内 package.json（resolveDshPackageJsonPath 处理 npm 全局布局）。
  * 用于环境信息头：问题报告据此核对 dsh 安装位置与版本，无需再追问用户环境。
  */
 function describeDshExecutable(config: DshConfig): { path: string | null; version: string | null } {
   let shim: string | null = null;
-  let binJs: string | null = null;
   if (process.platform === 'win32') {
-    // Windows：显式 executablePath 优先；否则 PATH 找 dsh.cmd → 推导 bin.js 绝对路径
+    // Windows：显式 executablePath 优先；否则 PATH 找 dsh.cmd
     shim = config.executablePath && !config.executablePath.endsWith('.js')
       ? config.executablePath
       : findInPath('dsh.cmd', process.env.PATH ?? '');
-    if (shim) {
-      binJs = shim.endsWith('.js')
-        ? shim
-        : join(dirname(shim), 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
-    }
   } else {
-    // 非 Windows：显式路径记录路径；否则只记录命令名（版本读取依赖具体安装布局，跳过）
-    shim = config.executablePath && config.executablePath.length > 0 ? config.executablePath : 'dsh';
+    // 非 Windows：显式路径优先；否则在 PATH（':' 分隔）里找 dsh shim
+    shim = config.executablePath && config.executablePath.length > 0
+      ? config.executablePath
+      : findInPathPosix('dsh', process.env.PATH);
   }
-  if (binJs) {
-    try {
-      // bin.js 上两级即 @deepseek-ai/dsh 包根，读其 package.json 的 version
-      const version = JSON.parse(readFileSync(join(dirname(dirname(binJs)), 'package.json'), 'utf8')).version;
-      return { path: shim, version };
-    } catch {
-      /* 读取失败按版本未知处理 */
+  if (shim !== null) {
+    const pkgPath = resolveDshPackageJsonPath(shim, process.platform);
+    if (pkgPath !== null) {
+      try {
+        const version = JSON.parse(readFileSync(pkgPath, 'utf8')).version;
+        if (typeof version === 'string' && version !== '') return { path: shim, version };
+      } catch {
+        /* 读取失败按版本未知处理 */
+      }
     }
   }
-  return { path: shim, version: null };
+  // 未定位到包（或读取失败）：保留可执行文件路径/命令名，版本标记未知
+  return { path: shim ?? (process.platform === 'win32' ? null : 'dsh'), version: null };
 }
 
 /** 插件激活：VS Code 启动完成后调用 */

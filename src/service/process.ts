@@ -1,8 +1,8 @@
 // src/service/process.ts — dsh web 子进程封装（跨平台）
 // 纯模块：spawn 通过参数注入，便于单测；不依赖 vscode。
 import { spawn, type SpawnOptions } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { win32 as win32Path } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { win32 as win32Path, dirname, join } from 'node:path';
 
 /** 最小子进程接口（真实 ChildProcess 结构上兼容，测试可注入假实现） */
 export interface ChildProcessLike {
@@ -306,4 +306,88 @@ export function createProcessRunner(
       return lastStart;
     },
   };
+}
+
+/**
+ * 在 PATH 的目录列表中查找可执行文件（POSIX 语义：分隔符 ':'）。
+ * 与 Windows 版 findInPath 分开，避免盘符/分隔符语义混淆（Windows PATH 用 ';'）。
+ *
+ * @param target     待查找的固定文件名（如 'dsh'）
+ * @param envPath    环境变量 PATH 的值（Linux/macOS 为 ':' 分隔）
+ * @param existsImpl 存在性校验（默认 node:fs.existsSync；单测可注入）
+ * @returns 命中的完整路径，未命中返回 null
+ */
+export function findInPathPosix(
+  target: string,
+  envPath: string | undefined,
+  existsImpl: (p: string) => boolean = existsSync,
+): string | null {
+  if (envPath === undefined) return null;
+  for (const dir of envPath.split(':')) {
+    if (dir === '') continue;
+    const candidate = join(dir, target);
+    if (existsImpl(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * 定位 dsh 包内 package.json 的绝对路径（跨平台，用于读取版本号）。
+ *
+ * 各平台安装布局：
+ * - Windows：npm shim `dsh.cmd` 与包同级的 `node_modules/@deepseek-ai/dsh/lib/bin.js`；
+ * - Linux/macOS：全局 shim（如 `/usr/local/bin/dsh`）通常是**符号链接**，指向
+ *   `.../lib/node_modules/@deepseek-ai/dsh/lib/bin.js`（npm 全局布局），也可能是普通脚本；
+ *   用户还可能直接配置 `executablePath` 指向 `bin.js`。
+ * 探测顺序：显式 bin.js → 解析符号链接 → 沿 shim 目录向上找 node_modules/@deepseek-ai/dsh。
+ * 全部失败返回 null（调用方按「版本未知」处理，不做任何猜测）。
+ *
+ * @param shimPath   dsh 可执行文件或 bin.js 的绝对路径（空串/裸命令名视为不可用）
+ * @param platform   平台名（process.platform）
+ * @param realpath   符号链接解析（默认 node:fs.realpathSync；测试注入）
+ * @param exists     存在性校验（默认 node:fs.existsSync；测试注入）
+ * @returns package.json 绝对路径；无法定位返回 null
+ */
+export function resolveDshPackageJsonPath(
+  shimPath: string,
+  platform: string,
+  realpath: (p: string) => string = realpathSync,
+  exists: (p: string) => boolean = existsSync,
+): string | null {
+  // 裸命令名（如 'dsh'）无法定位文件，交给调用方的 PATH 查找兜底
+  if (shimPath === '' || (!shimPath.includes('/') && !shimPath.includes('\\'))) return null;
+  const pkgFromBinJs = (binJs: string): string => join(dirname(dirname(binJs)), 'package.json');
+
+  // 1) 直接指向 bin.js（用户显式配置 executablePath=…/lib/bin.js）
+  if (shimPath.endsWith('.js')) {
+    const p = pkgFromBinJs(shimPath);
+    return exists(p) ? p : null;
+  }
+
+  // 2) 解析符号链接（npm 全局 shim 常态）：目标多为 …/@deepseek-ai/dsh/lib/bin.js
+  let resolved: string | null = null;
+  try {
+    resolved = realpath(shimPath);
+  } catch {
+    resolved = null; // shim 不存在/无权限：继续走目录探测
+  }
+  if (resolved !== null && resolved !== shimPath && resolved.endsWith('.js')) {
+    const p = pkgFromBinJs(resolved);
+    if (exists(p)) return p;
+  }
+
+  // 3) 从 shim 目录向上逐层查找（覆盖 npm 全局布局与 bin/lib 分开的布局）
+  let dir = dirname(shimPath);
+  for (let depth = 0; depth < 6; depth++) {
+    const candidates = [
+      join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
+      join(dir, 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
+      join(dir, 'package.json'),
+    ];
+    for (const c of candidates) if (exists(c)) return c;
+    const parent = dirname(dir);
+    if (parent === dir) break; // 到达根目录：停止
+    dir = parent;
+  }
+  return null;
 }
