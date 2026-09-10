@@ -17,6 +17,21 @@ import {
   type PanelMessage,
   type PageCtx,
 } from './html';
+// 注:简报曾建议 `import { describeFileRef } from '../context/tracker'`,但本文件中
+// refreshContextBar / render 实际未使用该函数(文件标签由 context.getFileLabel() 直接提供),
+// 而 tsconfig 开启 noUnusedLocals,冗余 import 会导致 typecheck 失败,故不引入。
+
+/** 上下文能力依赖(由扩展入口注入;未注入时工具条与上下文消息均不激活) */
+export interface ContextPanelDeps {
+  /** 当前文件标签(显示引用路径);无文件返回 null */
+  getFileLabel(): string | null;
+  /** 自动跟随开关当前值 */
+  getAutoFollow(): boolean;
+  /** 把当前文件加入 DSH 上下文 */
+  addFileContext(): void;
+  /** 切换自动跟随 */
+  toggleAutoFollow(): void;
+}
 
 /** 会话/代理状态（扩展注入）：驱动 ready 分支的三态渲染 */
 export type AuthUiState = 'ok' | 'needed' | 'pending';
@@ -54,6 +69,8 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
    * @param remoteEnabled 是否启用远程（SSH Remote 等）的 getter（v0.3.0，默认关闭）
    * @param resolveExternalUrl URL→本地可达 URL 解析器（远程走 asExternalUri 隧道；默认原样返回）
    * @param imageFallback 是否启用非视觉模型图片降级（v0.3.0，默认开）
+   * @param context 上下文能力依赖（文件切换/设置变更由扩展入口注入；可选，未注入时工具条与
+   *   上下文消息均不激活）
    */
   constructor(
     private manager: ServiceManager,
@@ -65,6 +82,7 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
     private resolveExternalUrl: (url: string) => Promise<string> = async (u) => u,
     private imageFallback: () => boolean = () => true,
     private ui: PanelProviderUiOpts = {},
+    private context?: ContextPanelDeps,
   ) {
     // 订阅状态变化，重绘面板（iframe 与占位页由状态驱动，无白屏路径）
     manager.onChange(() => void this.handleStateChange());
@@ -165,6 +183,13 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       case 'bridgeAck':
         // 握手回执：通知注入的回调（Task 7 据此评估桥接状态；version 供日志确认桥接代码版本）
         this.onBridgeAck?.(msg.ok, msg.version);
+        break;
+      case 'addFileContext':
+        this.context?.addFileContext();
+        break;
+      case 'toggleAutoFollow':
+        this.context?.toggleAutoFollow();
+        this.render(); // 开关状态变化后重渲染
         break;
     }
   }
@@ -307,11 +332,19 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
           // 旧地址」的不同步白屏（issue #13-2：frameHosts 原先有两处互相覆盖的构造）。
           const frameUrl = this.pendingExternalUrl ?? s.url ?? this.rawUrl();
           ctx.frameHosts = [new URL(frameUrl).origin];
-          html = readyPage(frameUrl, ctx, {
-            token: this.bridgeToken,
-            enabled: this.bridgeEnabled(), // 由 dsh.bridge.enabled 配置驱动（Task 7 接入）
-            imageFallback: this.imageFallback(), // v0.3.0：降级开关随握手消息带给桥接客户端
-          });
+          html = readyPage(
+            frameUrl,
+            ctx,
+            {
+              token: this.bridgeToken,
+              enabled: this.bridgeEnabled(), // 由 dsh.bridge.enabled 配置驱动（Task 7 接入）
+              imageFallback: this.imageFallback(), // v0.3.0：降级开关随握手消息带给桥接客户端
+            },
+            // 上下文工具条（PR #11）：未注入 context 时不渲染，保持向后兼容
+            this.context
+              ? { fileLabel: this.context.getFileLabel(), autoFollow: this.context.getAutoFollow() }
+              : undefined,
+          );
           break;
         }
         case 'failed':
@@ -326,5 +359,16 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       }
     }
     v.webview.html = html;
+  }
+
+  /** 工具条状态刷新:向 webview 推送下行消息并重渲染(文件切换/设置变更时由扩展调用) */
+  refreshContextBar(): void {
+    if (!this.view || !this.context) return;
+    void this.view.webview.postMessage({
+      kind: 'updateContextBar',
+      fileLabel: this.context.getFileLabel(),
+      autoFollow: this.context.getAutoFollow(),
+    });
+    this.render();
   }
 }
