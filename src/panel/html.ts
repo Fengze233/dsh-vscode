@@ -1,4 +1,7 @@
 // src/panel/html.ts — 面板占位页模板（纯函数、无逻辑、不依赖 vscode）
+// 注：运行时 import i18n 的 t（getLang 由扩展激活时 initI18n 设置，模块本身不依赖 vscode），
+// 供工具条文案翻译使用；其余页面函数仍沿用调用方注入 T 的方式。
+import { t } from '../i18n';
 import type { MsgKey } from '../i18n';
 
 /** 翻译函数签名（把 i18n.t 传入模板） */
@@ -25,7 +28,10 @@ export type PanelMessage =
   | { type: 'bridgeDeleteImages'; requestId: string; paths: string[] }
   | { type: 'bridgeDeleteImagesAck'; requestId: string; ok: boolean }
   /** 需要登录引导页：用户粘贴外部启动的 DSH 启动网址后提交（扩展校验并兑换会话） */
-  | { type: 'authSubmitLaunchUrl'; url: string };
+  | { type: 'authSubmitLaunchUrl'; url: string }
+  | { type: 'addFileContext' }
+  | { type: 'toggleAutoFollow' };
+
 
 /** 渲染上下文 */
 export interface PageCtx {
@@ -59,6 +65,12 @@ button:hover { background: var(--vscode-button-hoverBackground); }
 .spinner { width: 28px; height: 28px; border: 3px solid var(--vscode-progressBar-background); border-top-color: transparent; border-radius: 50%; margin: 0 auto 12px; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 iframe.frame { position: fixed; inset: 0; width: 100%; height: 100%; border: none; }
+.ctx-bar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--vscode-sideBarSectionHeader-background); border-bottom: 1px solid var(--vscode-sideBar-border); font-size: 12px; flex-shrink: 0; }
+.ctx-bar .ctx-file { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.9; }
+.ctx-bar button { padding: 2px 8px; margin: 0; font-size: 12px; }
+.ctx-bar label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+body.frame-body.has-bar { display: flex; flex-direction: column; }
+.has-bar iframe.frame { position: static; flex: 1; }
 `;
 
 /** 按钮点击 → postMessage 的内联脚本（nonce 放行） */
@@ -68,6 +80,11 @@ document.addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-action]');
   if (!btn) return;
   vscode.postMessage({ type: btn.dataset.action });
+});
+document.addEventListener('change', (e) => {
+  const box = e.target.closest('input[type="checkbox"][data-action="toggleAutoFollow"]');
+  if (!box) return;
+  vscode.postMessage({ type: 'toggleAutoFollow' });
 });
 `;
 
@@ -212,6 +229,33 @@ if (iframeEl) {
 }`;
 }
 
+/** 工具条下行监听:扩展推送 {kind:'updateContextBar'} 时更新标签与开关 */
+const CONTEXT_BAR_SCRIPT = `
+window.addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || d.kind !== 'updateContextBar') return;
+  const label = document.getElementById('dsh-ctx-label');
+  if (label) label.textContent = d.fileLabel ?? '';
+  const box = document.getElementById('dsh-ctx-autofollow');
+  if (box) box.checked = d.autoFollow === true;
+});
+`;
+
+/** 工具条状态(由 provider 传入,不传则不渲染) */
+export interface ContextBarState {
+  fileLabel: string | null;
+  autoFollow: boolean;
+}
+
+/** 工具条 HTML:当前文件标签 + 加入按钮 + 自动跟随开关 */
+function contextBarHtml(t: T, state: ContextBarState): string {
+  return `<div id="dsh-ctx-bar" class="ctx-bar">
+<span class="ctx-file">${t('ctx.currentFile')}: <span id="dsh-ctx-label">${escapeHtml(state.fileLabel ?? '')}</span></span>
+<button data-action="addFileContext">${t('ctx.add')}</button>
+<label><input type="checkbox" id="dsh-ctx-autofollow" data-action="toggleAutoFollow"${state.autoFollow ? ' checked' : ''}> ${t('ctx.autoFollow')}</label>
+</div>`;
+}
+
 /** HTML 转义（防御性，消息来自 i18n 但转义不费事） */
 function escapeHtml(s: string): string {
   return s
@@ -347,17 +391,28 @@ export function stoppedPage(t: T, ctx: PageCtx): string {
  * writeText 转发给扩展宿主（vscode.env.clipboard）执行，才能真正写入系统剪贴板。
  * 桥接启用时注入握手脚本，让顶层 webview 与 DSH 页面 iframe 建立握手并转发跳转/剪贴板消息。
  * @param bridge 桥接配置（可选，向后兼容既有调用）：token 为握手凭据，enabled 为是否注入握手脚本
+ * @param contextBar 上下文工具条状态（可选，不传则不渲染工具条，向后兼容）
  */
-export function readyPage(url: string, ctx: PageCtx, bridge?: { token: string; enabled: boolean; imageFallback?: boolean }): string {
+export function readyPage(
+  url: string,
+  ctx: PageCtx,
+  bridge?: { token: string; enabled: boolean; imageFallback?: boolean },
+  contextBar?: ContextBarState,
+): string {
   // 桥接启用时注入握手脚本；未传入或 enabled=false 时保持向后兼容，不注入
   const extraScripts = bridge?.enabled
     ? `<script nonce="${ctx.nonce}">${bridgeHandshakeScript(bridge.token, new URL(url).origin, bridge.imageFallback === true)}</script>`
     : '';
+  // 传入 contextBar 时渲染工具条（下行监听脚本 + DOM）；不传则保持向后兼容
+  const bar = contextBar
+    ? `<script nonce="${ctx.nonce}">${CONTEXT_BAR_SCRIPT}</script>${contextBarHtml(t, contextBar)}`
+    : '';
+  const bodyClass = contextBar ? 'frame-body has-bar' : 'frame-body';
   return shell(
     ctx,
     'DSH',
-    'frame-body',
-    `<iframe id="dsh-frame" class="frame" allow="clipboard-write" src="${url}"></iframe>`,
+    bodyClass,
+    `${bar}<iframe id="dsh-frame" class="frame" allow="clipboard-write" src="${url}"></iframe>`,
     extraScripts,
   );
 }

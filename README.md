@@ -39,6 +39,9 @@ Works with **DSH 0.1.2 and newer**, including its one-time-token browser authent
 - 🌐 **SSH Remote (opt-in)**: when connected to a remote host, run dsh on the remote and open the panel through a VS Code tunnel (`dsh.remote.enabled`, off by default);
 - 🖼️ **Free image upload**: send images even when the active model has no vision — the image is cached in the workspace and dispatched as a file-path reference, letting the model inspect it with an image tool (files are cleaned up when the panel closes; opt-out via `dsh.image.fallback`);
 - 🪟 **No surprise browser window**: `dsh web` is started with `--no-open` by default (restore with `dsh.openInBrowser`).
+- 🧠 **File context integration**: the panel toolbar shows the current file with an *Add* button and an *Auto-follow* toggle — inject the current file into the AI context in one click, or let it follow automatically as you switch files (injected into the most recent session of the current project, auto-created if none);
+- 🖱️ **Right-click menus**: "Add to Context / Ask DSH / Send Selection" directly from the editor, the explorer, and the editor title bar;
+- 📁 **Workspace adaptation**: switching VS Code workspaces restarts the DSH service with the new project as its working directory and idempotently registers the DSH workspace.
 
 ## 📥 Installation
 
@@ -115,6 +118,8 @@ Visiting it returns `303` plus a signed session cookie (`HttpOnly; SameSite=Stri
 
 **If you start DSH yourself** (systemd, a terminal), the extension cannot read that process's log, so the panel shows a one-time **sign-in page**: paste the launch URL from the service log (e.g. `journalctl -u dsh -n 100`). One paste lasts up to 30 days, and a service restart does *not* require pasting again. You can also paste a bare `http://127.0.0.1:3080/` address — for a DSH ≤ 0.1.1 (no auth) service that is enough.
 
+**Context injection uses the same relay**: the file-context commands (`DSH: Add Current File to Context`, ask/send-selection, auto-follow) call DSH's `/api` through the local relay too, so they carry the session cookie and pass the browser-trust fence automatically; if the panel has not finished signing in yet, they wait up to 5 seconds before warning.
+
 **Exposure of the relay**: it listens on `127.0.0.1` only and holds a 30-day session, so any local process (including other local users) that finds the port can drive that session — the same exposure as a DSH ≤ 0.1.1 service listening on `127.0.0.1:3080` with no authentication at all, and narrower in practice (the port is random and must be scanned). 0.1.2's authentication protects against network exposure and cross-site browser contexts; the relay does not reintroduce network exposure.
 
 ## 🔗 Bridge integration
@@ -167,6 +172,23 @@ The bridge only works inside the panel. If it is inactive (e.g. you open the DSH
 - **Image upload works seamlessly even for non-vision models**: attach images freely in the dialog. When the active model has no image input, the image is saved into your workspace and the message is sent back out as the original text plus a `image: <absolute-path>` reference — no error, no popup; the model inspects the file with its own image tool and answers normally. Vision-capable models keep the native image upload untouched.
 - **No browser auto-open**: `dsh web` is started with `--no-open`, so the plugin no longer pops a browser window; turn that back on with `dsh.openInBrowser`.
 
+## 🧠 Context integration
+
+The panel toolbar shows the current file with **Add** and **Auto-follow** controls: **Add** injects the current file into the AI context; with auto-follow enabled, switching files automatically injects the current file into the most recent session of the current project (creating a new session if none exists).
+
+### Context integration settings (`dsh.context.*`)
+
+| Setting | Default | Description |
+|---|---|---|
+| `dsh.context.autoFollow` | `false` | Automatically inject the current file into the AI context when switching files |
+| `dsh.context.followDebounceMs` | `800` | Auto-follow debounce delay in milliseconds (300-5000) |
+
+### Right-click menus
+
+- Editor: Add to Context / Ask DSH / Send Selection;
+- Explorer: Add to Context / Ask DSH;
+- Editor title bar: Open Panel / Open in Browser / Restart / Stop / Copy URL.
+
 ## ⚙️ Settings (`dsh.*`)
 
 | Setting | Default | Description |
@@ -191,7 +213,7 @@ Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 161 unit/integration tests (including a full real dsh web flow)
+npm run test          # 285 unit/integration tests (including real dsh web flows: service lifecycle, auth session, context injection)
 npm run compile       # builds out/extension.js
 npm run watch         # watch build
 npm run typecheck     # type check

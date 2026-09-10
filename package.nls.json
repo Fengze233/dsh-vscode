@@ -29,5 +29,13 @@
   "dsh.walkthrough.description": "Use the DeepSeek Harness web UI right inside VS Code.",
   "dsh.walkthrough.step.title": "Open the DSH panel",
   "dsh.walkthrough.step.description": "Click the DSH icon in the Activity Bar or the Secondary Side Bar, or run [DSH: Open Panel](command:dsh.openPanel). The panel starts (or reuses) the dsh web service and embeds the DSH page in the sidebar.",
-  "dsh.cmd.copyLogs.title": "DSH: Copy Logs"
+  "dsh.cmd.copyLogs.title": "DSH: Copy Logs",
+  "dsh.cmd.addFileContext.title": "Add Current File to DSH Context",
+  "dsh.cmd.askAboutFile.title": "Ask DSH About Current File",
+  "dsh.cmd.sendSelection.title": "Send Selection to DSH",
+  "dsh.cmd.addPathContext.title": "Add to DSH Context",
+  "dsh.cmd.askAboutPath.title": "Ask DSH About This",
+  "dsh.cmd.openContextPanel.title": "Open DSH Panel",
+  "dsh.config.contextAutoFollow": "Automatically add the current file to the DSH context when switching files.",
+  "dsh.config.contextDebounce": "Debounce in milliseconds for auto-follow (300-5000)."
 }
