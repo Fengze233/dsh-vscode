@@ -17,6 +17,22 @@ const messages = {
     'panel.stop': 'Stop Service',
     'panel.copyUrl': 'Copy URL',
     'panel.showLogs': 'Show Logs',
+    // 需要登录引导页（DSH ≥0.1.2 浏览器鉴权，非扩展启动的服务）
+    'panel.authTitle': 'DSH requires browser sign-in',
+    'panel.authExplain':
+      'This DSH service was not started by the extension, so its launch URL cannot be read automatically. Paste the URL dsh web printed at startup to sign in once (the session lasts 30 days).',
+    'panel.authStep1':
+      "In the DSH service log, find the line starting with 'dsh web: http://…/?token=…' (terminal output, or run 'journalctl -u dsh -n 100' for a systemd service).",
+    'panel.authStep2': 'Paste the whole URL below and click Sign In.',
+    'panel.authPlaceholder': 'dsh web: http://127.0.0.1:3080/?token=…',
+    'panel.authHint': 'The URL is used once to exchange a session and is never saved.',
+    'panel.authSubmit': 'Sign In',
+    'panel.authSubmitting': 'Signing in…',
+    'msg.authBadUrl': 'This does not look like a dsh web launch URL (expected: dsh web: http://127.0.0.1:<port>/?token=…). Copy it from the DSH service log.',
+    'msg.authNeedToken': 'This DSH service requires browser sign-in, but the pasted address has no one-time token. Paste the full launch URL from the log (the line starting with "dsh web: http://…/?token=…").',
+    'msg.authRejected': 'Sign-in failed: {reason}',
+    'msg.authOk': 'DSH signed in. The session lasts up to 30 days.',
+    'msg.authMismatch': 'The URL points to {urlHost}, but the running DSH service is at {targetHost}. Copy the URL from the log of this DSH service.',
     // 错误原因（error 字段存的 i18n 键）
     'err.portOccupied': 'Port {port} is occupied by another program. Change dsh.port in settings, then retry.',
     'err.dshNotFound': 'The dsh command was not found. Install DeepSeek Harness first.',
@@ -65,6 +81,22 @@ const messages = {
     'panel.stop': '停止服务',
     'panel.copyUrl': '复制网址',
     'panel.showLogs': '查看日志',
+    // 需要登录引导页（DSH ≥0.1.2 浏览器鉴权，非扩展启动的服务）
+    'panel.authTitle': 'DSH 需要浏览器登录',
+    'panel.authExplain':
+      '这个 DSH 服务不是由本扩展启动的，扩展读不到它的启动日志，无法自动获取登录网址。请把 dsh web 启动时打印的网址粘贴到下方完成一次登录（会话有效期 30 天）。',
+    'panel.authStep1':
+      '在 DSH 服务日志中找到以 dsh web: http://…/?token=… 开头的那一行（终端输出；systemd 服务可运行 journalctl -u dsh -n 100）。',
+    'panel.authStep2': '把整条网址粘贴到下方，点击「登录」。',
+    'panel.authPlaceholder': 'dsh web: http://127.0.0.1:3080/?token=…',
+    'panel.authHint': '该网址只用于兑换一次会话，不会被保存。',
+    'panel.authSubmit': '登录',
+    'panel.authSubmitting': '正在登录…',
+    'msg.authBadUrl': '这不像 dsh web 的启动网址（应为 dsh web: http://127.0.0.1:<端口>/?token=…）。请从 DSH 服务日志中复制。',
+    'msg.authNeedToken': '这个 DSH 服务需要浏览器登录，但粘贴的地址没有一次性 token。请从服务日志粘贴完整的启动网址（以 dsh web: http://…/?token=… 开头的那一行）。',
+    'msg.authRejected': '登录失败：{reason}',
+    'msg.authOk': 'DSH 登录成功，会话最长 30 天有效。',
+    'msg.authMismatch': '网址指向 {urlHost}，但正在运行的 DSH 服务在 {targetHost}。请从该服务的日志中复制网址。',
     'err.portOccupied': '端口 {port} 被其他程序占用。请在设置中修改 dsh.port 后重试。',
     'err.dshNotFound': '未找到 dsh 命令，请先安装 DeepSeek Harness。',
     'err.nodeNotFound': 'PATH 中未找到 Node.js（node.exe）。请安装 Node.js 或将其加入 PATH 后重启 VS Code。',

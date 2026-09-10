@@ -34,6 +34,8 @@ test('buildBridgeClient 内联产物语法合法且不含 export/占位符残留
     assert.ok(code.includes('imageCacheFilename'), 'v0.3.0 产物应包含图片缓存文件名生成');
     assert.ok(code.includes('buildDeleteImagesRequest'), 'v0.3.0 产物应包含 deleteImages 消息构造');
     assert.ok(code.includes('detectModelReject'), 'v0.3.0 产物应包含模型拒绝判定');
+    assert.ok(code.includes('normalizeRpcMethod'), 'v0.4.1 产物应包含端点名归一化（0.1.2 斜杠端点兼容）');
+    assert.ok(code.includes('unwrapRpcRequest'), 'v0.4.1 产物应包含业务请求解包（payload.args.request 兼容）');
     assert.ok(code.includes('buildTextOnlyContent'), 'v0.3.0 产物应包含纯文本内容重构');
     assert.ok(code.includes('rewriteRpcId'), 'v0.3.0 产物应包含降级重发响应 rpcId 改写');
     assert.ok(code.includes('copyViaBridge'), '产物应包含 writeText 接管逻辑');

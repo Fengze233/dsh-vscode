@@ -6,6 +6,8 @@ import {
   createProcessRunner,
   sanitizeCwd,
   findInPath,
+  findInPathPosix,
+  resolveDshPackageJsonPath,
   binJsFromShim,
   windowsDshInvocation,
   type ChildProcessLike,
@@ -332,3 +334,39 @@ test('startDsh 默认追加 --no-open，openInBrowser=true 时不追加（v0.3.0
   assert.equal(calls[1].args.includes('--no-open'), false);
 });
 
+
+test('findInPathPosix：按 ":" 分隔查找，命中返回完整路径，未命中返回 null', () => {
+  const fsSet = new Set(['/usr/local/bin/dsh', '/opt/node/bin/node']);
+  const exists = (p: string) => fsSet.has(p);
+  assert.equal(findInPathPosix('dsh', '/usr/bin:/usr/local/bin', exists), '/usr/local/bin/dsh');
+  assert.equal(findInPathPosix('dsh', '/usr/bin:/opt/bin', exists), null);
+  assert.equal(findInPathPosix('dsh', undefined, exists), null);
+  // 空条目（PATH 首尾/连续分隔符产生）应跳过而不报错
+  assert.equal(findInPathPosix('dsh', '::/usr/local/bin:', exists), '/usr/local/bin/dsh');
+});
+
+test('resolveDshPackageJsonPath：bin.js 直配 / 符号链接解析 / 向上查找 三种布局', () => {
+  // ① 显式 executablePath 指向 bin.js
+  const binJs = '/usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js';
+  const pkg = '/usr/local/lib/node_modules/@deepseek-ai/dsh/package.json';
+  const exists1 = (p: string) => p === pkg;
+  assert.equal(resolveDshPackageJsonPath(binJs, 'linux', () => binJs, exists1), pkg);
+
+  // ② npm 全局 shim 是符号链接 → realpath 指向 bin.js
+  const shim = '/usr/local/bin/dsh';
+  assert.equal(resolveDshPackageJsonPath(shim, 'linux', () => binJs, exists1), pkg);
+
+  // ③ 无符号链接信息（realpath 抛错）→ 从 shim 目录向上找 node_modules
+  const exists3 = (p: string) => p === '/usr/local/lib/node_modules/@deepseek-ai/dsh/package.json';
+  assert.equal(
+    resolveDshPackageJsonPath('/usr/local/bin/dsh', 'linux', () => { throw new Error('no link'); }, exists3),
+    '/usr/local/lib/node_modules/@deepseek-ai/dsh/package.json',
+  );
+
+  // ④ 裸命令名/空串无法定位
+  assert.equal(resolveDshPackageJsonPath('dsh', 'linux', () => '', () => true), null);
+  assert.equal(resolveDshPackageJsonPath('', 'linux', () => '', () => true), null);
+
+  // ⑤ 全部探测失败 → null（调用方按版本未知处理，不猜测）
+  assert.equal(resolveDshPackageJsonPath('/usr/local/bin/dsh', 'linux', () => { throw new Error('x'); }, () => false), null);
+});

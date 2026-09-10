@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import * as nodeFs from 'node:fs/promises';
 import { ServiceManager } from '../service/manager';
 import { handleBridgeMessage } from '../bridge/host';
-import { isRemoteName } from '../remote';
+import { classifyRemote, toLocalhostUrl, type RemoteKind } from '../remote';
 import { t } from '../i18n';
 import {
   loadingPage,
@@ -13,9 +13,23 @@ import {
   stoppedPage,
   readyPage,
   remoteDisabledPage,
+  authRequiredPage,
   type PanelMessage,
   type PageCtx,
 } from './html';
+
+/** 会话/代理状态（扩展注入）：驱动 ready 分支的三态渲染 */
+export type AuthUiState = 'ok' | 'needed' | 'pending';
+
+/** 面板增强接线（v0.4.0 鉴权适配；均可选，缺省保持旧行为） */
+export interface PanelProviderUiOpts {
+  /** 会话状态 getter：ok=可直接进 iframe；needed=显示「需要登录」引导页；pending/undefined=加载中 */
+  authState?: () => AuthUiState | undefined;
+  /** iframe 基地址覆盖（本地代办代理就绪后返回其 baseUrl；null=回退 dsh 真实地址） */
+  frameBaseOverride?: () => string | null;
+  /** 「需要登录」页提交启动网址的回调（扩展校验并兑换） */
+  onAuthUrlSubmit?: (url: string) => void;
+}
 
 export class DshPanelProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | null = null;
@@ -50,9 +64,15 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
     private remoteEnabled: () => boolean = () => false,
     private resolveExternalUrl: (url: string) => Promise<string> = async (u) => u,
     private imageFallback: () => boolean = () => true,
+    private ui: PanelProviderUiOpts = {},
   ) {
     // 订阅状态变化，重绘面板（iframe 与占位页由状态驱动，无白屏路径）
     manager.onChange(() => void this.handleStateChange());
+  }
+
+  /** 强制按最新状态重渲染（会话兑换完成/代理就绪后由扩展调用，弥补 onChange 之外的触发源） */
+  refresh(): void {
+    void this.handleStateChange();
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -74,11 +94,19 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * 当前窗口是否处于「远程但未启用」状态：远程窗口（remoteName 非空）且 dsh.remote.enabled=false。
+   * 当前窗口是否处于「远程隧道但未启用」状态：仅 SSH Remote/容器等需要隧道的远程窗口
+   * （remoteKind='tunneled'）且 dsh.remote.enabled=false 时成立。
+   * WSL（issue #13-3）不是隧道远程：vscode-server/dsh 同在一台 WSL 内、靠 localhost 转发直连，
+   * 不需要（也不支持）asExternalUri——WSL 窗口与本地窗口同样默认可用，不拦。
    * 该状态下不拉起远端服务、不建隧道，仅展示引导占位页。
    */
   private remoteWindowDisabled(): boolean {
-    return isRemoteName(vscode.env.remoteName) && !this.remoteEnabled();
+    return this.remoteKind() === 'tunneled' && !this.remoteEnabled();
+  }
+
+  /** 当前窗口的远程分类（local / wsl / tunneled） */
+  private remoteKind(): RemoteKind {
+    return classifyRemote(vscode.env.remoteName);
   }
 
   /** 当前展示用的本地可达 URL（供「复制网址」命令使用；未解析时返回 null 由调用方回退原 URL） */
@@ -112,6 +140,10 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       case 'openSettings':
         // 远程未启用占位页的「打开设置」按钮：聚焦 dsh.remote.enabled 设置
         void vscode.commands.executeCommand('workbench.action.openSettings', 'dsh.remote.enabled');
+        break;
+      case 'authSubmitLaunchUrl':
+        // 「需要登录」引导页提交的启动网址：转交扩展校验与兑换（成败反馈在扩展侧提示）
+        this.ui.onAuthUrlSubmit?.(msg.url);
         break;
       case 'bridgeCopyText':
         // 桥接剪贴板消息：VS Code 会拦截跨源 iframe 的原生 clipboard API，
@@ -203,20 +235,36 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * 状态变化处理：远程且启用时异步解析隧道 URL（防乱序后落地），
-   * 其余情况直接渲染（远程未启用会由 render 短路为占位页）。
+   * 状态变化处理：按远程分类异步解析「面板 iframe 实际加载的地址」：
+   * 基地址优先取「本地代办代理」（frameBaseOverride，DSH ≥0.1.2 鉴权下 iframe 只能经代理访问），
+   * 未接线时回退 manager 的 dsh 真实地址（旧版行为）。
+   * - tunneled（SSH Remote/容器）且已启用：经 asExternalUri 建隧道，返回本地可达 URL；
+   * - wsl：不需要隧道——把回环 host 替换为 localhost（Windows→WSL 的 localhost 转发，
+   *   也绕开 webview SW 对 127.0.0.1 iframe 的 origin 重写，见 issue #13-1/3）；
+   * - 其余情况（local / tunneled 未启用）保持原地址。
+   * 解析结果异步落地前用渲染代数防乱序覆盖。
    */
   private async handleStateChange(): Promise<void> {
     const s = this.manager.getSnapshot();
-    if (s.state === 'ready' && isRemoteName(vscode.env.remoteName) && this.remoteEnabled()) {
-      const gen = ++this.renderGen;
-      const raw = s.url ?? this.rawUrl();
-      const resolved = await this.resolveExternalUrl(raw);
-      if (gen !== this.renderGen) return; // 期间状态又变，丢弃过期结果
-      this.pendingExternalUrl = resolved;
+    const kind = this.remoteKind();
+    if (s.state === 'ready' && kind !== 'local') {
+      // 就绪后每次重算（frameBaseOverride 可能从 null 变为代理地址，refresh 时能取到新值）
+      const base = this.ui.frameBaseOverride?.() ?? s.url ?? this.rawUrl();
+      if (kind === 'tunneled' && this.remoteEnabled()) {
+        const gen = ++this.renderGen;
+        const resolved = await this.resolveExternalUrl(base);
+        if (gen !== this.renderGen) return; // 期间状态又变，丢弃过期结果
+        this.pendingExternalUrl = resolved;
+      } else if (kind === 'wsl') {
+        // WSL 不需要（也不支持）asExternalUri 隧道：localhost 直连变体即本地可达地址
+        this.pendingExternalUrl = toLocalhostUrl(base);
+      } else {
+        this.pendingExternalUrl = null; // tunneled 未启用：占位页兜底，不设解析地址
+      }
     } else {
       ++this.renderGen; // 使进行中的解析过期
-      this.pendingExternalUrl = null;
+      // local：本地代办代理地址即最终可达地址（无隧道解析）；tunneled 未启用：占位页无 iframe
+      this.pendingExternalUrl = kind === 'local' ? (this.ui.frameBaseOverride?.() ?? null) : null;
     }
     this.render();
   }
@@ -241,22 +289,31 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       html = remoteDisabledPage(t, ctx);
     } else {
       switch (s.state) {
-        case 'ready':
+        case 'ready': {
           this.wasConnected = true;
-          // iframe/CSP 使用解析后的本地可达 URL（远程=隧道；本地=原地址）。
-          // frameHosts 以解析出的 origin 为准，保证 CSP 放行该隧道地址。
-          {
-            const displayUrl = this.pendingExternalUrl ?? s.url ?? this.rawUrl();
-            if (this.pendingExternalUrl !== null) {
-              ctx.frameHosts = [new URL(this.pendingExternalUrl).origin];
-            }
-            html = readyPage(displayUrl, ctx, {
-              token: this.bridgeToken,
-              enabled: this.bridgeEnabled(), // 由 dsh.bridge.enabled 配置驱动（Task 7 接入）
-              imageFallback: this.imageFallback(), // v0.3.0：降级开关随握手消息带给桥接客户端
-            });
+          const authState = this.ui.authState?.();
+          // 会话三态：pending（兑换中/未决）→ 加载动画；needed → 需要登录引导页；
+          // ok（含旧版无鉴权）→ 正常 iframe。
+          if (authState === 'pending') {
+            html = loadingPage(t, ctx);
+            break;
           }
+          if (authState === 'needed') {
+            html = authRequiredPage(t, ctx);
+            break;
+          }
+          // iframe 与 CSP 必须同源：先定最终加载地址（解析后的本地可达 URL），
+          // 再由它推导 frameHosts——杜绝「iframe src 已换 localhost/隧道地址、CSP 仍放行
+          // 旧地址」的不同步白屏（issue #13-2：frameHosts 原先有两处互相覆盖的构造）。
+          const frameUrl = this.pendingExternalUrl ?? s.url ?? this.rawUrl();
+          ctx.frameHosts = [new URL(frameUrl).origin];
+          html = readyPage(frameUrl, ctx, {
+            token: this.bridgeToken,
+            enabled: this.bridgeEnabled(), // 由 dsh.bridge.enabled 配置驱动（Task 7 接入）
+            imageFallback: this.imageFallback(), // v0.3.0：降级开关随握手消息带给桥接客户端
+          });
           break;
+        }
         case 'failed':
           html = errorPage(t, ctx, s.error ? t(s.error, s.errorVars) : t('err.loadFailed'));
           break;

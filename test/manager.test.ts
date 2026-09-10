@@ -11,7 +11,10 @@ class FakeChild implements ChildProcessLike {
   killed: string[] = [];
   exitCbs: ((code: number | null) => void)[] = [];
   errorCbs: ((err: Error) => void)[] = [];
-  stdout = { on: (_e: 'data', _cb: (chunk: Buffer) => void) => {} };
+  stdout = { on: (_e: 'data', _cb: (chunk: Buffer) => void): void => {
+    if (_e === 'data') this.stdoutDataCb = _cb;
+  } };
+  stdoutDataCb: ((chunk: Buffer) => void) | null = null;
   stderrDataCb: ((chunk: Buffer) => void) | null = null;
   stderr = { on: (_e: 'data', _cb: (chunk: Buffer) => void): void => {
     if (_e === 'data') this.stderrDataCb = _cb;
@@ -27,8 +30,20 @@ class FakeChild implements ChildProcessLike {
   emitExit(code: number | null = null): void {
     for (const cb of [...this.exitCbs]) cb(code);
   }
+  emitStdout(text: string): void {
+    this.stdoutDataCb?.(Buffer.from(text));
+  }
   emitStderr(text: string): void {
     this.stderrDataCb?.(Buffer.from(text));
+  }
+}
+
+/** 轮询等待条件成立（异步时序测试用） */
+async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error('waitFor 超时');
+    await new Promise((r) => setTimeout(r, 5));
   }
 }
 
@@ -479,6 +494,71 @@ test('isNoOpenStderr：仅当 stderr 含 "unknown option" 且 "-no-open" 时判�
   assert.equal(isNoOpenStderr("dsh: 服务启动失败"), false, '无关报错不误判');
   assert.equal(isNoOpenStderr(""), false);
   assert.equal(isNoOpenStderr("--other --option --no-open is fine"), false, '需同时含 unknown option 才是崩溃标记');
+});
+
+test('启动子进程 stdout 打印 dsh web 启动网址（0.1.2 带 token）→ onLaunchUrl 收到匹配端口的 URL', async () => {
+  const launchUrls: string[] = [];
+  const h = makeHarness(undefined, { onLaunchUrl: (u) => launchUrls.push(u) });
+  // foreign → 换端口 3081 → spawn → 等待就绪（dsh）
+  h.probeQueue = ['foreign', 'down', 'dsh'];
+  const done = h.manager.ensureRunning();
+  await waitFor(() => h.child !== null); // spawn 已发生
+  // 模拟 dsh 输出：0.1.2 的鉴权就绪行（含 LAN 后缀同行）
+  h.child!.emitStdout(
+    'dsh web: http://127.0.0.1:3081/?token=ZQpcwOGassFgG-SOxgnI4JSqJp5UmgVUqeo2rZzNYAI (LAN: http://192.168.1.5:3081/?token=ZQpcwOGassFgG-SOxgnI4JSqJp5UmgVUqeo2rZzNYAI)\n',
+  );
+  // 噪音行不应触发回调
+  h.child!.emitStdout('[stdout] some noise line\n');
+  const s = await done;
+  assert.equal(s.state, 'ready');
+  assert.equal(s.url, 'http://127.0.0.1:3081/'); // 换端口后 URL 同步
+  assert.deepEqual(launchUrls, ['http://127.0.0.1:3081/?token=ZQpcwOGassFgG-SOxgnI4JSqJp5UmgVUqeo2rZzNYAI']);
+  h.manager.dispose();
+});
+
+test('启动网址行跨 chunk 分片（无换行边界）仍能完整解析', async () => {
+  const launchUrls: string[] = [];
+  const h = makeHarness(undefined, { onLaunchUrl: (u) => launchUrls.push(u) });
+  h.probeQueue = ['foreign', 'down', 'dsh'];
+  const done = h.manager.ensureRunning();
+  await waitFor(() => h.child !== null);
+  const url = 'http://127.0.0.1:3081/?token=ZQpcwOGassFgG-SOxgnI4JSqJp5UmgVUqeo2rZzNYAI';
+  // 第一片不带换行：解析器须缓存残行
+  h.child!.emitStdout(`dsh web: ${url.slice(0, 30)}`);
+  h.child!.emitStdout(`${url.slice(30)}\n`);
+  const s = await done;
+  assert.equal(s.state, 'ready');
+  assert.deepEqual(launchUrls, [url]);
+  h.manager.dispose();
+});
+
+test('stdout 网址端口与当前目标端口不一致（如残留旧端口输出）→ 不触发回调', async () => {
+  const launchUrls: string[] = [];
+  const h = makeHarness(undefined, { onLaunchUrl: (u) => launchUrls.push(u) });
+  h.probeQueue = ['foreign', 'down', 'dsh'];
+  const done = h.manager.ensureRunning();
+  await waitFor(() => h.child !== null);
+  h.child!.emitStdout('dsh web: http://127.0.0.1:3999/?token=abc123\n'); // 端口 3999 ≠ 3081
+  const s = await done;
+  assert.equal(s.state, 'ready');
+  assert.deepEqual(launchUrls, []);
+  h.manager.dispose();
+});
+
+test('stdout 日志打码 token（日志零明文），onLaunchUrl 回调仍收原文', async () => {
+  const logs: string[] = [];
+  const launchUrls: string[] = [];
+  const h = makeHarness(undefined, { log: (l) => logs.push(l), onLaunchUrl: (u) => launchUrls.push(u) });
+  h.probeQueue = ['foreign', 'down', 'dsh'];
+  const done = h.manager.ensureRunning();
+  await waitFor(() => h.child !== null);
+  h.child!.emitStdout('dsh web: http://127.0.0.1:3081/?token=SECRETTOKEN0123456789 (LAN: http://192.168.1.5:3081/?token=SECRETTOKEN0123456789)\n');
+  const s = await done;
+  assert.equal(s.state, 'ready');
+  assert.equal(launchUrls.length, 1);
+  assert.ok(launchUrls[0].includes('token=SECRETTOKEN0123456789'), '解析回调必须使用原文 token');
+  assert.ok(!logs.some((l) => l.includes('SECRETTOKEN0123456789')), '输出日志不得出现明文 token');
+  h.manager.dispose();
 });
 
 

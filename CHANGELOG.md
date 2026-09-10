@@ -1,3 +1,37 @@
+## [0.4.0] - 2026-09-10
+
+### 修复
+
+- **代码评审修复（合并前，桥接侧）**：① **同名图片旧缓存顶替新图**（Critical）——图片块与缓存的匹配改为「base64 精确匹配优先、文件名次之」，且视觉模型成功路径立即消费本条消息的缓存，杜绝同会话重复上传同名文件时把旧图字节落盘、静默发错图；② **排队场景误删图片**——下一条消息只删除「更早批次」、保留最新一批（DSH ≥0.1.2 的 queue 模式允许模型仍在跑时继续发消息，全删会删掉模型尚未读取的图），TTL 由 45 秒放宽到 5 分钟兜底；③ **重发失败不再丢缓存**——缓存消费移到重发成功之后，用户重试仍可降级；④ **Windows 卸载残留**——卸载钩子补传 npm 全局 node_modules，清理 `%APPDATA%\npm\node_modules\dsh-vscode-bridge`；⑤ globalState 写入失败兜底（不再产生未处理拒绝）。新增 3 组回归测试（0.1.2 线格式全链路、同名旧缓存顶替、批次保留最新），并更新「看完即删」用例语义。
+- **图片降级（模型不支持图像输入时自动改为路径转发）在 DSH ≥0.1.2 上失效**（用户实测：无法发送图片、只在页面弹「当前模型不支持图片」）。根因是 0.1.2 的三处线格式变更让桥接的拦截条件全部不命中：① RPC 端点由点分改为斜杠（`session.prompt` → `session/prompt`）；② 业务字段由 `payload.content` 改到 `payload.args.<参数名>`（prompt 的参数名是 `request`，list 是 `_request`）；③ 拒绝码由 `attachment-error` 改为 `session/attachment-invalid`（子代理为 `subagent/attachment-invalid`），`details.reason` 仍是 `MODEL_DOES_NOT_SUPPORT_IMAGES`。
+  修复：桥接新增**端点名归一化**与**两代请求解包**（自动定位 `payload.args.request.content`），拒绝判定兼容三种错误码且要求 reason 精确匹配（不误判图片超限等其它附件错误），重发时**原位写回** `args.request.content` 并保留 `requestId`/`sessionId`/`mode`/`clientTimeZone`（不改动原请求体对象）。已用真实 dsh 0.1.2-rc.1 验证：新格式重发请求被服务端正确解析（返回 `session/not-found` 业务错误而非 400/404），旧点分端点已 404。
+
+### 新增
+
+- **适配 DSH ≥0.1.2 的浏览器鉴权（方案 A：本地代办代理 + 会话自动兑换）**。0.1.2 起 DSH 默认开启一次性 token 鉴权（启动打印 `dsh web: http://127.0.0.1:<port>/?token=…`，未登录一律 401），且会话 cookie 为 `SameSite=Strict`——VS Code 面板 iframe 与 DSH 服务跨站，浏览器不会在嵌套 iframe 中回送该 cookie（真实 Chromium 三种顶层形态实测），直接内嵌不再可行。0.4.0 的完整适配：
+  1. **探测识别鉴权态**：401/403（body 含 `dsh web` 特征）判定为「DSH 在运行、需要登录」，不再是「端口被其他程序占用」——修复升级后「服务 15 秒内未就绪 / 端口占用」连环误报（issue #12）；
+  2. **启动网址自动捕获**：解析子进程 stdout 的 `dsh web: …/?token=…` 行（容忍 LAN 后缀与跨 chunk 分片；日志打码 token，零明文）；
+  3. **会话兑换与持有**：用启动网址向 DSH 完成一次 303 + 签名 cookie 兑换，cookie 存扩展私有存储（按 host:port 分条、记录过期时间、30 天有效且服务重启不失效；过期自动清理）；
+  4. **本地代办代理**：面板 iframe 改经扩展内 127.0.0.1 随机端口代理访问 DSH——代理全流量透传（上传大文件、SSE 流、WebSocket 升级）、重写 Host 为真实 DSH 地址并注入会话 cookie、剥离上游 set-cookie、无会话时明确 503；**自启场景全程零手工**；
+  5. **外部启动场景登录引导页**：检测到「DSH 在运行但扩展没有会话」时面板显示引导页，粘贴一次启动网址（校验 host:port 与服务一致后兑换）即可，30 天一次；
+  6. 「复制网址」「在浏览器打开」改用带 token 的启动网址（外部浏览器打开即可完成登录）。
+
+### 修复
+
+- **修复 issue #13：WSL Remote 窗口白屏 + 桥接握手必失败**（五处叠加根因全部处理）：
+  ① 握手与回执转发的 `postMessage` targetOrigin 不再用 iframe.src 推导的 origin（webview service worker 会重写 iframe 真实 origin，具名 targetOrigin 直接抛错），改 `'*'` + 来源窗口/来源 origin 双重校验（兼容 `vscode-webview://` 重写形态与 127.0.0.1/localhost 互换）；
+  ② CSP `frame-src` 由最终 iframe 地址单一推导，杜绝「iframe 已换地址、CSP 仍放行旧地址」的白屏；
+  ③ WSL 与 SSH Remote 分开归类：WSL 的 vscode-server/dsh 同在一台 WSL 内，靠 localhost 转发直连，不需要（也不支持）asExternalUri 隧道——WSL 窗口默认可用、不再被「SSH Remote 支持未开启」占位页拦死；
+  ④ 握手 hello 循环不再依赖 iframe `load` 事件（webview 内毫秒级加载会错过事件），脚本执行即启动，收到回执前每 250ms 重发、最长 15 秒；
+  ⑤ 握手超时按远程分类放宽：SSH Remote/容器 15s、本地/WSL 5s（原 3s 对远端全链路必超时）。
+- **登录引导页脚本修复**：与公共按钮脚本共用同一 `vscode` 实例（顶层重复声明 `const vscode` 会使页面脚本整体失效），并加防回归测试（每个占位页 `acquireVsCodeApi` 恰好声明一次）。
+- **会话/代理异常兜底**：兑换网络异常不卡加载页（3 秒自动重试，仅服务仍就绪时）；外部服务判定前给 2.5 秒启动网址宽限（stdout 打印晚于 HTTP 就绪），消除「需要登录」页闪现；代理启动失败记日志并复位可重试。
+- **代码评审修复（合并前四处置）**：① 旧版兼容回归——代理对「服务就绪但无会话」改为**直通转发**而非 503（≤0.1.1 无鉴权 DSH 照常可用）；② **401 自愈**——上游 401 透传的同时触发会话失效信号，扩展自动丢弃失效 cookie 并重新判定（自启场景自动重兑，外部服务落到登录引导页），不再永久卡 401 页；③ 登录引导页支持粘贴**裸地址**（外部启动的 ≤0.1.1：探测 200 即无鉴权直接可用；带鉴权服务会提示需完整 token 网址）；④ 代理 stop/start 竞态闭合（停用窗口不再泄漏监听与 WebSocket 上游连接）。
+
+### 其他
+
+- 版本升至 **0.4.0**（扩展与桥接版本同步，防漂移测试强制）。
+
 ## [0.3.1] - 2026-08-24
 
 ### 修复

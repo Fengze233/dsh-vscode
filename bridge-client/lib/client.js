@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     // —— 握手状态 ——
     let bridgeToken = ""; // 父页面下发的握手 token；未握手前为空，不激活任何拦截
     // 桥接包版本（与插件版本统一，随包发布；安装器按「版本不一致或 client.js 内容不一致」强制重装）
-    const BRIDGE_VERSION = "0.3.1";
+    const BRIDGE_VERSION = "0.4.0";
 
     // —— 剪贴板写桥接：VS Code webview 对跨源 iframe 的 navigator.clipboard.writeText 有权限拦截 ——
     // 背景：即使 iframe 声明 allow="clipboard-write"，VS Code（Electron）仍会拒绝写入
@@ -535,14 +535,15 @@ window.__ModuleLoader__.load({
 
     // —— 临时图片「模型看完即删」生命周期 ——
     // 模型在回合内通过图像工具按路径读取文件，文件必须存活到读取完成。因此每条消息的
-    // 临时图按「批次」管理：① 同会话发出下一条消息时立即删除（模型已读完上一条并给出回答）；
-    // ② 若不再发消息，TTL（默认 45 秒，测试可经 window.__dshBridgeImageTtlMs 覆盖）兜底自动删——
-    //    模型回合内通常数秒即完成图片读取，45 秒既覆盖读取又贴近"看完即删"；
-    // ③ 会话新建/删除/切换、页面卸载、扩展停用、手动命令等既有触发全部保留。
+    // 临时图按「批次」管理：① 同会话发出下一条消息时删除**更早的批次**（保留最新一批——
+    //    queue 模式下最新批可能仍在被读取，见 code review）；② 若不再发消息，TTL 兜底自动删
+    //    （默认 5 分钟，测试可经 window.__dshBridgeImageTtlMs 覆盖）：模型读取通常在数秒内完成，
+    //    5 分钟足以覆盖长回合，同时避免长任务期间图片被提前删除；
+    // ③ 会话新建/删除/切换、页面卸载、扩展停用、手动命令等既有触发全部保留（全删）。
     const IMAGE_TTL_MS =
       typeof window.__dshBridgeImageTtlMs === "number" && window.__dshBridgeImageTtlMs > 0
         ? window.__dshBridgeImageTtlMs
-        : 45000;
+        : 300000;
     const pendingBatches = []; // { paths: string[], timer }：已落盘、尚未删除的临时图批次
 
     // 删除一个批次：从待删表移除（幂等）、清定时器、向扩展宿主发 deleteImages 并从落盘表摘除
@@ -556,12 +557,34 @@ window.__ModuleLoader__.load({
       console.log("[dsh-vscode-bridge] image fallback: 临时图片已用完，删除 " + batch.paths.length + " 张: " + batch.paths.join(", "));
     }
 
-    // 立即删除全部待删批次（下一条消息/会话结束/页面卸载等场景）
+    // 立即删除全部待删批次（会话结束/页面卸载/扩展停用等场景）
     function flushAllBatches(reason) {
       if (pendingBatches.length === 0) return;
       const count = pendingBatches.reduce((n, b) => n + b.paths.length, 0);
       for (const batch of [...pendingBatches]) deleteBatch(batch);
       console.log("[dsh-vscode-bridge] image fallback: " + reason + "，立即删除已用完的临时图片 " + count + " 张");
+    }
+
+    // 下一条消息发出时：只删除「更早的批次」，保留最新一批。
+    // 背景（code review）：DSH ≥0.1.2 的 queue 模式允许模型仍在跑时继续发消息，若「发下一条
+    // 就全删」，可能删掉模型尚未读取的图片。串行场景下最新批即上一条消息的图（多半已读完），
+    // 但它同时是「可能正在被读」的那批，故一律保留，交由 TTL 兜底清理。
+    function flushBatchesExceptLatest(reason) {
+      if (pendingBatches.length <= 1) return;
+      const latest = pendingBatches[pendingBatches.length - 1];
+      const older = pendingBatches.filter((b) => b !== latest);
+      const count = older.reduce((n, b) => n + b.paths.length, 0);
+      for (const batch of older) deleteBatch(batch);
+      console.log("[dsh-vscode-bridge] image fallback: " + reason + "，删除更早的临时图片 " + count + " 张（保留最新一批，TTL 兜底）");
+    }
+
+    // 消费本条消息匹配到的缓存条目（成功路径与降级路径共用；返回被消费的条目数组）
+    function consumeCapturedImages(content) {
+      const used = matchCapturedImages(content, Array.from(imageCache.entries()).map(([key, v]) => ({ key, ...v })));
+      for (const entry of used) {
+        if (entry && typeof entry.key === "string") imageCache.delete(entry.key);
+      }
+      return used;
     }
 
     // 对话终止（新建/删除/切换会话）→ 立即删除已落盘临时图片并清偿缓存。
@@ -634,7 +657,8 @@ window.__ModuleLoader__.load({
     // 任何一步失败或无法落盘时返回 null（调用方回退原生被拒响应，绝不吞用户消息）。
     async function handlePromptImageRejected(parsed, url, init, origFetch) {
       try {
-        const payload = unwrapRpcPayload(parsed);
+        // 两代线格式统一解包（≤0.1.1 payload.content；≥0.1.2 payload.args.request.content）
+        const payload = unwrapRpcRequest(parsed);
         // 按消息内的顺序把图片块映射到已捕获缓存（匹配 name/data），只取本条消息实际用到的图片
         const used = matchCapturedImages(payload.content,
           Array.from(imageCache.entries()).map(([key, v]) => ({ key, ...v })));
@@ -652,16 +676,17 @@ window.__ModuleLoader__.load({
           console.warn("[dsh-vscode-bridge] image fallback: 没有可落盘的图片缓存（未打开工作区?），保持原生报错");
           return null; // 无可用落盘：不作降级
         }
-        // 消费：本条消息已用到的图片从缓存移除，避免后续消息继续重复引用
-        for (const entry of used) {
-          if (entry && typeof entry.key === "string") imageCache.delete(entry.key);
-        }
         const content = buildTextOnlyContent(payload.content, pointerLines);
         const resendBody = buildTextResendRequest(parsed, content);
         // 重发时剥离原请求的 signal：避免复用可能已中止/中止中的 AbortSignal 导致重发被中途取消
         const { signal: _signal, ...initNoSignal } = init || {};
         const resp = await origFetch(url, { ...initNoSignal, body: JSON.stringify(resendBody) });
-        // 登记本批临时图：模型在回合内读取；下一条消息发出时立即删除，TTL 兜底自动删
+        // 消费：**重发成功拿到响应后**才从缓存移除本条消息用到的图片——若重发抛错（网络异常），
+        // 缓存保留，用户重试仍可降级（先删后发会因缓存已空而彻底降级失败）。
+        for (const entry of used) {
+          if (entry && typeof entry.key === "string") imageCache.delete(entry.key);
+        }
+        // 登记本批临时图：模型在回合内读取；下一条消息发出时删除更早批次（保留最新批），TTL 兜底自动删
         const batch = { paths: savedPaths.slice(), timer: null };
         batch.timer = setTimeout(() => deleteBatch(batch), IMAGE_TTL_MS);
         pendingBatches.push(batch);
@@ -687,24 +712,39 @@ window.__ModuleLoader__.load({
           if (!imageFallbackEnabled || bridgeToken === "") return res;
           if (!init || init.method !== "POST" || typeof init.body !== "string" || init.body === "") return res;
           const parsed = JSON.parse(init.body);
-          // DSH 线格式：请求体为 { type, method, rpcId, payload }，业务 content 在 payload 下（payload 透传形态也兼容）
-          const payload = unwrapRpcPayload(parsed);
+          // DSH 线格式两代兼容：
+          //  - ≤0.1.1：{ type, method:'session.prompt', rpcId, payload:{ sessionId, content } }
+          //  - ≥0.1.2：{ type:'client-request', method:'session/prompt', rpcId,
+          //              payload:{ args:{ request:{ requestId, sessionId, mode, content } } } }
+          // unwrapRpcRequest 负责把两代都还原成「业务请求对象」，normalizeRpcMethod 把
+          // 斜杠端点归一成点分（session/prompt → session.prompt）供下方判断复用。
+          const payload = unwrapRpcRequest(parsed);
           // —— 对话生命周期：新建/删除会话或 prompt 观测到会话 id 变更 → 上一对话终止，清理临时图片 ——
-          const method = parsed && typeof parsed.method === "string" ? parsed.method : "";
+          const method = normalizeRpcMethod(parsed && parsed.method);
           const sessionId = payload && typeof payload.sessionId === "string" ? payload.sessionId : "";
           if (method === "session.create") handleConversationEnd("新建", true);
+          // 注：DSH ≥0.1.2 已无 session.delete 端点（删除会话走 workspace/archiveSession），
+          // 该分支仅为 ≤0.1.1 兼容保留；0.1.2 下靠 sessionId 变更与 TTL 兜底清理
           else if (method === "session.delete") handleConversationEnd("删除", true);
           else if (sessionId !== "" && lastSeenSessionId !== "" && sessionId !== lastSeenSessionId) {
             handleConversationEnd("切换", false); // 保留当前消息刚捕获的图片（不清 imageCache）
           }
           if (sessionId !== "") lastSeenSessionId = sessionId;
-          // 同会话继续发送消息：上一条消息的临时图模型已读完并已回答，立即删除（TTL 无需等待）
-          if (method === "session.prompt" && sessionId !== "") flushAllBatches("下一条消息");
+          // 同会话继续发送消息：删除「更早的」临时图批次，**保留最新一批**——DSH ≥0.1.2 的
+          // queue 模式允许模型仍在跑时继续发消息，全删可能删掉模型尚未读取的图片
+          // （code review 发现）；最新批由 TTL 兜底清理。
+          if (method === "session.prompt" && sessionId !== "") flushBatchesExceptLatest("下一条消息");
           if (!payload || !Array.isArray(payload.content) || !isPromptWithImages(payload.content)) return res;
           const clone = res.clone();
           let respJson = null;
           try { respJson = await clone.json(); } catch {}
-          if (!detectModelReject(respJson)) return res;
+          if (!detectModelReject(respJson)) {
+            // 视觉模型正常接受（或其它非「模型不支持图片」的失败）：本条消息的图片已由 DSH
+            // 原生处理，桥接缓存不再需要 → 立即消费，避免同会话后续同名文件命中陈旧条目
+            // 把旧图字节落盘（code review Critical：静默发错图）。
+            consumeCapturedImages(payload.content);
+            return res;
+          }
           console.log("[dsh-vscode-bridge] image fallback: 模型不支持图片，落盘并改为地址重发");
           if (fallbackResendInFlight) { console.log("[dsh-vscode-bridge] image fallback: 已有进行中的降级，保持原生响应"); return res; }
           // input 多为 URL 实例（.href）；resolveFetchUrl 兼容 string/URL/Request 三种

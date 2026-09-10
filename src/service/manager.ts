@@ -1,6 +1,7 @@
 // src/service/manager.ts — 服务管理器：状态机编排探测/启动/等待/停止
 // 纯模块：不依赖 vscode；探测与进程管理均通过依赖注入，便于单测。
 import { findFreePort, PORT_FALLBACK_ATTEMPTS, type ProbeResult } from './detect';
+import { parseLaunchUrlLine, pickLaunchUrl } from './launchUrl';
 import type { ChildProcessLike, ProcessRunner } from './process';
 import type { MsgKey } from '../i18n';
 
@@ -58,6 +59,9 @@ export interface ManagerDeps {
   healthIntervalMs?: number;
   /** 启动总超时（毫秒，默认 15000） */
   startTimeoutMs?: number;
+  /** 捕获到 DSH 启动网址（`dsh web: http://host:port/?token=…`）时的回调。
+   * DSH ≥0.1.2 鉴权：该 URL 是兑换浏览器会话 cookie 的唯一入口（见 dsh-client-connection）。 */
+  onLaunchUrl?: (url: string) => void;
 }
 
 /** 启动总超时默认值（毫秒） */
@@ -82,6 +86,8 @@ export class ServiceManager {
   private noOpenDisabled = false;
   /** 最近一次启动子进程的 stderr 缓冲（有界，用于识别 "unknown option '--no-open'" 崩溃根因） */
   private childStderr = '';
+  /** stdout 行拆分缓冲：data 事件可能任意分片，跨 chunk 的行先缓存，遇换行再解析 */
+  private stdoutPartial = '';
   private disposed = false;
   /** 父进程退出时杀掉子进程，防止僵尸（stopOnExit=false 时移除） */
   private parentExitHook = (): void => {
@@ -305,7 +311,26 @@ export class ServiceManager {
       childExited = true;
       this.handleUnexpectedExit(child);
     });
-    child.stdout?.on('data', (chunk) => this.deps.log(`[stdout] ${chunk.toString().trimEnd()}`));
+    child.stdout?.on('data', (chunk) => {
+      const text = chunk.toString();
+      // 日志打码：启动网址行含一次性登录 token，输出通道不做可复制凭据残留
+      this.deps.log(`[stdout] ${text.replace(/([?&]token=)[A-Za-z0-9_-]+/g, '$1***').trimEnd()}`);
+      // 行级解析启动网址（0.1.2 打印 `dsh web: http://127.0.0.1:<port>/?token=<43字符>`），
+      // 供扩展兑换浏览器会话 cookie（解析用原文，打码只作用于日志文本）。
+      this.stdoutPartial += text;
+      const lines = this.stdoutPartial.split('\n');
+      this.stdoutPartial = lines.pop() ?? '';
+      for (const line of lines) {
+        const url = parseLaunchUrlLine(line);
+        if (url === null) continue; // 噪音行：忽略
+        // 只认与当前目标端口一致且优先环回地址的候选，排除 LAN 后缀等不可靠条目
+        const picked = pickLaunchUrl([url], this.opts.port);
+        if (picked !== null) {
+          this.deps.log(`[process] 捕获 DSH 启动网址（host:port=${new URL(picked).host}）`);
+          this.deps.onLaunchUrl?.(picked);
+        }
+      }
+    });
     child.stderr?.on('data', (chunk) => {
       const text = chunk.toString();
       // 有界缓冲最近一次启动的 stderr（用于识别 --no-open 不支持导致的启动崩溃）

@@ -6,10 +6,19 @@ export type ProbeResult = 'dsh' | 'foreign' | 'down';
 
 /** DSH 首页的稳定识别特征（首页 HTML 内联了 window.__DSH_BOOT__ 启动数据，已实测确认） */
 const DSH_MARKER = '__DSH_BOOT__';
+/**
+ * DSH ≥0.1.2 鉴权 401 响应体特征（无 cookie 访问任意路径时返回，对真实 0.1.2-rc.1 实测）：
+ * `dsh web authentication required; reopen the URL printed by dsh web.`
+ * 403 的 fence 拒绝（/api 的 untrusted-host 等）也以 dsh web 名义出现。
+ * 用「dsh web」两个词判定，避免把普通站点的 401/403 误认成 DSH。
+ */
+const DSH_AUTH_MARKER = 'dsh web';
 
 /**
  * 探测 host:port 上运行的服务：
  * - 200 且首页含 DSH 标记 → 'dsh'
+ * - 401/403 且 body 含 DSH 鉴权特征 → 'dsh'（DSH ≥0.1.2 带鉴权：服务在运行、只是需要登录，
+ *   绝不能误判为“端口被其他程序占用”——误判会触发换端口级联与启动超时连环误报）
  * - 有 HTTP 响应但不是 DSH → 'foreign'（端口被其他程序占用）
  * - 连接失败/超时/拒绝 → 'down'（视为未运行）
  */
@@ -26,7 +35,15 @@ export async function probeService(
       signal: controller.signal,
       redirect: 'manual',
     });
-    if (!res.ok) return 'foreign';
+    if (!res.ok) {
+      // 非 200：只有鉴权拒绝需要读 body 判定身份（401/403 body 极小），
+      // 其余错误（404/500 等）一律按“非 DSH”处理，不再消费 body。
+      if (res.status === 401 || res.status === 403) {
+        const body = await res.text();
+        return body.includes(DSH_AUTH_MARKER) ? 'dsh' : 'foreign';
+      }
+      return 'foreign';
+    }
     const body = await res.text();
     return body.includes(DSH_MARKER) ? 'dsh' : 'foreign';
   } catch {

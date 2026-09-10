@@ -18,11 +18,49 @@ async function serve(
 
 const DSH_HTML = '<!doctype html><html><head><script>window.__DSH_BOOT__ = {}</script></head><body></body></html>';
 const OTHER_HTML = '<!doctype html><html><head><title>Nginx</title></head><body>hi</body></html>';
+/** DSH ≥0.1.2 的鉴权 401 响应体（无 cookie 访问任何路径时返回，已对真实 dsh 0.1.2-rc.1 实测） */
+const AUTH_401_BODY = 'dsh web authentication required; reopen the URL printed by dsh web.\n';
 
 test('首页含 __DSH_BOOT__ 标记 → dsh', async () => {
   const { server, port } = await serve((_req, res) => {
     res.writeHead(200, { 'content-type': 'text/html' });
     res.end(DSH_HTML);
+  });
+  try {
+    assert.equal(await probeService('127.0.0.1', port, 1000), 'dsh');
+  } finally {
+    server.close();
+  }
+});
+
+test('401 且 body 为 DSH 鉴权提示 → dsh（DSH ≥0.1.2 带鉴权：服务在跑、需要登录，绝非端口被占）', async () => {
+  const { server, port } = await serve((_req, res) => {
+    res.writeHead(401, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end(AUTH_401_BODY);
+  });
+  try {
+    assert.equal(await probeService('127.0.0.1', port, 1000), 'dsh');
+  } finally {
+    server.close();
+  }
+});
+
+test('401 但 body 不是 DSH 鉴权提示（如普通需要认证的站点）→ foreign', async () => {
+  const { server, port } = await serve((_req, res) => {
+    res.writeHead(401, { 'content-type': 'text/plain' });
+    res.end('Unauthorized');
+  });
+  try {
+    assert.equal(await probeService('127.0.0.1', port, 1000), 'foreign');
+  } finally {
+    server.close();
+  }
+});
+
+test('403 且 body 含 DSH 字样 → dsh（/api 围栏拒绝也是“DSH 在运行”的信号）', async () => {
+  const { server, port } = await serve((_req, res) => {
+    res.writeHead(403, { 'content-type': 'text/plain' });
+    res.end('forbidden: dsh web fence');
   });
   try {
     assert.equal(await probeService('127.0.0.1', port, 1000), 'dsh');
