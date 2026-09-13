@@ -39,6 +39,8 @@ Works with **DSH 0.1.2 and newer**, including its one-time-token browser authent
 - 🌐 **SSH Remote (opt-in)**: when connected to a remote host, run dsh on the remote and open the panel through a VS Code tunnel (`dsh.remote.enabled`, off by default);
 - 🖼️ **Free image upload**: send images even when the active model has no vision — the image is cached in the workspace and dispatched as a file-path reference, letting the model inspect it with an image tool (files are cleaned up when the panel closes; opt-out via `dsh.image.fallback`);
 - 🪟 **No surprise browser window**: `dsh web` is started with `--no-open` by default (restore with `dsh.openInBrowser`).
+- 📁 **Workspace auto-select**: opening the panel automatically switches DSH to the workspace matching your current VS Code folder and opens its session — no more hunting for the directory in the DSH sidebar (`dsh.workspace.autoSelect`, on by default);
+- 🙈 **Sidebar shows only the current workspace**: other workspace groups are hidden, leaving just the current project and its conversations; close the VS Code folder to restore everything (`dsh.workspace.soloMode`, on by default).
 
 ## 📥 Installation
 
@@ -151,6 +153,46 @@ To remove, either way works:
 
 The bridge only works inside the panel. If it is inactive (e.g. you open the DSH page in a browser, or the install failed), the panel remains **fully usable** — only the three integrations above are unavailable; a one-time startup warning (with "Retry Install" / "Don't Show Again") is shown.
 
+## 🆕 What's new in v0.4.1
+
+- **📁 Workspace auto-select**: opening the panel automatically switches DSH to the workspace matching your current VS Code folder and opens its session — no more manually picking the directory in the DSH sidebar.
+- **🙈 Sidebar shows only the current workspace**: other workspace groups are hidden, so the sidebar contains just the current project and its conversations.
+- **Fixed: the bridge could stay disabled on Windows with no way back**: DSH may leave a stale "disable dsh-vscode-bridge" record in the profile config, so the bridge was installed but inactive (symptoms: external links dead, file-path clicks dead, workspace sync inert). The installer now clears that record on every activation.
+- **Fixed: `dsh` version detection failed on Windows**: `findInPathPosix` / `resolveDshPackageJsonPath` joined POSIX paths with a platform-dependent helper, producing `\usr\local\bin\dsh` on Windows.
+
+### Workspace auto-select: what it does and how to use it
+
+**Background**: the DSH sidebar lists every workspace you have ever used (one group per directory). When you open a folder in VS Code, the extension previously used that folder only as the `dsh web` working directory — it did **not** make the DSH sidebar follow it, so you had to click the matching directory yourself every time.
+
+**Now**, when the panel opens the extension will:
+
+1. Idempotently register the current VS Code folder as a DSH workspace (reused if it already exists — never duplicated);
+2. Call DSH's front-end "open workspace" capability (the very same function your sidebar click invokes) to switch to that workspace and open its session — if the current session already belongs to the target workspace, your ongoing conversation is **not** interrupted;
+3. Hide the other workspace groups so only the current one remains.
+
+**Screenshots** — VS Code folder on the left, the DSH panel auto-selected to the same workspace on the right:
+
+| Open a folder → auto-selected | Sidebar reduced to the current workspace |
+|---|---|
+| ![workspace auto select](docs/screenshots/workspace-autoselect.png) | ![workspace solo mode](docs/screenshots/workspace-solomode.png) |
+
+**How to use it**: install, open a folder, click the DSH icon. That's it — **works out of the box, no configuration needed**.
+
+**To turn it off**:
+
+| Setting | Default | Description |
+|---|---|---|
+| `dsh.workspace.autoSelect` | `true` | When off, the workspace is no longer auto-switched (the sidebar still shows all groups) |
+| `dsh.workspace.soloMode` | `true` | When off, the sidebar shows all groups but auto-select still works |
+
+**Manual control is untouched**: auto-select just "clicks for you" — every native DSH sidebar interaction (switching to another workspace, creating sessions, searching) keeps working. Once you switch elsewhere, that selection is yours; the extension will not fight you for it.
+
+**Safety notes**:
+
+- The extension sends only the **folder path** to DSH — no file contents are read or uploaded;
+- "Show only the current workspace" is a purely **visual** filter (`display:none`): no data is deleted, no session is affected — clearing the VS Code folder or turning the setting off restores everything instantly;
+- If the workspace cannot be matched (e.g. you renamed it inside DSH), the extension **gives up on hiding and leaves the sidebar as-is** — it never blanks the sidebar.
+
 ## 🆕 What's new in v0.4.0
 
 - **DSH 0.1.2 support (browser authentication)**: automatic sign-in (launch-URL capture → session exchange → 30-day cookie) plus a loopback relay so the embedded panel keeps working under DSH's `SameSite=Strict` session model; externally started services get a one-time paste page. See [DSH ≥0.1.2 authentication](#-dsh-012-authentication--the-local-relay).
@@ -180,6 +222,8 @@ The bridge only works inside the panel. If it is inactive (e.g. you open the DSH
 | `dsh.openInBrowser` | `false` | Open the DSH page in the default browser after the service starts (when off, `--no-open` is passed to `dsh web`) |
 | `dsh.remote.enabled` | `false` | Enable remote scenarios (SSH Remote / WSL / Dev Containers / Codespaces): run dsh on the remote and open the panel through a VS Code tunnel (off by default; reload the window after enabling) |
 | `dsh.image.fallback` | `true` | Send attached images as file-path references when the active model has no vision, instead of failing (files are cached in the session working directory and removed when the panel closes) |
+| `dsh.workspace.autoSelect` | `true` | Automatically switch DSH to the workspace matching the current VS Code folder when the panel opens |
+| `dsh.workspace.soloMode` | `true` | Show only the current workspace group in the DSH sidebar (close the VS Code folder to restore all) |
 
 ## 🌍 Localization
 

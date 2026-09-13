@@ -1,3 +1,20 @@
+## [0.4.1] - 2026-09-13
+
+### 新增
+
+- **工作区自动选中**：打开面板时自动把 DSH 切换到与当前 VS Code 文件夹同路径的工作区并打开其会话。链路：扩展侧在握手完成/工作区切换/配置变更时把工作区路径经握手消息（`bridgeHello.workspacePath`）与下行消息（`syncWorkspace`）下发给页面内桥接；桥接调用 DSH 前端自己的 `workspaces.create`（幂等注册）→ `uiWorkspace.openWorkspace`（与手动点击侧边栏工作区是同一个函数）。若当前会话已属于目标工作区则不切换，不打断正在进行的对话。桥接以 `workspaceSynced` 回执确认，扩展侧按 0/1/2/4/8s 共 5 轮重试，回执后停表。开关 `dsh.workspace.autoSelect`（默认开）。
+- **侧边栏只显示当前工作区（solo）**：隐藏其他工作区分组，只留当前工作区及其会话。纯视觉过滤（`display:none`），不删除数据、不影响会话；匹配不到目标分组时一律还原显示（fail-open），绝不把侧边栏变空白。开关 `dsh.workspace.soloMode`（默认开）。
+
+### 修复
+
+- **Windows 下桥接可能被 DSH 自动禁用后永久失效**：DSH 会在 profile 配置里留下形如 `# dsh-fix: disabled entry "dsh-vscode-bridge"` 的禁用条目，cordis 后者覆盖前者，导致桥接包已安装但不生效（症状：外链点不开、文件路径点不开、工作区同步不工作）。安装器新增自愈：每次安装时清理带 `dsh-fix` 注释头的桥接禁用条目（保守策略，不触碰用户手动的禁用）。
+- **Windows 上定位 dsh 包失败**：`findInPathPosix` 与 `resolveDshPackageJsonPath` 用平台相关的 `path.join` 拼接 POSIX 路径，在 Windows 宿主上得到 `\usr\local\bin\dsh` 这类反斜杠路径，与真实 POSIX 布局不符。改为按输入路径风格选用 `path.posix` / `path.win32`。
+- **同步重试导致的 iframe 反复重载（服务显示"已断开"）**：两处修复——① `pushWorkspaceSync` 不再触发 `render()`（重设 `webview.html` 会重载 iframe → 重新握手 → 再次推送 → 死循环）；② 回执路径比较改为大小写不敏感 + 分隔符归一（DSH 端 realpath 规范化后可能回传小写路径，原先的严格比较导致确认永不生效、重试不停止）。
+
+### 说明
+
+- 本版仅包含工作区同步功能与上述修复；未包含任何 VS Code 工作区注册之外的功能改动。
+
 ## [0.4.0] - 2026-09-10
 
 ### 修复

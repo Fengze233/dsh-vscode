@@ -29,5 +29,11 @@
   "dsh.walkthrough.description": "在 VS Code 内直接使用 DeepSeek Harness 网页界面。",
   "dsh.walkthrough.step.title": "打开 DSH 面板",
   "dsh.walkthrough.step.description": "点击左侧活动栏或右侧辅助侧边栏的 DSH 图标，或运行 [DSH: 打开面板](command:dsh.openPanel)。面板会自动启动（或复用）dsh web 服务，并在侧边栏内嵌显示 DSH 网页。",
-  "dsh.cmd.copyLogs.title": "DSH: 复制日志"
+  "dsh.cmd.copyLogs.title": "DSH: 复制日志",
+  "dsh.config.workspaceAutoSelect": "打开面板时自动选中与当前 VS Code 文件夹对应的 DSH 工作区。",
+  "dsh.config.workspaceSoloMode": "DSH 侧边栏只显示当前工作区分组；关闭 VS Code 文件夹即还原显示全部。",
+  "dsh.config.startTimeoutMs": "等待 `dsh web` 就绪的毫秒数。DSH 冷启动耗时与插件数量相关；若日志显示启动超时但服务其实能起来，请调大此项（默认 45000）。",
+  "dsh.config.healthCheckIntervalMs": "已就绪服务的健康探测间隔（毫秒）。探测仅用于发现「服务已死」，间隔越大越不容易误判断连；0 表示关闭探测（默认 120000）。",
+  "dsh.config.healthCheckProbeTimeoutMs": "单次健康探测的超时（毫秒）。独立于启动阶段的快速轮询，避免服务繁忙时被误判为已死（默认 10000）。",
+  "dsh.config.healthCheckFailureThreshold": "判定服务断开所需的连续探测失败次数。单次失败绝不触发断连（默认 3）。"
 }

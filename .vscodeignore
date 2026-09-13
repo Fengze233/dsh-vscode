@@ -1,26 +1,29 @@
-.vscode/**
+﻿.vscode/**
 .superpowers/**
 .github/**
 src/**
 test/**
 scripts/**
-# 排除开发文档，但保留 docs/screenshots：README 引用的截图/视频封面需随包分发（商店页面渲染 README 图片）
+# 鎺掗櫎寮€鍙戞枃妗ｏ紝浣嗕繚鐣?docs/screenshots锛歊EADME 寮曠敤鐨勬埅鍥?瑙嗛灏侀潰闇€闅忓寘鍒嗗彂锛堝晢搴楅〉闈㈡覆鏌?README 鍥剧墖锛?
 docs/superpowers/**
 docs/**/*.md
 out/test/**
-# 桥接客户端源码为模板（client.js 含占位符），打包只发构建产物 out/bridge-client/
+# 妗ユ帴瀹㈡埛绔簮鐮佷负妯℃澘锛坈lient.js 鍚崰浣嶇锛夛紝鎵撳寘鍙彂鏋勫缓浜х墿 out/bridge-client/
 bridge-client/**
 **/*.map
 tsconfig.json
-# 仓库元数据与中文镜像：不随扩展分发（GitHub 上可读）
+# 浠撳簱鍏冩暟鎹笌涓枃闀滃儚锛氫笉闅忔墿灞曞垎鍙戯紙GitHub 涓婂彲璇伙級
 .gitignore
 README.zh.md
 CONTRIBUTING.md
 .playwright-mcp
-# 图片降级临时缓存（工作区根目录残留，绝不进安装包）
+# 鍥剧墖闄嶇骇涓存椂缂撳瓨锛堝伐浣滃尯鏍圭洰褰曟畫鐣欙紝缁濅笉杩涘畨瑁呭寘锛?
 dsh-imgcache-*
 
-# 本地测试/调试产物（禁止入包）
+# 鏈湴娴嬭瘯/璋冭瘯浜х墿锛堢姝㈠叆鍖咃級
 .dsh-e2e-home/
 .dsh-auth-mock/
 .worktrees/
+
+# 环境残留目录（npm 缓存等）：不随扩展打包
+.npm-cache/**

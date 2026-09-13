@@ -2,7 +2,7 @@
   "name": "dsh-vscode-panel",
   "displayName": "DSH",
   "description": "在 VS Code 侧边栏中使用 DeepSeek Harness（DSH）网页界面",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "Fengze233",
   "icon": "assets/icon.png",
   "license": "MIT",
@@ -255,6 +255,44 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "%dsh.config.imageFallback%"
+        },
+        "dsh.workspace.autoSelect": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%dsh.config.workspaceAutoSelect%"
+        },
+        "dsh.workspace.soloMode": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%dsh.config.workspaceSoloMode%"
+        },
+        "dsh.startTimeoutMs": {
+          "type": "number",
+          "default": 45000,
+          "minimum": 5000,
+          "maximum": 600000,
+          "markdownDescription": "%dsh.config.startTimeoutMs%"
+        },
+        "dsh.healthCheck.intervalMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 0,
+          "maximum": 3600000,
+          "markdownDescription": "%dsh.config.healthCheckIntervalMs%"
+        },
+        "dsh.healthCheck.probeTimeoutMs": {
+          "type": "number",
+          "default": 10000,
+          "minimum": 1000,
+          "maximum": 60000,
+          "markdownDescription": "%dsh.config.healthCheckProbeTimeoutMs%"
+        },
+        "dsh.healthCheck.failureThreshold": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 10,
+          "markdownDescription": "%dsh.config.healthCheckFailureThreshold%"
         }
       }
     }

@@ -1,12 +1,12 @@
-node_modules
+﻿node_modules
 out/
 *.vsix
 .superpowers/
 
-# git worktree 工作区（本计划隔离开发用）
+# git worktree 宸ヤ綔鍖猴紙鏈鍒掗殧绂诲紑鍙戠敤锛?
 .worktrees/
 
-# 敏感文件（防误提交密钥/凭据）
+# 鏁忔劅鏂囦欢锛堥槻璇彁浜ゅ瘑閽?鍑嵁锛?
 .env
 .env.*
 *.pem
@@ -17,7 +17,10 @@ credentials.yaml
 
 .playwright-mcp/
 
-# 图片降级临时缓存（工作区根目录，会话结束/面板关闭后自动清理）
+# 鍥剧墖闄嶇骇涓存椂缂撳瓨锛堝伐浣滃尯鏍圭洰褰曪紝浼氳瘽缁撴潫/闈㈡澘鍏抽棴鍚庤嚜鍔ㄦ竻鐞嗭級
 dsh-imgcache-*
 .dsh-e2e-home/
 .dsh-auth-mock/
+
+# 本地 npm 缓存（DSH 插件构建）
+.npm-cache/
