@@ -4,6 +4,7 @@
 
 - **工作区自动选中**：打开面板时自动把 DSH 切换到与当前 VS Code 文件夹同路径的工作区并打开其会话。链路：扩展侧在握手完成/工作区切换/配置变更时把工作区路径经握手消息（`bridgeHello.workspacePath`）与下行消息（`syncWorkspace`）下发给页面内桥接；桥接调用 DSH 前端自己的 `workspaces.create`（幂等注册）→ `uiWorkspace.openWorkspace`（与手动点击侧边栏工作区是同一个函数）。若当前会话已属于目标工作区则不切换，不打断正在进行的对话。桥接以 `workspaceSynced` 回执确认，扩展侧按 0/1/2/4/8s 共 5 轮重试，回执后停表。开关 `dsh.workspace.autoSelect`（默认开）。
 - **侧边栏只显示当前工作区（solo）**：隐藏其他工作区分组，只留当前工作区及其会话。纯视觉过滤（`display:none`），不删除数据、不影响会话；匹配不到目标分组时一律还原显示（fail-open），绝不把侧边栏变空白。开关 `dsh.workspace.soloMode`（默认开）。
+- **面板内侧边栏折叠把手**：面板左缘提供一个细长把手，点击可隐藏/显示**整个** DSH 侧边栏列（含窄屏下那条图标条），把宽度让给对话区。DSH 自带的「收起侧边栏」只压到 56px 图标条（`computeColumns` 里硬编码，没有"完全隐藏"状态），故此处通过覆盖其 CSS Grid 的第一列宽度实现；还原时按隐藏前量到的轨道值写回并把宽度控制交还 React（侧边栏拖拽照常可用）。状态记在 `localStorage`，刷新后保持；定位不到 DSH 框架时不注入把手（零改动）。开关 `dsh.sidebarToggle`（默认开）。
 
 ### 修复
 

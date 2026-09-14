@@ -35,5 +35,6 @@
   "dsh.config.startTimeoutMs": "等待 `dsh web` 就绪的毫秒数。DSH 冷启动耗时与插件数量相关；若日志显示启动超时但服务其实能起来，请调大此项（默认 45000）。",
   "dsh.config.healthCheckIntervalMs": "已就绪服务的健康探测间隔（毫秒）。探测仅用于发现「服务已死」，间隔越大越不容易误判断连；0 表示关闭探测（默认 120000）。",
   "dsh.config.healthCheckProbeTimeoutMs": "单次健康探测的超时（毫秒）。独立于启动阶段的快速轮询，避免服务繁忙时被误判为已死（默认 10000）。",
-  "dsh.config.healthCheckFailureThreshold": "判定服务断开所需的连续探测失败次数。单次失败绝不触发断连（默认 3）。"
+  "dsh.config.healthCheckFailureThreshold": "判定服务断开所需的连续探测失败次数。单次失败绝不触发断连（默认 3）。",
+  "dsh.config.sidebarToggle": "在面板左侧显示细长把手，点击可隐藏/显示整个 DSH 侧边栏（含窄屏那条图标条），让对话区更宽。把手仅在 VS Code 面板内出现。"
 }

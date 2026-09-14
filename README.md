@@ -41,6 +41,7 @@ Works with **DSH 0.1.2 and newer**, including its one-time-token browser authent
 - 🪟 **No surprise browser window**: `dsh web` is started with `--no-open` by default (restore with `dsh.openInBrowser`).
 - 📁 **Workspace auto-select**: opening the panel automatically switches DSH to the workspace matching your current VS Code folder and opens its session — no more hunting for the directory in the DSH sidebar (`dsh.workspace.autoSelect`, on by default);
 - 🙈 **Sidebar shows only the current workspace**: other workspace groups are hidden, leaving just the current project and its conversations; close the VS Code folder to restore everything (`dsh.workspace.soloMode`, on by default).
+- ↔️ **Collapsible sidebar**: a slim handle on the panel's left edge hides/shows the **entire** DSH sidebar column — including the narrow icon rail — giving the conversation the full width. DSH's own toggle only shrinks the sidebar to a 56px rail, so this handle covers the part DSH cannot (`dsh.sidebarToggle`, on by default).
 
 ## 📥 Installation
 
@@ -224,6 +225,7 @@ The bridge only works inside the panel. If it is inactive (e.g. you open the DSH
 | `dsh.image.fallback` | `true` | Send attached images as file-path references when the active model has no vision, instead of failing (files are cached in the session working directory and removed when the panel closes) |
 | `dsh.workspace.autoSelect` | `true` | Automatically switch DSH to the workspace matching the current VS Code folder when the panel opens |
 | `dsh.workspace.soloMode` | `true` | Show only the current workspace group in the DSH sidebar (close the VS Code folder to restore all) |
+| `dsh.sidebarToggle` | `true` | Slim handle on the panel's left edge that hides/shows the whole DSH sidebar column |
 
 ## 🌍 Localization
 

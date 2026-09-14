@@ -293,6 +293,11 @@
           "minimum": 1,
           "maximum": 10,
           "markdownDescription": "%dsh.config.healthCheckFailureThreshold%"
+        },
+        "dsh.sidebarToggle": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%dsh.config.sidebarToggle%"
         }
       }
     }

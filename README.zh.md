@@ -41,6 +41,7 @@
 - 🪟 **不再误弹浏览器**：启动 `dsh web` 默认追加 `--no-open`（需弹浏览器时用 `dsh.openInBrowser` 恢复）。
 - 📁 **工作区自动选中**：打开面板时自动选中与当前 VS Code 文件夹同路径的 DSH 工作区并打开其会话——不再需要在 DSH 侧边栏里手动找目录（开关 `dsh.workspace.autoSelect`，默认开）；
 - 🙈 **侧边栏只显示当前工作区**：隐藏其他工作区分组，侧边栏只剩当前项目及其对话；关闭 VS Code 文件夹即还原显示全部（开关 `dsh.workspace.soloMode`，默认开）。
+- ↔️ **可折叠侧边栏**：面板左缘的细长把手可隐藏/显示**整个** DSH 侧边栏（含窄屏那条图标条），把宽度让给对话区。DSH 自带的收起只能压成 56px 图标条，这个把手补足它做不到的部分（开关 `dsh.sidebarToggle`，默认开）。
 
 ## 📥 安装
 
@@ -224,6 +225,7 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 | `dsh.image.fallback` | `true` | 当前模型无视觉能力时，把上传图片以文件路径形式随消息发送而不报错（文件缓存在会话工作目录，面板关闭时清理） |
 | `dsh.workspace.autoSelect` | `true` | 打开面板时自动切换到与当前 VS Code 文件夹同路径的 DSH 工作区 |
 | `dsh.workspace.soloMode` | `true` | DSH 侧边栏只显示当前工作区分组（关闭 VS Code 文件夹即还原显示全部） |
+| `dsh.sidebarToggle` | `true` | 面板左缘的侧边栏折叠把手（可隐藏/显示整个 DSH 侧边栏，让对话区更宽） |
 
 ## 🌍 多语言
 

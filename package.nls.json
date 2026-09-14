@@ -35,5 +35,6 @@
   "dsh.config.startTimeoutMs": "How long to wait (ms) for `dsh web` to become ready. DSH cold start scales with the number of installed plugins; raise this if you see a start timeout while the service actually comes up (default 45000).",
   "dsh.config.healthCheckIntervalMs": "Interval (ms) between health probes of a ready service. The probe only detects a dead service; a larger interval means fewer false disconnects. 0 disables probing (default 120000).",
   "dsh.config.healthCheckProbeTimeoutMs": "Timeout (ms) for a single health probe. Kept separate from the faster start-up probing so a busy service is not misjudged as dead (default 10000).",
-  "dsh.config.healthCheckFailureThreshold": "Consecutive failed health probes required before the panel reports the service as disconnected. A single failure never disconnects (default 3)."
+  "dsh.config.healthCheckFailureThreshold": "Consecutive failed health probes required before the panel reports the service as disconnected. A single failure never disconnects (default 3).",
+  "dsh.config.sidebarToggle": "Show a slim handle inside the panel that hides/shows the whole DSH sidebar column (including the narrow icon rail), giving the conversation more width. The handle only appears in the VS Code panel."
 }
