@@ -578,25 +578,30 @@ test('npmNodeModulesRootFrom：从包内 bin.js 上溯到 node_modules 根', () 
   assert.equal(npmNodeModulesRootFrom('C:\\tools\\dsh\\lib\\bin.js'), undefined);
 });
 
-test('shouldSkipForeignTarget：按父目录判定——不存在 → 可写；仅含本扩展包 → 可写', () => {
+test('shouldSkipForeignTarget：判据是「父目录含命令垫片(.cmd)」而不是「父目录有他人条目」', () => {
+  // 父目录不存在 → 可写
   const empty = { exists: () => false, readdir: () => [] };
   assert.equal(shouldSkipForeignTarget('C:\\any\\node_modules', empty), false);
-
-  const ours = {
-    exists: () => true,
-    readdir: () => [BRIDGE_PACKAGE_NAME],
-  };
-  assert.equal(shouldSkipForeignTarget('C:\\npm\\node_modules', ours), false);
 });
 
-test('shouldSkipForeignTarget：父目录含他人产物（如 DSH Desktop 的 dsh.cmd）→ 跳过', () => {
-  // 复刻 issue #20 的受害目录：%APPDATA%\DSH Desktop\host-commands\desktop\bin
-  // 注意判定对象是**父目录**：目标子目录 dsh-vscode-bridge 还不存在，但父目录被桌面独占。
-  const victim = {
+test('shouldSkipForeignTarget：node_modules 里有一堆别人的包也要放行（回归防线）', () => {
+  // 真实场景：~/.dsh/profiles/node_modules 里有 180+ 个 DSH 依赖包，但桥接本来就该装在这里。
+  // 曾用"父目录含非本扩展条目就跳过"的判据，导致 secondary 位置的桥接永远刷不了新版本。
+  const npmLike = {
     exists: () => true,
-    readdir: () => ['dsh.cmd'],
+    readdir: () => ['@babel', '@aws-sdk', '@deepseek-ai', 'express', 'ws', BRIDGE_PACKAGE_NAME],
   };
+  assert.equal(shouldSkipForeignTarget('C:\\Users\\u\\.dsh\\profiles\\node_modules', npmLike), false);
+  assert.equal(shouldSkipForeignTarget('/home/u/.dsh/profiles/node_modules', npmLike), false);
+});
+
+test('shouldSkipForeignTarget：父目录含 .cmd 命令垫片 → 跳过（issue #20 的受害目录）', () => {
+  // 复刻 %APPDATA%\DSH Desktop\host-commands\desktop\bin：被桌面独占，只允许它自己的 dsh.cmd
+  const victim = { exists: () => true, readdir: () => ['dsh.cmd'] };
   assert.equal(shouldSkipForeignTarget('C:\\Users\\u\\AppData\\Roaming\\DSH Desktop\\host-commands\\desktop\\bin', victim), true);
+  // 大小写不敏感（Windows 实际可能给 .CMD）
+  const upper = { exists: () => true, readdir: () => ['DSH.CMD'] };
+  assert.equal(shouldSkipForeignTarget('C:\\somewhere\\bin', upper), true);
 });
 
 test('shouldSkipForeignTarget：父目录不可读 → 保守跳过（不冒写坏他人目录的风险）', () => {

@@ -111,13 +111,19 @@ export function npmNodeModulesRootFrom(p: string): string | undefined {
 }
 
 /**
- * 判断该安装目标是否应当跳过：其**父目录**已存在、且含有非本扩展产物（issue #20）。
+ * 判断该安装目标是否应当跳过：其**父目录是"命令垫片目录"**（issue #20）。
  *
- * 关键点（真实文件系统验证时踩到）：危险的不是"目标目录里有什么"，而是"**往父目录里新增条目**"。
+ * 关键点（真实文件系统 + 真机验证得出，且踩过一次回归）：
+ * 危险不是"父目录里有别人的东西"，而是"**往一个被别的程序独占的命令目录里新增条目**"。
  * 受害目录 `%APPDATA%\DSH Desktop\host-commands\desktop\bin` 被 DSH Desktop 以硬断言独占
- * （`assertOwnedDirectoryEntries([...], ['dsh.cmd'])`）：只要该目录里多出任何条目（包括
- * 我们新建的 `dsh-vscode-bridge/`），桌面下次启动就会硬失败。因此必须按父目录判定：
- * 父目录不存在（由本扩展创建）或只含本扩展的包目录 → 可写；父目录含其它条目 → 跳过。
+ * （只允许它自己的 `dsh.cmd`）：多出任何条目（含我们新建的 `dsh-vscode-bridge/`）都会让
+ * 桌面下次启动硬失败。
+ *
+ * 判据刻意收窄为「父目录里存在批处理垫片（`*.cmd`）」——这正是"命令目录"的特征：
+ * - `…/desktop/bin` 里有 `dsh.cmd` → 跳过 ✅（issue #20 的场景）
+ * - `…/node_modules`（npm 全局或 DSH profiles 下的依赖目录）里有成百上千个包，
+ *   但不会有 `dsh.cmd` → **放行**，否则桥接无法被刷新（曾因"父目录有他人条目就跳过"
+ *   导致 `profiles/node_modules` 的桥接停留在旧版本）。
  *
  * @param parentDir 目标目录的父目录（如 `…/node_modules` 或 `…/desktop/bin`）
  */
@@ -127,7 +133,8 @@ export function shouldSkipForeignTarget(
 ): boolean {
   if (!fs.exists(parentDir)) return false; // 父目录不存在：由本扩展创建，安全
   try {
-    return fs.readdir(parentDir).some((name) => name !== BRIDGE_PACKAGE_NAME);
+    // 只认"命令垫片目录"：含 *.cmd 即视为被别的程序独占的命令目录
+    return fs.readdir(parentDir).some((name) => name.toLowerCase().endsWith('.cmd'));
   } catch {
     // 读不到目录内容（权限/IO）时保守跳过：宁可少装一处，也不冒写坏他人目录的风险
     return true;
