@@ -192,3 +192,31 @@ test('每个占位页 acquireVsCodeApi 恰好声明一次（顶层 const 重复�
   }
 });
 
+test('readyPage 传入 contextBar 时渲染工具条(标签/加入按钮/自动跟随开关)', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, { fileLabel: 'src/extension.ts', autoFollow: true });
+  assert.ok(html.includes('id="dsh-ctx-bar"'), '应渲染工具条容器');
+  assert.ok(html.includes('id="dsh-ctx-label"'), '应渲染文件标签');
+  assert.ok(html.includes('src/extension.ts'), '应显示文件引用');
+  assert.ok(html.includes('data-action="addFileContext"'), '应渲染加入按钮');
+  assert.ok(html.includes('id="dsh-ctx-autofollow"'), '应渲染自动跟随开关');
+  assert.ok(html.includes('checked'), 'autoFollow=true 时开关应为选中态');
+});
+
+test('readyPage 未传 contextBar 时不渲染工具条(向后兼容)', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx());
+  assert.ok(!html.includes('dsh-ctx-bar'));
+});
+
+test('工具条下行脚本:监听 updateContextBar 更新标签与开关', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, { fileLabel: null, autoFollow: false });
+  assert.ok(html.includes("'updateContextBar'"), '应包含下行消息监听');
+  assert.ok(html.includes('dsh-ctx-label'), '监听脚本应引用标签元素');
+  assert.ok(html.includes('dsh-ctx-autofollow'), '监听脚本应引用开关元素');
+});
+
+test('工具条 fileLabel 为空时显示空标签', () => {
+  initI18n('en');
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, { fileLabel: null, autoFollow: false });
+  assert.ok(html.includes('Current file'), '无文件时仍显示「当前文件」前缀文案');
+  assert.ok(html.includes('id="dsh-ctx-label"></span>'), '标签内容为空(不渲染 null 字样)');
+});

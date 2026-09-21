@@ -29,5 +29,13 @@
   "dsh.walkthrough.description": "在 VS Code 内直接使用 DeepSeek Harness 网页界面。",
   "dsh.walkthrough.step.title": "打开 DSH 面板",
   "dsh.walkthrough.step.description": "点击左侧活动栏或右侧辅助侧边栏的 DSH 图标，或运行 [DSH: 打开面板](command:dsh.openPanel)。面板会自动启动（或复用）dsh web 服务，并在侧边栏内嵌显示 DSH 网页。",
-  "dsh.cmd.copyLogs.title": "DSH: 复制日志"
+  "dsh.cmd.copyLogs.title": "DSH: 复制日志",
+  "dsh.cmd.addFileContext.title": "将当前文件加入 DSH 上下文",
+  "dsh.cmd.askAboutFile.title": "用 DSH 询问当前文件",
+  "dsh.cmd.sendSelection.title": "将选区发送给 DSH",
+  "dsh.cmd.addPathContext.title": "加入 DSH 上下文",
+  "dsh.cmd.askAboutPath.title": "用 DSH 询问此项",
+  "dsh.cmd.openContextPanel.title": "打开 DSH 面板",
+  "dsh.config.contextAutoFollow": "切换文件时自动把当前文件注入 DSH 上下文。",
+  "dsh.config.contextDebounce": "自动跟随防抖毫秒数(300-5000)。"
 }

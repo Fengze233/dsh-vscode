@@ -60,6 +60,23 @@ const messages = {
       'Port {port} is occupied by another program. Temporarily using port {fallback} for this session (your dsh.port setting is unchanged).',
     'msg.logsCopied': 'DSH logs copied to the clipboard. Paste them into your bug report.',
     'msg.imageCacheCleaned': 'Cleaned up {count} image-fallback temp file(s) from the workspace.',
+    // 上下文工具条
+    'ctx.currentFile': 'Current file',
+    'ctx.add': 'Add to Context',
+    'ctx.autoFollow': 'Auto-follow',
+    // 上下文联动
+    'ctx.noActiveFile': 'No file is open.',
+    'ctx.noSelection': 'Select some text first.',
+    'ctx.added': 'Added to DSH context: {path}',
+    'ctx.serviceFailed': 'DSH service failed to start.',
+    'ctx.unsupportedVersion': 'This DSH version does not support the context feature. Please upgrade DSH.',
+    'ctx.rpcError': 'DSH rejected the request: {message}',
+    'ctx.serviceUnreachable': 'DSH service is unreachable.',
+    'ctx.failed': 'Failed to update DSH context: {message}',
+    'ctx.askPrompt': 'Ask DSH about {path}',
+    'ctx.askPlaceholder': 'What do you want to know? (leave empty to only reference the file)',
+    'ctx.selPrompt': 'Send selection from {path} to DSH',
+    'ctx.selPlaceholder': 'Optional note about the selection',
     // 桥接状态与警告
     'bridge.warnDegraded':
       'DSH bridge is not active. These features are unavailable: 1) click links to open in browser 2) click file paths to open in VS Code. You can retry installing the bridge or silence this warning.',
@@ -120,6 +137,23 @@ const messages = {
       '端口 {port} 被其他程序占用，本次会话临时改用端口 {fallback}（dsh.port 设置未更改，重启 VS Code 后恢复）。',
     'msg.logsCopied': 'DSH 日志已复制到剪贴板，请粘贴到问题报告中。',
     'msg.imageCacheCleaned': '已清理 {count} 张图片降级临时缓存。',
+    // 上下文工具条
+    'ctx.currentFile': '当前文件',
+    'ctx.add': '加入上下文',
+    'ctx.autoFollow': '自动跟随',
+    // 上下文联动
+    'ctx.noActiveFile': '当前没有打开的文件。',
+    'ctx.noSelection': '请先选中一些文本。',
+    'ctx.added': '已加入 DSH 上下文：{path}',
+    'ctx.serviceFailed': 'DSH 服务启动失败。',
+    'ctx.unsupportedVersion': '当前 DSH 版本不支持上下文功能，请升级 DSH。',
+    'ctx.rpcError': 'DSH 拒绝请求：{message}',
+    'ctx.serviceUnreachable': 'DSH 服务无响应。',
+    'ctx.failed': '更新 DSH 上下文失败：{message}',
+    'ctx.askPrompt': '就 {path} 向 DSH 提问',
+    'ctx.askPlaceholder': '想问什么？(留空则仅引用该文件)',
+    'ctx.selPrompt': '把 {path} 的选区发送给 DSH',
+    'ctx.selPlaceholder': '选区附言(可选)',
     'bridge.warnDegraded':
       'DSH 桥接未生效，以下功能不可用：①点击链接跳转浏览器 ②点击文件路径在 VS Code 打开。可重试安装桥接，或不再显示本警告。',
     'bridge.retryNow': '重试安装',

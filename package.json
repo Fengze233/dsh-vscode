@@ -2,7 +2,7 @@
   "name": "dsh-vscode-panel",
   "displayName": "DSH",
   "description": "在 VS Code 侧边栏中使用 DeepSeek Harness（DSH）网页界面",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "Fengze233",
   "icon": "assets/icon.png",
   "license": "MIT",
@@ -31,7 +31,13 @@
     "onCommand:dsh.bridge.retry",
     "onCommand:dsh.bridge.uninstall",
     "onCommand:dsh.cleanupImageCache",
-    "onCommand:dsh.copyLogs"
+    "onCommand:dsh.copyLogs",
+    "onCommand:dsh.addFileContext",
+    "onCommand:dsh.askAboutFile",
+    "onCommand:dsh.sendSelection",
+    "onCommand:dsh.addPathContext",
+    "onCommand:dsh.askAboutPath",
+    "onCommand:dsh.openContextPanel"
   ],
   "contributes": {
     "viewsContainers": {
@@ -144,6 +150,31 @@
         "command": "dsh.openFromTitle",
         "title": "%dsh.cmd.openFromTitle.title%",
         "icon": "assets/whale-icon-bg.svg"
+      },
+      {
+        "command": "dsh.addFileContext",
+        "title": "%dsh.cmd.addFileContext.title%"
+      },
+      {
+        "command": "dsh.askAboutFile",
+        "title": "%dsh.cmd.askAboutFile.title%"
+      },
+      {
+        "command": "dsh.sendSelection",
+        "title": "%dsh.cmd.sendSelection.title%"
+      },
+      {
+        "command": "dsh.addPathContext",
+        "title": "%dsh.cmd.addPathContext.title%"
+      },
+      {
+        "command": "dsh.askAboutPath",
+        "title": "%dsh.cmd.askAboutPath.title%"
+      },
+      {
+        "command": "dsh.openContextPanel",
+        "title": "%dsh.cmd.openContextPanel.title%",
+        "icon": "$(panel)"
       }
     ],
     "menus": {
@@ -179,6 +210,53 @@
           "command": "dsh.showLogs",
           "when": "view == dsh.panel || view == dsh.panel.secondary",
           "group": "navigation@5"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "dsh.addFileContext",
+          "group": "dsh@1"
+        },
+        {
+          "command": "dsh.askAboutFile",
+          "group": "dsh@2"
+        },
+        {
+          "command": "dsh.sendSelection",
+          "group": "dsh@3",
+          "when": "editorHasSelection"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "dsh.addPathContext",
+          "group": "dsh@1"
+        },
+        {
+          "command": "dsh.askAboutPath",
+          "group": "dsh@2"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "dsh.openContextPanel",
+          "group": "dsh@1"
+        },
+        {
+          "command": "dsh.openExternal",
+          "group": "dsh@2"
+        },
+        {
+          "command": "dsh.restart",
+          "group": "dsh@3"
+        },
+        {
+          "command": "dsh.stop",
+          "group": "dsh@4"
+        },
+        {
+          "command": "dsh.copyUrl",
+          "group": "dsh@5"
         }
       ]
     },
@@ -255,6 +333,18 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "%dsh.config.imageFallback%"
+        },
+        "dsh.context.autoFollow": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%dsh.config.contextAutoFollow%"
+        },
+        "dsh.context.followDebounceMs": {
+          "type": "number",
+          "default": 800,
+          "minimum": 300,
+          "maximum": 5000,
+          "markdownDescription": "%dsh.config.contextDebounce%"
         }
       }
     }

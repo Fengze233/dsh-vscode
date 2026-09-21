@@ -12,6 +12,8 @@ test('合法配置原样通过', () => {
     host: 'localhost', port: 4000, autoStart: false, stopOnExit: false, extraArgs: ['--trusted-host', 'x:1'],
     bridgeEnabled: true, workspaceRootIndex: 0, silenceWarning: false, executablePath: '',
     openInBrowser: false, remoteEnabled: false, imageFallback: true,
+    // PR #11：新增 context 设置项后须补充完整对象断言（deepEqual 要求键完全一致）
+    autoFollow: false, followDebounceMs: 800,
   });
 });
 
@@ -122,4 +124,29 @@ test('v0.3.0 新设置非布尔值回退默认（不记错误）', () => {
   assert.equal(r2.errors.length, 0);
   assert.equal(r3.errors.length, 0);
   assert.equal(r4.errors.length, 0);
+});
+
+test('autoFollow/followDebounceMs 默认值与合法值', () => {
+  const r1 = normalizeConfig({});
+  assert.equal(r1.config.autoFollow, false);
+  assert.equal(r1.config.followDebounceMs, 800);
+
+  const r2 = normalizeConfig({ autoFollow: true, followDebounceMs: 300 });
+  assert.equal(r2.config.autoFollow, true);
+  assert.equal(r2.config.followDebounceMs, 300);
+  assert.deepEqual(r2.errors, []);
+});
+
+test('followDebounceMs 越界(<300 / >5000 / 非整数)→ 回退默认并记录错误', () => {
+  for (const bad of [299, 5001, 3.5, -1]) {
+    const r = normalizeConfig({ followDebounceMs: bad });
+    assert.equal(r.config.followDebounceMs, 800, `bad=${bad}`);
+    assert.ok(r.errors.length > 0, `bad=${bad} 应记录错误`);
+  }
+});
+
+test('autoFollow 非布尔 → 静默回退默认(不记错误)', () => {
+  const r = normalizeConfig({ autoFollow: 'yes' as unknown as boolean });
+  assert.equal(r.config.autoFollow, false);
+  assert.deepEqual(r.errors, []);
 });
