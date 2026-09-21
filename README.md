@@ -202,6 +202,10 @@ The panel toolbar shows the current file with **Add** and **Auto-follow** contro
 | `dsh.openInBrowser` | `false` | Open the DSH page in the default browser after the service starts (when off, `--no-open` is passed to `dsh web`) |
 | `dsh.remote.enabled` | `false` | Enable remote scenarios (SSH Remote / WSL / Dev Containers / Codespaces): run dsh on the remote and open the panel through a VS Code tunnel (off by default; reload the window after enabling) |
 | `dsh.image.fallback` | `true` | Send attached images as file-path references when the active model has no vision, instead of failing (files are cached in the session working directory and removed when the panel closes) |
+| `dsh.startTimeoutMs` | `45000` | How long to wait for `dsh web` to become ready, in milliseconds (5000–600000). Raise it on slow machines (Windows cold start measured at 17–23 s); this is the first knob to turn when the log says the service was not ready in time although it did start |
+| `dsh.env` | `{}` | Extra environment variables injected into the DSH child process (merged with the parent environment). Typical use on proxy networks: `{"NODE_OPTIONS":"--use-env-proxy"}` |
+| `dsh.useEnvProxy` | `false` | Append `--use-env-proxy` to the child process's `NODE_OPTIONS` (existing options are kept). Enable it when the model API is only reachable through an HTTP/HTTPS proxy |
+| `dsh.panel.zoomLevel` | `1` | Zoom level of the embedded page (`0.5`/`0.75`/`0.9`/`1`/`1.1`/`1.25`/`1.5`/`2`): shrink it when the text is too large in the sidebar, enlarge it for demos |
 
 ## 🌍 Localization
 
@@ -213,7 +217,7 @@ Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 285 unit/integration tests (including real dsh web flows: service lifecycle, auth session, context injection)
+npm run test          # 320 unit/integration tests (including real dsh web flows: service lifecycle, auth session, context injection)
 npm run compile       # builds out/extension.js
 npm run watch         # watch build
 npm run typecheck     # type check

@@ -202,6 +202,10 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 | `dsh.openInBrowser` | `false` | 服务启动后在默认浏览器中打开 DSH 页面（关闭时向 `dsh web` 传递 `--no-open`） |
 | `dsh.remote.enabled` | `false` | 启用远程场景（SSH Remote / WSL / Dev Containers / Codespaces）：在远端运行 dsh，经 VS Code 隧道在面板中打开（默认关闭；开启后需重载窗口生效） |
 | `dsh.image.fallback` | `true` | 当前模型无视觉能力时，把上传图片以文件路径形式随消息发送而不报错（文件缓存在会话工作目录，面板关闭时清理） |
+| `dsh.startTimeoutMs` | `45000` | 等待 `dsh web` 就绪的总超时（毫秒，5000–600000）。冷启动慢的机器（Windows 实测 17–23 秒）可调大；日志提示「未在 N 秒内就绪」但服务其实已起来时优先调此项 |
+| `dsh.env` | `{}` | 注入 DSH 子进程的额外环境变量（键值对，与父进程环境合并）。典型用法：代理网络下设 `{"NODE_OPTIONS":"--use-env-proxy"}` |
+| `dsh.useEnvProxy` | `false` | 自动为子进程的 `NODE_OPTIONS` 追加 `--use-env-proxy`（不覆盖已有选项）。必须经 HTTP/HTTPS 代理才能访问模型 API 时开启 |
+| `dsh.panel.zoomLevel` | `1` | 面板内网页缩放档位（`0.5`/`0.75`/`0.9`/`1`/`1.1`/`1.25`/`1.5`/`2`）：侧边栏里字太大时调小，演示时调大 |
 
 ## 🌍 多语言
 
@@ -213,7 +217,7 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 
 ```bash
 npm install
-npm run test          # 285 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话、上下文注入）
+npm run test          # 320 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话、上下文注入）
 npm run compile       # 构建 out/extension.js
 npm run watch         # 监听构建
 npm run typecheck     # 类型检查
