@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { initI18n, t } from './i18n';
-import { readConfig, type DshConfig } from './config';
+import { readConfig, buildChildEnv, type DshConfig } from './config';
 import { probeService } from './service/detect';
 import { createProcessRunner, findInPath, findInPathPosix, resolveDshPackageJsonPath } from './service/process';
 import { ServiceManager, type ManagerOptions } from './service/manager';
@@ -80,6 +80,8 @@ function toManagerOptions(config: DshConfig): ManagerOptions {
     pollMs: 500,
     // 启动总超时由 dsh.startTimeoutMs 驱动（默认 45s；Windows 冷启动实测 17–23s，issue #23）
     startTimeoutMs: config.startTimeoutMs,
+    // 子进程额外环境变量：dsh.env 与 dsh.useEnvProxy 合并（issue #18；无配置时 runner 不传 env）
+    env: buildChildEnv(config.env, config.useEnvProxy),
   };
 }
 

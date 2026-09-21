@@ -7,6 +7,7 @@ import {
   DEFAULTS,
   MIN_START_TIMEOUT_MS,
   MAX_START_TIMEOUT_MS,
+  buildChildEnv,
 } from '../src/config';
 
 test('合法配置原样通过', () => {
@@ -22,6 +23,8 @@ test('合法配置原样通过', () => {
     autoFollow: false, followDebounceMs: 800,
     // issue #23：启动总超时改为可配，默认 45s（旧硬编码 15s 会把已就绪的服务判超时）
     startTimeoutMs: 45000,
+    // issue #18：子进程环境变量注入（默认关闭/为空，保持既有行为）
+    env: {}, useEnvProxy: false,
   });
 });
 
@@ -187,4 +190,66 @@ test('startTimeoutMs 非数字类型 → 回退默认并记录错误', () => {
   const r = normalizeConfig({ startTimeoutMs: '45000' as unknown as number });
   assert.equal(r.config.startTimeoutMs, 45000);
   assert.ok(r.errors.length > 0);
+});
+
+// ——— issue #18：dsh.env / dsh.useEnvProxy ———
+test('env 默认空对象、合法键值原样保留（issue #18）', () => {
+  const r1 = normalizeConfig({});
+  assert.deepEqual(r1.config.env, {});
+  assert.equal(r1.config.useEnvProxy, false);
+
+  const r2 = normalizeConfig({ env: { NODE_OPTIONS: '--use-env-proxy', HTTPS_PROXY: 'http://127.0.0.1:11888' } });
+  assert.deepEqual(r2.config.env, { NODE_OPTIONS: '--use-env-proxy', HTTPS_PROXY: 'http://127.0.0.1:11888' });
+  assert.deepEqual(r2.errors, []);
+});
+
+test('env 非法条目被跳过并记录错误（值非字符串 / 键含 = 或为空）', () => {
+  const r = normalizeConfig({
+    env: { GOOD: '1', BAD_NUM: 2 as unknown as string, 'A=B': 'x', '': 'y' },
+  });
+  assert.deepEqual(r.config.env, { GOOD: '1' });
+  assert.equal(r.errors.length, 3);
+});
+
+test('env 非对象（数组/字符串/null）→ 回退空对象并记录错误', () => {
+  for (const bad of [[], 'x', null, 42] as unknown[]) {
+    const r = normalizeConfig({ env: bad as Record<string, string> });
+    assert.deepEqual(r.config.env, {}, `bad=${JSON.stringify(bad)}`);
+    assert.ok(r.errors.length > 0, `bad=${JSON.stringify(bad)} 应记录错误`);
+  }
+});
+
+test('useEnvProxy 非布尔 → 静默回退 false（不记错误）', () => {
+  const r = normalizeConfig({ useEnvProxy: 'yes' as unknown as boolean });
+  assert.equal(r.config.useEnvProxy, false);
+  assert.deepEqual(r.errors, []);
+});
+
+test('buildChildEnv：useEnvProxy=false 时不改动 NODE_OPTIONS', () => {
+  assert.deepEqual(buildChildEnv({}, false), {});
+  assert.deepEqual(buildChildEnv({ NODE_OPTIONS: '--max-old-space-size=4096' }, false), {
+    NODE_OPTIONS: '--max-old-space-size=4096',
+  });
+});
+
+test('buildChildEnv：useEnvProxy=true 时注入 --use-env-proxy', () => {
+  // 原先没有 NODE_OPTIONS → 直接设为该标志
+  assert.deepEqual(buildChildEnv({}, true), { NODE_OPTIONS: '--use-env-proxy' });
+  // 已有其它选项 → 追加而不是覆盖
+  assert.deepEqual(buildChildEnv({ NODE_OPTIONS: '--max-old-space-size=4096' }, true), {
+    NODE_OPTIONS: '--max-old-space-size=4096 --use-env-proxy',
+  });
+  // 已包含该标志（含经由 dsh.env 显式设置的情况）→ 不重复追加
+  assert.deepEqual(buildChildEnv({ NODE_OPTIONS: '--use-env-proxy' }, true), {
+    NODE_OPTIONS: '--use-env-proxy',
+  });
+  assert.deepEqual(buildChildEnv({ NODE_OPTIONS: '--max-old-space-size=4096 --use-env-proxy' }, true), {
+    NODE_OPTIONS: '--max-old-space-size=4096 --use-env-proxy',
+  });
+});
+
+test('buildChildEnv：不改动入参对象（纯函数）', () => {
+  const input = { NODE_OPTIONS: '--a' };
+  buildChildEnv(input, true);
+  assert.deepEqual(input, { NODE_OPTIONS: '--a' });
 });

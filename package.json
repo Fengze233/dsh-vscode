@@ -352,6 +352,19 @@
           "minimum": 5000,
           "maximum": 600000,
           "markdownDescription": "%dsh.config.startTimeoutMs%"
+        },
+        "dsh.env": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "markdownDescription": "%dsh.config.env%"
+        },
+        "dsh.useEnvProxy": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%dsh.config.useEnvProxy%"
         }
       }
     }

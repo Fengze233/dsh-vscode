@@ -39,6 +39,8 @@ export interface ManagerOptions {
   openInBrowser?: boolean;
   /** 启动总超时（毫秒，默认 45000，可用 dsh.startTimeoutMs 调整；issue #23） */
   startTimeoutMs?: number;
+  /** 额外注入子进程的环境变量（dsh.env + useEnvProxy 合并结果；issue #18） */
+  env?: Record<string, string>;
 }
 
 /**
@@ -257,6 +259,8 @@ export class ServiceManager {
           executablePath: this.opts.executablePath,
           // noOpenDisabled 后视为"用户要求弹浏览器"（即不追加 --no-open），兼容旧版 dsh
           openInBrowser: this.noOpenDisabled ? true : this.opts.openInBrowser,
+          // 额外环境变量（issue #18）：未配置时保持 undefined（runner 不传 env，完全继承父进程）
+          env: this.opts.env,
         });
         break; // spawn 成功（未同步抛异常），跳出重试循环继续等待就绪
       } catch (err) {
