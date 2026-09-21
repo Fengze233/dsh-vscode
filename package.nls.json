@@ -22,8 +22,8 @@
   "dsh.config.workspaceRootIndex": "Which workspace root to use as the working directory for the auto-started `dsh web` (0-based; falls back to the first root when out of range).",
   "dsh.config.bridgeSilenceWarning": "Suppress bridge warnings (e.g. when a DSH page is open outside the panel).",
   "dsh.config.executablePath": "Absolute path to the dsh executable (dsh.cmd on Windows). Empty = look up on PATH.",
-  "dsh.config.openInBrowser": "Open the DSH page in the default browser after the service starts (when off, \u0060--no-open\u0060 is passed to \u0060dsh web\u0060).",
-  "dsh.config.remoteEnabled": "Enable remote scenarios (SSH Remote / WSL / Dev Containers / Codespaces): run dsh on the remote host and open the panel through a VS Code tunnel. Off by default; when off, remote windows show a guide instead of starting a remote service. Requires \u0060dsh\u0060 installed on the remote and a window reload after enabling.",
+  "dsh.config.openInBrowser": "Open the DSH page in the default browser after the service starts (when off, `--no-open` is passed to `dsh web`).",
+  "dsh.config.remoteEnabled": "Enable remote scenarios (SSH Remote / WSL / Dev Containers / Codespaces): run dsh on the remote host and open the panel through a VS Code tunnel. Off by default; when off, remote windows show a guide instead of starting a remote service. Requires `dsh` installed on the remote and a window reload after enabling.",
   "dsh.config.imageFallback": "When the active model does not support image input, automatically send attached images as file-path references instead of failing (files are cached in the session working directory and removed when the conversation ends).",
   "dsh.walkthrough.title": "Get Started with DSH",
   "dsh.walkthrough.description": "Use the DeepSeek Harness web UI right inside VS Code.",
@@ -37,5 +37,9 @@
   "dsh.cmd.askAboutPath.title": "Ask DSH About This",
   "dsh.cmd.openContextPanel.title": "Open DSH Panel",
   "dsh.config.contextAutoFollow": "Automatically add the current file to the DSH context when switching files.",
-  "dsh.config.contextDebounce": "Debounce in milliseconds for auto-follow (300-5000)."
+  "dsh.config.contextDebounce": "Debounce in milliseconds for auto-follow (300-5000).",
+  "dsh.config.startTimeoutMs": "How long to wait for `dsh web` to become ready, in milliseconds (default 45000). Cold start time depends on machine speed and the number of DSH plugins; raise this if the log says the service was not ready in time while it actually did start.",
+  "dsh.config.env": "Extra environment variables injected into the DSH child process (key/value pairs, values must be strings); merged with the parent environment instead of replacing it. Typical use: on networks that require a proxy, set `NODE_OPTIONS=--use-env-proxy` so Node's native fetch honours HTTP(S)_PROXY.",
+  "dsh.config.useEnvProxy": "Append `--use-env-proxy` to the DSH child process's `NODE_OPTIONS` (your existing NODE_OPTIONS options are kept). Useful when the model API must be reached through an HTTP/HTTPS proxy.",
+  "dsh.config.panelZoom": "Zoom the embedded `dsh web` page up or down — useful when the text is too large (or too small) in the sidebar. Pick 50%–150% from the dropdown (5% steps); for finer control, write any value between 0.5 and 1.5 directly in `settings.json`. 100% is the default. The page still fills the panel exactly, with no scrollbars, and clicks stay accurate."
 }

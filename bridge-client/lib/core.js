@@ -25,6 +25,72 @@ export function buildOpenFileMessage(path, cwd) {
   return cwd === undefined ? { kind: 'openFile', path } : { kind: 'openFile', path, cwd };
 }
 
+/**
+ * DSH 页面里「文件入口」按钮的稳定选择器（issue #22）。
+ *
+ * 背景与实证（DSH 0.1.5-rc.2 产物）：
+ * - 文件名内联渲染成 `button`，其 class 是 CSS Module 哈希名（实测 `fileMention_kcgor_304`），
+ *   因此原先的 `classList.contains('fileMention')` 恒为 false，转发完全失效；
+ * - 「本轮文件改动」芯片：`[data-produced-files-row] button[title]`（title 为相对路径）；
+ * - present 交付卡片：`[data-presented-file] button[title]`（title 为工作区绝对路径）；
+ * - 同卡片上的「更多」菜单按钮带 `aria-haspopup="menu"`，必须排除，避免劫持宿主的原生打开菜单。
+ */
+export const FILE_ENTRY_SELECTOR = [
+  'button[class*="fileMention"]',
+  '[data-produced-files-row] button[title]',
+  '[data-presented-file] button[title]',
+].join(', ');
+
+/** 需要排除的文件入口候选：宿主原生菜单触发器（如 present 卡片的「更多」按钮） */
+const FILE_ENTRY_EXCLUDE_SELECTOR = '[aria-haspopup]';
+
+/**
+ * 从按钮的标签文案里抽取被引号包裹的路径。
+ * 实测 DSH 的 aria-label 形如「打开 docs/progress.md」「在侧边栏预览 `a/b.md`」——
+ * 路径一定带反引号或引号包裹，按「引号内的内容」提取即可，无需依赖本地化前缀。
+ */
+function pathInLabel(label) {
+  if (typeof label !== 'string') return null;
+  const m = label.match(/[`"'\u2018\u2019\u201c\u201d]([^`"'\u2018\u2019\u201c\u201d]+)[`"'\u2018\u2019\u201c\u201d]/);
+  return m === null ? '' : m[1];
+}
+
+/**
+ * 从被点击的「文件入口」按钮解析出要转发的路径（纯函数，便于单测）。
+ *
+ * 取值优先级（issue #22 实测的属性语义）：
+ *   1. `title` 才是路径（produced 芯片是相对路径，present 卡片是工作区绝对路径）；
+ *   2. `aria-label` 是本地化动作文案（「打开 …」「预览 …」「queued a.ts」），
+ *      仅当 title 为空时才作兜底，且必须先抽出引号包裹的路径片段；
+ *      抽不出带引号的路径时——若整串文案看起来仍像路径（无空格、无换行）才采用，
+ *      否则判为不可用（宁可漏转，也不把「打开 docs/a.md」整串当路径下发）。
+ *
+ * @param btn 形如按钮的元素（只要求 getAttribute / matches / closest）
+ * @returns 路径字符串；无法判断时返回 null
+ */
+export function resolveFileEntryPath(btn) {
+  if (btn === null || btn === undefined || typeof btn.getAttribute !== 'function') return null;
+  // 宿主原生菜单触发器（aria-haspopup）不是"打开文件"，交给宿主处理
+  if (typeof btn.matches === 'function' && btn.matches(FILE_ENTRY_EXCLUDE_SELECTOR)) return null;
+
+  const title = (btn.getAttribute('title') ?? '').trim();
+  if (title !== '') return title;
+
+  const label = (btn.getAttribute('aria-label') ?? '').trim();
+  if (label === '') {
+    // 最后兜底：纯文本内容（DSH 早期版本的文件名按钮没有 title/aria-label）
+    const text = typeof btn.textContent === 'string' ? btn.textContent.trim() : '';
+    return text === '' ? null : text;
+  }
+
+  const quoted = pathInLabel(label);
+  if (quoted !== null) return quoted === '' ? null : quoted;
+
+  // 无引号：仅当整串仍像单个路径时才采用（排除「queued a.ts, b.ts」这类多文件摘要）
+  if (label.includes('\n') || /\s/.test(label) || label.includes(' ')) return null;
+  return label;
+}
+
 // 构造"工作区同步回执"消息（bridgeAck，path 可选；version 为桥接包版本，供扩展侧日志识别代码版本）
 export function buildSyncWorkspaceAck(ok, path, version) {
   const base = path === undefined ? { kind: 'bridgeAck', ok } : { kind: 'bridgeAck', ok, path };

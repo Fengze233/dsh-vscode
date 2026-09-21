@@ -1,3 +1,47 @@
+## [0.4.1] - 2026-09-21
+
+> 版本号说明：原先并入 main 的 `0.5.0` 编号已**回退并入本版 0.4.1**（该版本从未发布到商店，
+> 回退不产生用户可见的版本断档）。0.4.0 之后的所有改动都以 0.4.1 为单位发布。
+
+### 新增
+
+- **面板网页缩放** `dsh.panel.zoomLevel`（issue #8）：可把内嵌的 DSH 页面整体放大/缩小
+  （下拉档位 50%–150%，每 5% 一档共 21 档；更细的值可在 `settings.json` 直接写 0.5–1.5 的任意数值。默认 100%）。
+  实现为「iframe 逻辑尺寸 = `calc(100% / zoom)`、再 `transform: scale(zoom)` 且原点在左上」，
+  物理尺寸恒等于面板可用区域，因此缩小与放大两个方向都完美铺满、无滚动条，点击命中也准确
+  （真机几何实测：0.5/0.75/1/1.25/1.5 × 有/无工具条，留白 0、容器内三处取点命中均为 iframe）。
+- **子进程环境变量注入** `dsh.env` 与 `dsh.useEnvProxy`（issue #18）：向 DSH 子进程注入额外
+  环境变量（与父进程环境合并，原有变量全部保留）。`dsh.useEnvProxy` 开启时会确保
+  `NODE_OPTIONS` 含 `--use-env-proxy`（不覆盖用户已有的其它 NODE_OPTIONS 选项），
+  解决**必须走代理的网络里 DSH 无法请求模型 API** 的问题——Node 的原生 fetch 默认不读
+  `HTTP(S)_PROXY`，实测：把 `https_proxy` 指向死地址仍直连成功，加上该启动参数才会真的走代理；
+  而该参数是 Node 启动参数，原先的 `dsh.extraArgs` 只能拼在 `dsh web` 之后，无法生效。
+- **启动总超时可配** `dsh.startTimeoutMs`（issue #23）：默认由 15 秒放宽到 **45 秒**
+  （Windows 冷启动实测 17–23 秒），可配区间 5000–600000 毫秒。
+
+### 修复
+
+- **面板里点击文件不转发到 VS Code 编辑器**（issue #22）：DSH 把文件名内联渲染成 CSS Module
+  **哈希类名**（实测 `fileMention_kcgor_304`），而桥接用 `classList.contains('fileMention')`
+  判断，恒为 false，导致转发整体失效；且取值顺序把 `aria-label`（本地化动作文案，如
+  「打开 <路径>」）当成路径。现改用稳定选择器（`button[class*="fileMention"]` /
+  `[data-produced-files-row] button[title]` / `[data-presented-file] button[title]`，
+  并排除 `aria-haspopup` 的宿主原生菜单按钮），解析时 **`title` 优先**，
+  `aria-label` 仅在能抽出引号包裹的路径时兜底，覆盖聊天正文文件名 / 「本轮文件改动」芯片 /
+  present 交付卡片三类入口。
+- **桥接包被写进 DSH Desktop 私有命令目录，导致桌面下次启动失败**（issue #20）：
+  `resolveNpmGlobalNodeModules()` 把「`dsh.cmd` 所在目录」当成了 npm 全局 `node_modules` 根，
+  于是桥接包被复制进 `%APPDATA%\DSH Desktop\host-commands\desktop\bin`——该目录被 DSH Desktop
+  以硬断言独占（只允许它自己的 `dsh.cmd`），多一个条目就让桌面启动报
+  `command runtime directory contains unexpected entries`。现改为：从包内入口向上寻找真正的
+  `node_modules` 目录（找不到就放弃该目标），垫片目录返回 `<垫片目录>/node_modules`；
+  并在写入前增加白名单校验——目标目录若已存在且含**非本扩展产物**，一律跳过（目录不可读时
+  同样保守跳过），绝不往别人的私有目录里写。
+- **`cordis.patch.yml` 桥接条目重复导致插件树崩溃**（issue #19）：文件里出现两段
+  `# dsh-vscode-bridge: begin/end` 时（旧版本残留 / 多窗口并发激活），DSH 侧同一 id 多条
+  `insert` 会让插件树崩溃，用户必须手工删除重复项才能进入。安装器现在会自愈去重：
+  保留首段、删除后续段落，并保留用户自己的其它条目与头部注释。
+
 ## [0.5.0] - 2026-09-10
 
 ### 新增

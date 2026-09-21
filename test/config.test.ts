@@ -1,7 +1,15 @@
 // test/config.test.ts — 配置规范化与回环地址校验的单元测试
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeConfig, isLoopbackHost, DEFAULTS } from '../src/config';
+import {
+  normalizeConfig,
+  isLoopbackHost,
+  DEFAULTS,
+  MIN_START_TIMEOUT_MS,
+  MAX_START_TIMEOUT_MS,
+  buildChildEnv,
+  PANEL_ZOOM_LEVELS,
+} from '../src/config';
 
 test('合法配置原样通过', () => {
   const { config, errors } = normalizeConfig({
@@ -14,6 +22,12 @@ test('合法配置原样通过', () => {
     openInBrowser: false, remoteEnabled: false, imageFallback: true,
     // PR #11：新增 context 设置项后须补充完整对象断言（deepEqual 要求键完全一致）
     autoFollow: false, followDebounceMs: 800,
+    // issue #23：启动总超时改为可配，默认 45s（旧硬编码 15s 会把已就绪的服务判超时）
+    startTimeoutMs: 45000,
+    // issue #18：子进程环境变量注入（默认关闭/为空，保持既有行为）
+    env: {}, useEnvProxy: false,
+    // issue #8：面板缩放（默认 1 = 不缩放）
+    panelZoomLevel: 1,
   });
 });
 
@@ -149,4 +163,120 @@ test('autoFollow 非布尔 → 静默回退默认(不记错误)', () => {
   const r = normalizeConfig({ autoFollow: 'yes' as unknown as boolean });
   assert.equal(r.config.autoFollow, false);
   assert.deepEqual(r.errors, []);
+});
+
+// ——— issue #23：启动总超时可配 ———
+// 背景：Windows 冷启动实测 17–23s，旧的硬编码 15s 会让已就绪的服务被判「未就绪」。
+test('startTimeoutMs 默认 45 秒（issue #23：替代原先 15s 硬编码）', () => {
+  const r = normalizeConfig({});
+  assert.equal(r.config.startTimeoutMs, 45000);
+  assert.equal(DEFAULTS.startTimeoutMs, 45000);
+});
+
+test('startTimeoutMs 合法值(含边界)原样保留且不报错', () => {
+  for (const ok of [MIN_START_TIMEOUT_MS, 45000, MAX_START_TIMEOUT_MS]) {
+    const r = normalizeConfig({ startTimeoutMs: ok });
+    assert.equal(r.config.startTimeoutMs, ok, `ok=${ok}`);
+    assert.deepEqual(r.errors, [], `ok=${ok}`);
+  }
+});
+
+test('startTimeoutMs 越界/非整数 → 回退默认并记录错误', () => {
+  for (const bad of [MIN_START_TIMEOUT_MS - 1, MAX_START_TIMEOUT_MS + 1, 15000.5, -1, NaN]) {
+    const r = normalizeConfig({ startTimeoutMs: bad });
+    assert.equal(r.config.startTimeoutMs, 45000, `bad=${bad}`);
+    assert.ok(r.errors.length > 0, `bad=${bad} 应记录错误`);
+  }
+});
+
+test('startTimeoutMs 非数字类型 → 回退默认并记录错误', () => {
+  const r = normalizeConfig({ startTimeoutMs: '45000' as unknown as number });
+  assert.equal(r.config.startTimeoutMs, 45000);
+  assert.ok(r.errors.length > 0);
+});
+
+// ——— issue #18：dsh.env / dsh.useEnvProxy ———
+test('env 默认空对象、合法键值原样保留（issue #18）', () => {
+  const r1 = normalizeConfig({});
+  assert.deepEqual(r1.config.env, {});
+  assert.equal(r1.config.useEnvProxy, false);
+
+  const r2 = normalizeConfig({ env: { NODE_OPTIONS: '--use-env-proxy', HTTPS_PROXY: 'http://127.0.0.1:11888' } });
+  assert.deepEqual(r2.config.env, { NODE_OPTIONS: '--use-env-proxy', HTTPS_PROXY: 'http://127.0.0.1:11888' });
+  assert.deepEqual(r2.errors, []);
+});
+
+test('env 非法条目被跳过并记录错误（值非字符串 / 键含 = 或为空）', () => {
+  const r = normalizeConfig({
+    env: { GOOD: '1', BAD_NUM: 2 as unknown as string, 'A=B': 'x', '': 'y' },
+  });
+  assert.deepEqual(r.config.env, { GOOD: '1' });
+  assert.equal(r.errors.length, 3);
+});
+
+test('env 非对象（数组/字符串/null）→ 回退空对象并记录错误', () => {
+  for (const bad of [[], 'x', null, 42] as unknown[]) {
+    const r = normalizeConfig({ env: bad as Record<string, string> });
+    assert.deepEqual(r.config.env, {}, `bad=${JSON.stringify(bad)}`);
+    assert.ok(r.errors.length > 0, `bad=${JSON.stringify(bad)} 应记录错误`);
+  }
+});
+
+test('useEnvProxy 非布尔 → 静默回退 false（不记错误）', () => {
+  const r = normalizeConfig({ useEnvProxy: 'yes' as unknown as boolean });
+  assert.equal(r.config.useEnvProxy, false);
+  assert.deepEqual(r.errors, []);
+});
+
+test('buildChildEnv：useEnvProxy=false 时不改动 NODE_OPTIONS', () => {
+  assert.deepEqual(buildChildEnv({}, false), {});
+  assert.deepEqual(buildChildEnv({ NODE_OPTIONS: '--max-old-space-size=4096' }, false), {
+    NODE_OPTIONS: '--max-old-space-size=4096',
+  });
+});
+
+test('buildChildEnv：useEnvProxy=true 时注入 --use-env-proxy', () => {
+  // 原先没有 NODE_OPTIONS → 直接设为该标志
+  assert.deepEqual(buildChildEnv({}, true), { NODE_OPTIONS: '--use-env-proxy' });
+  // 已有其它选项 → 追加而不是覆盖
+  assert.deepEqual(buildChildEnv({ NODE_OPTIONS: '--max-old-space-size=4096' }, true), {
+    NODE_OPTIONS: '--max-old-space-size=4096 --use-env-proxy',
+  });
+  // 已包含该标志（含经由 dsh.env 显式设置的情况）→ 不重复追加
+  assert.deepEqual(buildChildEnv({ NODE_OPTIONS: '--use-env-proxy' }, true), {
+    NODE_OPTIONS: '--use-env-proxy',
+  });
+  assert.deepEqual(buildChildEnv({ NODE_OPTIONS: '--max-old-space-size=4096 --use-env-proxy' }, true), {
+    NODE_OPTIONS: '--max-old-space-size=4096 --use-env-proxy',
+  });
+});
+
+test('buildChildEnv：不改动入参对象（纯函数）', () => {
+  const input = { NODE_OPTIONS: '--a' };
+  buildChildEnv(input, true);
+  assert.deepEqual(input, { NODE_OPTIONS: '--a' });
+});
+
+// ——— issue #8：面板缩放（范围 0.5–1.5，支持自定义值） ———
+test('panelZoomLevel 默认 1；档位与自定义值都合法', () => {
+  assert.equal(normalizeConfig({}).config.panelZoomLevel, 1);
+  for (const lv of [...PANEL_ZOOM_LEVELS, 1.15, 0.55, 1.5, 0.5]) {
+    const r = normalizeConfig({ panelZoomLevel: lv });
+    assert.equal(r.config.panelZoomLevel, lv, `level=${lv}`);
+    assert.deepEqual(r.errors, [], `level=${lv} 不应报错`);
+  }
+});
+
+test('panelZoomLevel 越界或非数字 → 回退默认并记录错误', () => {
+  for (const bad of [0, 0.3, 0.49, 1.51, 3, -1, NaN, Infinity]) {
+    const r = normalizeConfig({ panelZoomLevel: bad });
+    assert.equal(r.config.panelZoomLevel, 1, `bad=${bad}`);
+    assert.ok(r.errors.length > 0, `bad=${bad} 应记录错误`);
+  }
+});
+
+test('panelZoomLevel 非数字类型 → 回退默认并记录错误', () => {
+  const r = normalizeConfig({ panelZoomLevel: '1.25' as unknown as number });
+  assert.equal(r.config.panelZoomLevel, 1);
+  assert.ok(r.errors.length > 0);
 });

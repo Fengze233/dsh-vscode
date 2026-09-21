@@ -9,7 +9,7 @@
 // 2. 新增条目必须用 `insert:` 包裹；裸 `- id:` 条目是「按 id 覆盖既有行」的 patch，
 //    目标行不存在时只会告警并跳过，不会真正新增条目。
 // 3. 卸载时按 begin/end 标记精确删除条目段；若删除后仅剩空白，还原为 `[]`。
-import { join, dirname } from 'node:path';
+import { join, dirname, win32 } from 'node:path';
 import * as nodeFs from 'node:fs';
 
 /** 桥接条目在 cordis.patch.yml 中的包裹标记（卸载时按标记精确删除） */
@@ -91,6 +91,57 @@ export function bridgeTargetDirs(profileDir: string, npmGlobalNodeModules?: stri
 }
 
 /**
+ * 从「dsh 包内文件路径」向上寻找第一个 `node_modules` 目录（issue #20）。
+ *
+ * 场景：`dsh.executablePath` 指向 `…\app.asar.unpacked\node_modules\@deepseek-ai\dsh\lib\bin.js`
+ * 这类包内入口时，`dirname` 得到的是包内目录而非 node_modules 根；逐级上溯才能拿到真正的根。
+ * 全程用 path.win32，避免在非 Windows 上单测这条 Windows 逻辑时被平台路径规则干扰。
+ *
+ * @returns node_modules 根目录；路径中不含 node_modules 段时返回 undefined（调用方放弃该目标）
+ */
+export function npmNodeModulesRootFrom(p: string): string | undefined {
+  let dir = win32.dirname(p);
+  for (let i = 0; i < 12; i += 1) {
+    if (win32.basename(dir).toLowerCase() === 'node_modules') return dir;
+    const parent = win32.dirname(dir);
+    if (parent === dir) break; // 到盘符根仍未找到
+    dir = parent;
+  }
+  return undefined;
+}
+
+/**
+ * 判断该安装目标是否应当跳过：其**父目录是"命令垫片目录"**（issue #20）。
+ *
+ * 关键点（真实文件系统 + 真机验证得出，且踩过一次回归）：
+ * 危险不是"父目录里有别人的东西"，而是"**往一个被别的程序独占的命令目录里新增条目**"。
+ * 受害目录 `%APPDATA%\DSH Desktop\host-commands\desktop\bin` 被 DSH Desktop 以硬断言独占
+ * （只允许它自己的 `dsh.cmd`）：多出任何条目（含我们新建的 `dsh-vscode-bridge/`）都会让
+ * 桌面下次启动硬失败。
+ *
+ * 判据刻意收窄为「父目录里存在批处理垫片（`*.cmd`）」——这正是"命令目录"的特征：
+ * - `…/desktop/bin` 里有 `dsh.cmd` → 跳过 ✅（issue #20 的场景）
+ * - `…/node_modules`（npm 全局或 DSH profiles 下的依赖目录）里有成百上千个包，
+ *   但不会有 `dsh.cmd` → **放行**，否则桥接无法被刷新（曾因"父目录有他人条目就跳过"
+ *   导致 `profiles/node_modules` 的桥接停留在旧版本）。
+ *
+ * @param parentDir 目标目录的父目录（如 `…/node_modules` 或 `…/desktop/bin`）
+ */
+export function shouldSkipForeignTarget(
+  parentDir: string,
+  fs: Pick<InstallerFs, 'exists' | 'readdir'>,
+): boolean {
+  if (!fs.exists(parentDir)) return false; // 父目录不存在：由本扩展创建，安全
+  try {
+    // 只认"命令垫片目录"：含 *.cmd 即视为被别的程序独占的命令目录
+    return fs.readdir(parentDir).some((name) => name.toLowerCase().endsWith('.cmd'));
+  } catch {
+    // 读不到目录内容（权限/IO）时保守跳过：宁可少装一处，也不冒写坏他人目录的风险
+    return true;
+  }
+}
+
+/**
  * 判定 cordis.patch.yml 的顶层是否为「流式空数组 []」。
  *
  * 规则：去掉注释行与空行后：
@@ -146,18 +197,27 @@ export function installBridge(opts: BridgeInstallOptions): BridgeInstallResult {
     return { status: 'degraded', reason: 'web profile not found' };
   }
   const patchPath = join(profileDir, 'cordis.patch.yml');
-  const targets = bridgeTargetDirs(profileDir, opts.npmGlobalNodeModules);
+  const allTargets = bridgeTargetDirs(profileDir, opts.npmGlobalNodeModules);
+  // 写入前的白名单校验（issue #20）：按**父目录**判定——父目录里已有非本扩展产物就跳过该目标。
+  // 典型受害目录是 DSH Desktop 的私有命令目录（只允许它自己的 dsh.cmd）：哪怕目标子目录
+  // 还不存在，只要往那里新建 `dsh-vscode-bridge/`，桌面下次启动就会硬失败。
+  const targets = allTargets.filter((t) => !shouldSkipForeignTarget(dirname(t), opts.fs));
   // primary 路径保持兼容语义（BridgeInstallResult.bridgeDir）
-  const bridgeDir = targets[0];
+  const bridgeDir = targets[0] ?? allTargets[0];
 
   // 读取现有 patch（不存在视为空，避免真实环境首次运行时 readFile 抛错）
   const existing = opts.fs.exists(patchPath) ? opts.fs.readFile(patchPath) : '';
 
   if (existing.includes(BRIDGE_BEGIN_MARK)) {
-    // 已存在条目：全部目标目录都必须可用（能读到含 `"name"` 的 package.json，
+    // 已存在条目：先把可能出现的重复副本自愈掉（issue #19——重复条目会让 DSH 插件树崩溃），
+    // 再做"全部目标目录都必须可用"的判定（能读到含 `"name"` 的 package.json，
     // 且版本与插件随附版本一致——版本不一致说明是升级前的旧包，需强制重装刷新）。
     // 仅 exists 会漏掉「目录在但 package.json 不可读」的坏包（chmod 000 事故），
     // 且 Windows 场景某目标缺失但其余完好时也需自愈补回。
+    const deduped = dedupeBridgeEntries(existing);
+    if (deduped !== existing) {
+      opts.fs.writeFile(patchPath, deduped);
+    }
     const wantVersion = bridgeVersion(opts.bridgeSourceDir, opts.fs);
     const unusable = targets.filter((t) => !isBridgeUsable(t, opts.fs, wantVersion, opts.bridgeSourceDir));
     if (unusable.length === 0) {
@@ -199,6 +259,38 @@ export function installBridge(opts: BridgeInstallOptions): BridgeInstallResult {
     return { status: 'degraded', reason: `copy failed at ${failedTarget}: ${errMsg(e)}`, profileDir, bridgeDir };
   }
   return { status: 'ok', profileDir, bridgeDir };
+}
+
+/**
+ * 去掉重复的桥接条目，只保留第一段（issue #19）。
+ *
+ * 现场：多个 VS Code 窗口同时激活、或旧版本残留，会让 cordis.patch.yml 里出现两段
+ * `# dsh-vscode-bridge: begin/end`。DSH 侧同一 id 出现多条 insert 会让插件树崩溃
+ * （用户报告：必须手工删掉重复项才能进入）。这里做幂等自愈：保留首段、删除后续段落。
+ *
+ * @returns 去重后的 patch 文本；本来只有一段（或没有）时原样返回
+ */
+export function dedupeBridgeEntries(patch: string): string {
+  if (!patch.includes(BRIDGE_BEGIN_MARK)) return patch;
+  // 逐段提取 begin..end（含标记行本身）；用全局匹配定位所有段落
+  const segRe = new RegExp(
+    `${escapeRegExp(BRIDGE_BEGIN_MARK)}[^\\n]*\\n[\\s\\S]*?${escapeRegExp(BRIDGE_END_MARK)}[^\\n]*`,
+    'g',
+  );
+  const segs = patch.match(segRe);
+  if (segs === null || segs.length <= 1) return patch;
+  let out = patch;
+  // 从后往前删，避免前面的删除影响后续匹配到的位置
+  for (let i = segs.length - 1; i >= 1; i -= 1) {
+    out = out.replace(segs[i], '');
+  }
+  // 删段后可能留下多余空行：折叠连续 3 个以上换行，避免文件越来越"松散"
+  return out.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+}
+
+/** 转义正则特殊字符（用于把标记文本当字面量匹配） */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /** 提取 Error 的 message（未知抛出物兜底为字符串化） */

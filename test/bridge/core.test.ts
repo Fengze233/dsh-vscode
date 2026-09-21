@@ -15,7 +15,75 @@ import {
   computeInsertedValue,
   buildReadTextMessage,
   buildReadTextAck,
+  FILE_ENTRY_SELECTOR,
+  resolveFileEntryPath,
 } from '../../bridge-client/lib/core.js';
+
+/** 构造最小按钮替身（只实现 resolveFileEntryPath 需要的接口） */
+function fakeBtn(attrs: { title?: string; 'aria-label'?: string; text?: string; haspopup?: boolean }) {
+  return {
+    getAttribute: (name: string) => {
+      if (name === 'title') return attrs.title ?? null;
+      if (name === 'aria-label') return attrs['aria-label'] ?? null;
+      return null;
+    },
+    textContent: attrs.text ?? '',
+    matches: (sel: string) => (sel === '[aria-haspopup]' ? attrs.haspopup === true : false),
+  };
+}
+
+// ——— issue #22：文件入口解析（原先 classList.contains('fileMention') 恒不命中） ———
+test('FILE_ENTRY_SELECTOR 覆盖三类文件入口', () => {
+  // markdown 文件名（CSS Module 哈希类名，必须用 class*= 而非精确类名）
+  assert.ok(FILE_ENTRY_SELECTOR.includes('button[class*="fileMention"]'));
+  // produced 芯片 / present 卡片预览面：稳定 data 属性 + title
+  assert.ok(FILE_ENTRY_SELECTOR.includes('[data-produced-files-row] button[title]'));
+  assert.ok(FILE_ENTRY_SELECTOR.includes('[data-presented-file] button[title]'));
+});
+
+test('resolveFileEntryPath：title 优先（title 才是路径，aria-label 是动作文案）', () => {
+  // produced 芯片：title 是相对路径，aria-label 是「打开 <路径>」的本地化文案
+  assert.equal(
+    resolveFileEntryPath(fakeBtn({ title: 'docs/progress.md', 'aria-label': '打开 docs/progress.md' })),
+    'docs/progress.md',
+  );
+  // present 卡片：title 已是工作区绝对路径
+  assert.equal(
+    resolveFileEntryPath(fakeBtn({ title: '/home/u/proj/src/a.ts', 'aria-label': '在侧边栏预览 src/a.ts' })),
+    '/home/u/proj/src/a.ts',
+  );
+  // Windows 盘符绝对路径原样透传（协议判定由扩展侧 resolveBridgePath 负责）
+  assert.equal(resolveFileEntryPath(fakeBtn({ title: 'C:\\work\\a.ts' })), 'C:\\work\\a.ts');
+});
+
+test('resolveFileEntryPath：title 为空时从 aria-label 抽取引号包裹的路径', () => {
+  assert.equal(resolveFileEntryPath(fakeBtn({ 'aria-label': '打开 `docs/progress.md`' })), 'docs/progress.md');
+  assert.equal(resolveFileEntryPath(fakeBtn({ 'aria-label': '在侧边栏预览 "src/a.ts"' })), 'src/a.ts');
+  assert.equal(resolveFileEntryPath(fakeBtn({ 'aria-label': 'Open \u201cREADME.md\u201d' })), 'README.md');
+});
+
+test('resolveFileEntryPath：aria-label 无引号路径时判为不可用（不把整串文案当路径）', () => {
+  // 旧实现会把「打开 docs/progress.md」整串下发，扩展侧解析不到文件
+  assert.equal(resolveFileEntryPath(fakeBtn({ 'aria-label': '打开 docs/progress.md' })), null);
+  assert.equal(resolveFileEntryPath(fakeBtn({ 'aria-label': 'queued a.ts, b.ts' })), null);
+  assert.equal(resolveFileEntryPath(fakeBtn({ 'aria-label': '在侧边栏打开' })), null);
+});
+
+test('resolveFileEntryPath：排除 aria-haspopup 的宿主菜单触发按钮', () => {
+  assert.equal(resolveFileEntryPath(fakeBtn({ title: 'docs/a.md', haspopup: true })), null);
+});
+
+test('resolveFileEntryPath：无 title/aria-label 时退回纯文本文件名', () => {
+  assert.equal(resolveFileEntryPath(fakeBtn({ text: 'src/main.ts' })), 'src/main.ts');
+  assert.equal(resolveFileEntryPath(fakeBtn({ text: '   ' })), null);
+  assert.equal(resolveFileEntryPath(fakeBtn({})), null);
+});
+
+test('resolveFileEntryPath：非法输入不抛错', () => {
+  assert.equal(resolveFileEntryPath(null as unknown as never), null);
+  assert.equal(resolveFileEntryPath(undefined as unknown as never), null);
+  assert.equal(resolveFileEntryPath({} as unknown as never), null);
+});
 
 test('isAllowedExternalUrl 仅放行 http/https', () => {
   assert.equal(isAllowedExternalUrl('https://example.com/a'), true);

@@ -2,7 +2,8 @@
   "name": "dsh-vscode-panel",
   "displayName": "DSH",
   "description": "在 VS Code 侧边栏中使用 DeepSeek Harness（DSH）网页界面",
-  "version": "0.5.0",
+  "version": "0.4.1",
+  "l10n": "./l10n",
   "publisher": "Fengze233",
   "icon": "assets/icon.png",
   "license": "MIT",
@@ -345,6 +346,77 @@
           "minimum": 300,
           "maximum": 5000,
           "markdownDescription": "%dsh.config.contextDebounce%"
+        },
+        "dsh.startTimeoutMs": {
+          "type": "number",
+          "default": 45000,
+          "minimum": 5000,
+          "maximum": 600000,
+          "markdownDescription": "%dsh.config.startTimeoutMs%"
+        },
+        "dsh.env": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "markdownDescription": "%dsh.config.env%"
+        },
+        "dsh.useEnvProxy": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%dsh.config.useEnvProxy%"
+        },
+        "dsh.panel.zoomLevel": {
+                  "type": "number",
+                  "default": 1,
+                  "enum": [
+                            0.5,
+                            0.55,
+                            0.6,
+                            0.65,
+                            0.7,
+                            0.75,
+                            0.8,
+                            0.85,
+                            0.9,
+                            0.95,
+                            1.0,
+                            1.05,
+                            1.1,
+                            1.15,
+                            1.2,
+                            1.25,
+                            1.3,
+                            1.35,
+                            1.4,
+                            1.45,
+                            1.5
+                  ],
+                  "enumDescriptions": [
+                            "50%（最小，一屏看最多内容）",
+                            "55%",
+                            "60%",
+                            "65%",
+                            "70%",
+                            "75%",
+                            "80%",
+                            "85%",
+                            "90%",
+                            "95%",
+                            "100%（默认，与 DSH 原始大小一致）",
+                            "105%",
+                            "110%",
+                            "115%",
+                            "120%",
+                            "125%",
+                            "130%",
+                            "135%",
+                            "140%",
+                            "145%",
+                            "150%（最大，适合演示）"
+                  ],
+                  "markdownDescription": "%dsh.config.panelZoom%"
         }
       }
     }

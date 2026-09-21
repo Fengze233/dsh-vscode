@@ -370,3 +370,35 @@ test('resolveDshPackageJsonPath：bin.js 直配 / 符号链接解析 / 向上查
   // ⑤ 全部探测失败 → null（调用方按版本未知处理，不猜测）
   assert.equal(resolveDshPackageJsonPath('/usr/local/bin/dsh', 'linux', () => { throw new Error('x'); }, () => false), null);
 });
+
+// ——— issue #18：向 DSH 子进程注入额外环境变量 ———
+test('startDsh 传 env：与父进程环境合并（父进程变量保留），而不是替换', () => {
+  const calls: SpawnOptions[] = [];
+  const spawnImpl: SpawnFn = (_cmd, _args, opts) => {
+    calls.push(opts as SpawnOptions);
+    return new FakeChild();
+  };
+  const runner = createProcessRunner(spawnImpl, 'linux');
+  runner.startDsh({
+    host: '127.0.0.1', port: 3080, extraArgs: [],
+    env: { NODE_OPTIONS: '--use-env-proxy' },
+  });
+  const env = calls[0].env as Record<string, string> | undefined;
+  assert.ok(env, '传了 env 时应给 spawn 提供 env');
+  assert.equal(env.NODE_OPTIONS, '--use-env-proxy');
+  // 父进程原有变量必须保留（生产里 process.env.PATH 尤其关键）
+  assert.equal(env.PATH, process.env.PATH);
+});
+
+test('startDsh 未传 env 或传空对象：不给 spawn 提供 env 键（保持完全继承的既有行为）', () => {
+  const calls: SpawnOptions[] = [];
+  const spawnImpl: SpawnFn = (_cmd, _args, opts) => {
+    calls.push(opts as SpawnOptions);
+    return new FakeChild();
+  };
+  const runner = createProcessRunner(spawnImpl, 'linux');
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
+  assert.equal('env' in calls[0], false, '未配置时不应出现 env 键');
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], env: {} });
+  assert.equal('env' in calls[1], false, '空对象等同未配置');
+});

@@ -37,6 +37,10 @@ export interface ManagerOptions {
   executablePath?: string;
   /** 是否允许 dsh web 打开浏览器（true=不传 --no-open；默认追加 --no-open） */
   openInBrowser?: boolean;
+  /** 启动总超时（毫秒，默认 45000，可用 dsh.startTimeoutMs 调整；issue #23） */
+  startTimeoutMs?: number;
+  /** 额外注入子进程的环境变量（dsh.env + useEnvProxy 合并结果；issue #18） */
+  env?: Record<string, string>;
 }
 
 /**
@@ -64,8 +68,9 @@ export interface ManagerDeps {
   onLaunchUrl?: (url: string) => void;
 }
 
-/** 启动总超时默认值（毫秒） */
-const DEFAULT_START_TIMEOUT_MS = 15000;
+/** 启动总超时默认值（毫秒）：45s。Windows 冷启动实测可达 17–23s，
+ *  旧的 15s 会让已就绪的服务被判超时（issue #23）；用户可用 dsh.startTimeoutMs 调整。 */
+const DEFAULT_START_TIMEOUT_MS = 45000;
 /** 就绪后健康探测间隔默认值（毫秒） */
 const DEFAULT_HEALTH_INTERVAL_MS = 30000;
 /** 「崩溃后换端口重启」的最大轮数（防死循环；超过后报启动崩溃） */
@@ -99,6 +104,12 @@ export class ServiceManager {
   };
 
   constructor(private opts: ManagerOptions, private deps: ManagerDeps) {
+    // 启动总超时以 ManagerOptions 为准（dsh.startTimeoutMs 经 toManagerOptions 传入）；
+    // deps.startTimeoutMs 仅作为测试注入默认使用。注意不能反过来判"deps 没值才取 options"：
+    // 测试 harness 总会塞 deps 默认值，那样配置将永远不生效（issue #23 实现时踩过）。
+    if (opts.startTimeoutMs !== undefined) {
+      this.deps.startTimeoutMs = opts.startTimeoutMs;
+    }
     process.once('exit', this.parentExitHook);
   }
 
@@ -248,6 +259,8 @@ export class ServiceManager {
           executablePath: this.opts.executablePath,
           // noOpenDisabled 后视为"用户要求弹浏览器"（即不追加 --no-open），兼容旧版 dsh
           openInBrowser: this.noOpenDisabled ? true : this.opts.openInBrowser,
+          // 额外环境变量（issue #18）：未配置时保持 undefined（runner 不传 env，完全继承父进程）
+          env: this.opts.env,
         });
         break; // spawn 成功（未同步抛异常），跳出重试循环继续等待就绪
       } catch (err) {
@@ -454,6 +467,10 @@ export class ServiceManager {
     const prev = { host: this.opts.host, port: this.opts.port, cwd: this.opts.cwd };
     const targetChanged = prev.host !== opts.host || prev.port !== opts.port || prev.cwd !== opts.cwd;
     this.opts = opts;
+    // 同步启动超时（issue #23）：设置项改后立即生效，否则要重载窗口才生效
+    if (opts.startTimeoutMs !== undefined) {
+      this.deps.startTimeoutMs = opts.startTimeoutMs;
+    }
     if (targetChanged) {
       if (this.child) return this.restart();
       // 复用外部服务时只更新地址展示，实际可达性由下次 ensureRunning 重新探测

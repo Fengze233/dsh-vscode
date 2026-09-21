@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { initI18n, t } from './i18n';
-import { readConfig, type DshConfig } from './config';
+import { readConfig, buildChildEnv, type DshConfig } from './config';
 import { probeService } from './service/detect';
 import { createProcessRunner, findInPath, findInPathPosix, resolveDshPackageJsonPath } from './service/process';
 import { ServiceManager, type ManagerOptions } from './service/manager';
@@ -26,6 +26,7 @@ import {
   installBridge,
   uninstallBridge,
   createNodeFs,
+  npmNodeModulesRootFrom,
   type BridgeInstallResult,
 } from './bridge/installer';
 import { cleanupAllImageCaches, cleanupStaleImageCaches } from './bridge/host';
@@ -78,6 +79,10 @@ function toManagerOptions(config: DshConfig): ManagerOptions {
     openInBrowser: config.openInBrowser,
     timeoutMs: 3000,
     pollMs: 500,
+    // 启动总超时由 dsh.startTimeoutMs 驱动（默认 45s；Windows 冷启动实测 17–23s，issue #23）
+    startTimeoutMs: config.startTimeoutMs,
+    // 子进程额外环境变量：dsh.env 与 dsh.useEnvProxy 合并（issue #18；无配置时 runner 不传 env）
+    env: buildChildEnv(config.env, config.useEnvProxy),
   };
 }
 
@@ -88,21 +93,27 @@ function toManagerOptions(config: DshConfig): ManagerOptions {
  * 进程不同，profiles 双位置仍可能解析不到桥接包；而 npm 全局 node_modules
  * （AppData\Roaming\npm\node_modules）是确定可达的位置。本函数据此返回该目录作为第三安装目标。
  *
- * 规则（仅 win32）：
- * - 优先 config.executablePath（非空且不以 .js 结尾）→ dirname；
- * - 否则 findInPath('dsh.cmd', process.env.PATH) → dirname；
- * - 都找不到 → undefined（不传，保持双位置向后兼容）。
+ * 规则（仅 win32，issue #20 修正）：
+ * - config.executablePath 以 .js 结尾（包内入口，如 DSH Desktop 的 `…\@deepseek-ai\dsh\lib\bin.js`）
+ *   → 从该路径**向上寻找第一个 node_modules 目录**；找不到就放弃该目标；
+ * - config.executablePath 指向垫片（.cmd）→ 用 `dirname(垫片)/node_modules`
+ *   （垫片目录本身不是 node_modules 根，直接返回它会把桥接包写进别人的私有目录）；
+ * - 否则 findInPath('dsh.cmd', PATH) → 同上推导；
+ * - 推导不出真正的 node_modules 根 → undefined（只装 profiles 双位置）。
  * - 非 win32 → undefined。
  */
 function resolveNpmGlobalNodeModules(config: DshConfig): string | undefined {
   if (process.platform !== 'win32') return undefined;
   const exec = config.executablePath;
-  if (exec && !exec.endsWith('.js')) {
-    return dirname(exec);
+  if (exec && exec.endsWith('.js')) {
+    return npmNodeModulesRootFrom(exec);
+  }
+  if (exec) {
+    return join(dirname(exec), 'node_modules');
   }
   const found = findInPath('dsh.cmd', process.env.PATH ?? '');
   if (found) {
-    return dirname(found);
+    return join(dirname(found), 'node_modules');
   }
   return undefined;
 }
@@ -533,6 +544,8 @@ export function activate(context: vscode.ExtensionContext): void {
     frameBaseOverride: () =>
       authProxyStarted && authSessionState === 'ok' && manager?.getSnapshot().state === 'ready' ? (authProxy?.baseUrl ?? null) : null,
     onAuthUrlSubmit: (url) => void handleAuthUrlSubmit(url),
+    // 面板缩放：由 dsh.panel.zoomLevel 驱动（issue #8）
+    zoomLevel: () => readConfig().config.panelZoomLevel,
   });
 
   /** 用户浏览器可打开的 DSH 地址：优先带 token 的启动网址（0.1.2 起浏览器需要它完成登录） */

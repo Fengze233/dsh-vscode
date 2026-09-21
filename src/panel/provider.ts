@@ -44,6 +44,8 @@ export interface PanelProviderUiOpts {
   frameBaseOverride?: () => string | null;
   /** 「需要登录」页提交启动网址的回调（扩展校验并兑换） */
   onAuthUrlSubmit?: (url: string) => void;
+  /** 面板缩放 getter（dsh.panel.zoomLevel，issue #8；缺省 1 = 不缩放） */
+  zoomLevel?: () => number;
 }
 
 export class DshPanelProvider implements vscode.WebviewViewProvider {
@@ -344,6 +346,8 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
             this.context
               ? { fileLabel: this.context.getFileLabel(), autoFollow: this.context.getAutoFollow() }
               : undefined,
+            // 面板缩放（issue #8）：未接线时 1（不缩放）
+            this.ui.zoomLevel?.() ?? 1,
           );
           break;
         }
@@ -362,13 +366,22 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /** 工具条状态刷新:向 webview 推送下行消息并重渲染(文件切换/设置变更时由扩展调用) */
+  /**
+   * 刷新面板：把最新的工具条状态推给 webview 并重渲染（文件切换/设置变更时由扩展调用）。
+   *
+   * 注意：**不能**在未注入 context 时提前返回——缩放档位等"渲染期读取"的设置项
+   * 也依赖这个入口重渲染，提前返回会让改设置后必须重载窗口才生效（自审时发现的缺陷）。
+   * 未注入 context 时只做重渲染，不发工具条消息。
+   */
   refreshContextBar(): void {
-    if (!this.view || !this.context) return;
-    void this.view.webview.postMessage({
-      kind: 'updateContextBar',
-      fileLabel: this.context.getFileLabel(),
-      autoFollow: this.context.getAutoFollow(),
-    });
+    if (!this.view) return;
+    if (this.context) {
+      void this.view.webview.postMessage({
+        kind: 'updateContextBar',
+        fileLabel: this.context.getFileLabel(),
+        autoFollow: this.context.getAutoFollow(),
+      });
+    }
     this.render();
   }
 }

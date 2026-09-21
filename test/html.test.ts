@@ -161,7 +161,8 @@ test('authRequiredPage 需要登录引导页：说明 + 输入框 + 提交经 po
   assert.ok(html.includes('id="auth-submit"'), '应有登录按钮');
   assert.ok(html.includes("type: 'authSubmitLaunchUrl'"), '提交应经 postMessage 发给扩展校验/兑换');
   assert.ok(html.includes(t('panel.authPlaceholder')), '输入框应有示例占位文案');
-  assert.ok(!html.includes('dsh-frame'), '登录页不应包含 DSH iframe');
+  // 断言口径：检查 iframe 元素本身，而不是子串（共享 CSS 里的注释/选择器也可能含相似字样）
+  assert.ok(!html.includes('<iframe'), '登录页不应包含 DSH iframe 元素');
 });
 
 test('authRequiredPage 英文文案不缺失（en/zh 双语齐全）', () => {
@@ -219,4 +220,44 @@ test('工具条 fileLabel 为空时显示空标签', () => {
   const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, { fileLabel: null, autoFollow: false });
   assert.ok(html.includes('Current file'), '无文件时仍显示「当前文件」前缀文案');
   assert.ok(html.includes('id="dsh-ctx-label"></span>'), '标签内容为空(不渲染 null 字样)');
+});
+
+// ——— issue #8：面板缩放 ———
+test('readyPage 默认不缩放：不写 zoom 变量（保持历史 DOM）', () => {
+  // 注意断言口径：CSS 里定义了 --dshv-zoom 的默认值，所以不能直接找子串，
+  // 要确认"元素上没有被写入内联缩放变量"
+  const html = readyPage('http://127.0.0.1:3080/', ctx());
+  assert.ok(!html.includes('style="--dshv-zoom'), '默认 1 时不应输出内联 zoom 变量');
+  const html2 = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 1);
+  assert.ok(!html2.includes('style="--dshv-zoom'), '显式传 1 同样不输出');
+});
+
+test('readyPage 缩放：注入 zoom 变量，iframe 用 calc(100%/zoom) + scale(zoom) 铺满', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 0.8);
+  assert.ok(html.includes('style="--dshv-zoom:0.8"'), '应写入 0.8 的缩放变量（内联）');
+  // 逻辑尺寸 100%/zoom 再 scale(zoom) → 物理尺寸恒等于容器：缩小/放大两方向都铺满
+  // （真机几何实测：0.5/0.75/1/1.25/1.5 × 有/无工具条，留白 0、无滚动条、三点命中均为 iframe）
+  assert.ok(/width: calc\(100% \/ var\(--dshv-zoom, 1\)\)/.test(html), '宽度按 1/zoom 计算');
+  assert.ok(/height: calc\(100% \/ var\(--dshv-zoom, 1\)\)/.test(html), '高度按 1/zoom 计算');
+  assert.ok(/transform: scale\(var\(--dshv-zoom, 1\)\)/.test(html), '用 scale 还原物理尺寸');
+  assert.ok(/transform-origin: 0 0/.test(html), '缩放原点必须在左上角');
+  // 缩放由容器变量驱动；iframe 自身仍保留 id/class（桥接脚本依赖它们）
+  assert.ok(html.includes('class="frame-zoom"'));
+  assert.ok(html.includes('id="dsh-frame"'));
+  assert.ok(html.includes('allow="clipboard-write"'));
+});
+
+test('缩放支持放大方向（>1）与自定义值（如 1.15）', () => {
+  const up = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 1.5);
+  assert.ok(up.includes('style="--dshv-zoom:1.5"'), '放大档位同样只写 zoom 变量');
+  const custom = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 1.15);
+  assert.ok(custom.includes('style="--dshv-zoom:1.15"'), '自定义值应原样注入');
+});
+
+test('缩放布局：iframe 不参与 flex（flex:1 会固定 width，与百分比尺寸冲突）', () => {
+  // 回归防线：曾用 `.has-bar .frame-zoom { position: relative; flex: 1 }` + `iframe { flex: 1 }`，
+  // 真机实测出现横向滚动条与内容不满。现改为容器绝对定位 + iframe 不用 flex。
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 0.9);
+  assert.ok(!/\.has-bar iframe\.frame \{[^}]*flex/.test(html), '不得再给 iframe 加 flex');
+  assert.ok(/\.has-bar \.frame-zoom \{[^}]*position: absolute/.test(html), '工具栏下容器应绝对定位铺满剩余区域');
 });

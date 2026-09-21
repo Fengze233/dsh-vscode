@@ -202,10 +202,43 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 | `dsh.openInBrowser` | `false` | 服务启动后在默认浏览器中打开 DSH 页面（关闭时向 `dsh web` 传递 `--no-open`） |
 | `dsh.remote.enabled` | `false` | 启用远程场景（SSH Remote / WSL / Dev Containers / Codespaces）：在远端运行 dsh，经 VS Code 隧道在面板中打开（默认关闭；开启后需重载窗口生效） |
 | `dsh.image.fallback` | `true` | 当前模型无视觉能力时，把上传图片以文件路径形式随消息发送而不报错（文件缓存在会话工作目录，面板关闭时清理） |
+| `dsh.startTimeoutMs` | `45000` | 等待 `dsh web` 就绪的总超时（毫秒，5000–600000）。冷启动慢的机器（Windows 实测 17–23 秒）可调大；日志提示「未在 N 秒内就绪」但服务其实已起来时优先调此项 |
+| `dsh.env` | `{}` | 注入 DSH 子进程的额外环境变量（键值对，与父进程环境合并）。典型用法：代理网络下设 `{"NODE_OPTIONS":"--use-env-proxy"}` |
+| `dsh.useEnvProxy` | `false` | 自动为子进程的 `NODE_OPTIONS` 追加 `--use-env-proxy`（不覆盖已有选项）。必须经 HTTP/HTTPS 代理才能访问模型 API 时开启 |
+| `dsh.panel.zoomLevel` | `1` | 面板内网页缩放：下拉可选 `0.5`–`1.5`（每 0.05 一档）；更细的值可直接写 `settings.json` |
+
+### 设置界面中英对照
+
+设置界面的**条目名**由配置键推导（点号变空格、中间段加冒号），**说明文案**来自扩展的本地化文件（包内已提供 `package.nls.zh-cn.json` / `package.nls.zh-hans.json`）。
+但在 VS Code + WSL Remote 场景下实测：即使扩展宿主的 locale 已是 `zh-cn`、nls 文件与键覆盖均正确，设置界面仍显示英文（对照中可见官方 `Remote.*` 扩展为中文）——属该环境的清单本地化限制，非扩展缺陷。因此本表作为长期可用的对照；搜索时**直接输配置键**（如 `panel.zoomLevel`、`useEnvProxy`）比输标题更容易命中。
+
+| 设置界面显示的英文名 | 配置键 | 含义 |
+|---|---|---|
+| Dsh: Auto Start | `dsh.autoStart` | 服务未运行时自动启动 `dsh web` |
+| Dsh: Bridge: Enabled | `dsh.bridge.enabled` | 启用面板与 DSH 之间的桥接（外链、文件跳转） |
+| Dsh: Bridge: Silence Warning | `dsh.bridge.silenceWarning` | 抑制桥接警告 |
+| Dsh: Context: Auto Follow | `dsh.context.autoFollow` | 切换文件时自动把当前文件注入 DSH 上下文 |
+| Dsh: Context: Follow Debounce Ms | `dsh.context.followDebounceMs` | 自动跟随的防抖毫秒数（300–5000） |
+| Dsh: Env | `dsh.env` | 注入 DSH 子进程的环境变量（键值对） |
+| Dsh: Executable Path | `dsh.executablePath` | `dsh` 可执行文件绝对路径（留空则从 PATH 查找） |
+| Dsh: Extra Args | `dsh.extraArgs` | 启动 `dsh web` 时附加的参数 |
+| Dsh: Host | `dsh.host` | 服务地址（仅允许回环地址） |
+| Dsh: Image: Fallback | `dsh.image.fallback` | 模型无视觉能力时把图片降级为路径转发 |
+| Dsh: Open In Browser | `dsh.openInBrowser` | 启动后在默认浏览器打开 DSH 页面 |
+| **Dsh: Panel: Zoom Level** | `dsh.panel.zoomLevel` | **面板内网页缩放**：0.5–1.5，可自定义数值 |
+| Dsh: Port | `dsh.port` | 期望端口（探测与启动共用） |
+| Dsh: Remote: Enabled | `dsh.remote.enabled` | 启用远程场景（SSH Remote / WSL / Dev Containers） |
+| Dsh: Start Timeout Ms | `dsh.startTimeoutMs` | 等待 `dsh web` 就绪的总超时（毫秒，默认 45000） |
+| Dsh: Stop On Exit | `dsh.stopOnExit` | 关闭最后一个窗口时停止插件启动的服务 |
+| **Dsh: Use Env Proxy** | `dsh.useEnvProxy` | **自动为子进程追加 `NODE_OPTIONS=--use-env-proxy`**（代理环境用） |
+| Dsh: Workspace Root Index | `dsh.workspaceRootIndex` | 多根工作区取第几个根目录（从 0 起） |
 
 ## 🌍 多语言
 
 界面文案跟随 VS Code 显示语言（`Configure Display Language`）：`zh-*` → 简体中文，其余语言 → 英文。
+
+扩展包内提供 `package.nls.json` / `package.nls.zh-cn.json` / `package.nls.zh-hans.json`。
+但在 **VS Code + WSL Remote** 场景实测：即使扩展宿主的 locale 已是 `zh-cn`、本地化文件与键覆盖均正确，设置界面仍显示英文（同一界面里官方 `Remote.*` 扩展为中文）——属该环境的清单本地化限制，非扩展缺陷。因此上文《设置界面中英对照》表作为长期可用的对照方案。
 
 ## 🧑‍💻 开发
 
@@ -213,7 +246,7 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 
 ```bash
 npm install
-npm run test          # 285 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话、上下文注入）
+npm run test          # 326 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话、上下文注入）
 npm run compile       # 构建 out/extension.js
 npm run watch         # 监听构建
 npm run typecheck     # 类型检查

@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     // —— 握手状态 ——
     let bridgeToken = ""; // 父页面下发的握手 token；未握手前为空，不激活任何拦截
     // 桥接包版本（与插件版本统一，随包发布；安装器按「版本不一致或 client.js 内容不一致」强制重装）
-    const BRIDGE_VERSION = "0.5.0";
+    const BRIDGE_VERSION = "0.4.1";
 
     // —— 剪贴板写桥接：VS Code webview 对跨源 iframe 的 navigator.clipboard.writeText 有权限拦截 ——
     // 背景：即使 iframe 声明 allow="clipboard-write"，VS Code（Electron）仍会拒绝写入
@@ -432,7 +432,7 @@ window.__ModuleLoader__.load({
       if (menuEl) menuEl.style.display = "none";
     }
 
-    // —— DOM 拦截：外链与 fileMention 点击 → postMessage 转发给父页面（扩展） ——
+    // —— DOM 拦截：外链与文件入口（markdown 文件名 / produced 芯片 / present 卡片）点击 → postMessage 转发给父页面（扩展） ——
     function bindLinkInterception() {
       document.addEventListener("click", (e) => {
         if (bridgeToken === "") return; // 未握手（普通浏览器打开）不激活
@@ -446,15 +446,19 @@ window.__ModuleLoader__.load({
           parent.postMessage(buildOpenExternalMessage(anchor.href), "*");
           return;
         }
-        // 文件路径按钮：DSH fileMention 渲染为 button.fileMention，label 取 aria-label/title/textContent
-        const btn = target.closest("button[title], button[aria-label]");
-        if (btn && btn.classList && btn.classList.contains("fileMention")) {
-          e.preventDefault();
-          e.stopPropagation();
-          const label = btn.getAttribute("aria-label") || btn.getAttribute("title") || btn.textContent || "";
-          // openFile 消息仍发送 path；不带 cwd 字段（工作区同步已移除，会话 cwd 不再维护），
-          // 扩展侧以工作区根目录作为相对路径解析兜底。
-          parent.postMessage(buildOpenFileMessage(label), "*");
+        // 文件入口按钮：markdown 文件名（CSS Module 哈希类名）/ produced 芯片 / present 卡片
+        // 统一走 FILE_ENTRY_SELECTOR + resolveFileEntryPath（替代原先恒不命中的
+        // classList.contains('fileMention')，见 issue #22）。
+        const btn = target.closest(FILE_ENTRY_SELECTOR);
+        if (btn) {
+          const path = resolveFileEntryPath(btn);
+          if (path !== null && path !== "") {
+            e.preventDefault();
+            e.stopPropagation();
+            // openFile 消息仍发送 path；不带 cwd 字段（工作区同步已移除，会话 cwd 不再维护），
+            // 扩展侧以工作区根目录作为相对路径解析兜底。
+            parent.postMessage(buildOpenFileMessage(path), "*");
+          }
         }
       }, true); // 捕获阶段：先于 DSH 自身处理器
     }

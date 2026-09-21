@@ -76,6 +76,29 @@ test('resolveWebviewView 注入 context 时渲染工具条(含文件标签)', ()
   assert.ok(h.view.webview.html.includes('src/extension.ts'));
 });
 
+// 自审回归：缩放档位等"渲染期读取"的设置项也依赖 refreshContextBar 重渲染。
+// 若在未注入 context 时提前 return，改设置后必须重载窗口才生效。
+test('refreshContextBar 在未注入 context 时仍然重渲染（缩放置变更即时生效）', () => {
+  const manager = fakeManager();
+  let zoom = 1;
+  const provider = new DshPanelProvider(
+    manager as never,
+    undefined, undefined,
+    () => '/proj', () => true, () => false,
+    async (u) => u, () => true,
+    { zoomLevel: () => zoom }, // ui：只接线缩放
+    undefined, // context 未注入
+  );
+  const view = fakeView();
+  provider.resolveWebviewView(view as never);
+  // 注意口径：CSS 里定义了 --dshv-zoom 的默认值，所以要看"元素上有没有写入内联缩放变量"
+  assert.ok(!view.webview.html.includes('style="--dshv-zoom'), '默认 1 档不写内联缩放变量');
+  zoom = 0.8;
+  provider.refreshContextBar();
+  assert.ok(view.webview.html.includes('style="--dshv-zoom:0.8'), '重渲染后应写入新的内联缩放变量');
+  assert.equal(view.posted.length, 0, '未注入 context 时不应发工具条消息');
+});
+
 test('addFileContext 消息 → context.addFileContext()', () => {
   const h = makeCtx();
   h.view.fire({ type: 'addFileContext' });

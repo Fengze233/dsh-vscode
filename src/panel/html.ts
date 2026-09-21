@@ -70,7 +70,25 @@ iframe.frame { position: fixed; inset: 0; width: 100%; height: 100%; border: non
 .ctx-bar button { padding: 2px 8px; margin: 0; font-size: 12px; }
 .ctx-bar label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
 body.frame-body.has-bar { display: flex; flex-direction: column; }
-.has-bar iframe.frame { position: static; flex: 1; }
+/* 面板缩放（issue #8，支持 0.5–1.5 两个方向）：用 transform: scale 缩放 iframe——
+   浏览器会把指针坐标自动逆变换回 iframe 的逻辑坐标系，因此点击位置依然准确。
+   关键点（均为真机几何实测得出）：
+   1) 容器必须“绝对定位”铺满可用区域；不要给 iframe 加 flex:1（flex 会固定 width，
+      与下面的百分比尺寸冲突，实测出现滚动条/内容不满）。
+   2) iframe 的逻辑尺寸按 1/zoom 放大、再用 scale(zoom) 还原，于是**物理尺寸恒等于容器**
+      —— 缩小与放大两个方向都能完美铺满（旧实现只在 ≤1 时成立，>1 会右/下落空）。
+   变量名刻意用 --dshv- 前缀，避免与页面里 iframe 元素的 id 子串互相干扰。 */
+.frame-zoom { position: absolute; inset: 0; }
+/* 顶部工具条存在时，缩放容器铺满工具条以下的剩余区域。
+   注：这里的 28px 与上面 .ctx-bar 的固定高度对齐（工具条是固定高的一条），改其高度需同步此处。 */
+.has-bar .frame-zoom { position: absolute; left: 0; right: 0; bottom: 0; top: 28px; }
+.frame-zoom > iframe.frame {
+  position: absolute; left: 0; top: 0; display: block; border: none;
+  width: calc(100% / var(--dshv-zoom, 1));
+  height: calc(100% / var(--dshv-zoom, 1));
+  transform: scale(var(--dshv-zoom, 1));
+  transform-origin: 0 0;
+}
 `;
 
 /** 按钮点击 → postMessage 的内联脚本（nonce 放行） */
@@ -392,12 +410,15 @@ export function stoppedPage(t: T, ctx: PageCtx): string {
  * 桥接启用时注入握手脚本，让顶层 webview 与 DSH 页面 iframe 建立握手并转发跳转/剪贴板消息。
  * @param bridge 桥接配置（可选，向后兼容既有调用）：token 为握手凭据，enabled 为是否注入握手脚本
  * @param contextBar 上下文工具条状态（可选，不传则不渲染工具条，向后兼容）
+ * @param zoomLevel 面板缩放（issue #8，可选，默认 1）；非 1 时用 CSS zoom 缩放 iframe，
+ *   并按比例放大 iframe 尺寸，使缩放后仍正好铺满容器（不产生横向滚动条）
  */
 export function readyPage(
   url: string,
   ctx: PageCtx,
   bridge?: { token: string; enabled: boolean; imageFallback?: boolean },
   contextBar?: ContextBarState,
+  zoomLevel = 1,
 ): string {
   // 桥接启用时注入握手脚本；未传入或 enabled=false 时保持向后兼容，不注入
   const extraScripts = bridge?.enabled
@@ -408,11 +429,16 @@ export function readyPage(
     ? `<script nonce="${ctx.nonce}">${CONTEXT_BAR_SCRIPT}</script>${contextBarHtml(t, contextBar)}`
     : '';
   const bodyClass = contextBar ? 'frame-body has-bar' : 'frame-body';
+  // 缩放：只对非 1 的档位写入内联变量（1 时保持历史 DOM，零行为变化）
+  const zoomAttr =
+    zoomLevel !== undefined && zoomLevel !== 1
+      ? ` style="--dshv-zoom:${zoomLevel}"`
+      : '';
   return shell(
     ctx,
     'DSH',
     bodyClass,
-    `${bar}<iframe id="dsh-frame" class="frame" allow="clipboard-write" src="${url}"></iframe>`,
+    `${bar}<div class="frame-zoom"${zoomAttr}><iframe id="dsh-frame" class="frame" allow="clipboard-write" src="${url}"></iframe></div>`,
     extraScripts,
   );
 }
