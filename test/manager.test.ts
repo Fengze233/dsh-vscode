@@ -616,3 +616,23 @@ test('reconfigure host/port/cwd 全不变:不重启(无多余 spawn)', async () 
   assert.equal(h.child, oldChild);
   h.manager.dispose(); // 同上:清理健康探测 interval,避免测试进程挂起
 });
+
+// ——— issue #23：设置项改动后超时值必须立即生效（走 reconfigure 路径） ———
+test('reconfigure 会同步新的 startTimeoutMs（改设置后无需重载窗口）', async () => {
+  const h = makeHarness({ startTimeoutMs: 50 });
+  h.probeQueue = ['down'];
+  const before = await h.manager.ensureRunning();
+  assert.equal(before.error, 'err.startTimeout');
+  assert.equal(before.errorVars?.seconds, 0); // 50ms → round→0
+
+  // 模拟用户在设置里把超时改成 1500ms 后触发的配置变更
+  await h.manager.reconfigure({
+    host: '127.0.0.1', port: 3080, extraArgs: [], autoStart: true,
+    timeoutMs: 100, pollMs: 5, startTimeoutMs: 1500,
+  });
+  h.probeQueue = ['down'];
+  const after = await h.manager.ensureRunning();
+  assert.equal(after.error, 'err.startTimeout');
+  assert.equal(after.errorVars?.seconds, 2, '新超时值应已生效（1500ms → round→2）');
+  h.manager.dispose();
+});

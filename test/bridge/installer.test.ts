@@ -578,32 +578,59 @@ test('npmNodeModulesRootFrom：从包内 bin.js 上溯到 node_modules 根', () 
   assert.equal(npmNodeModulesRootFrom('C:\\tools\\dsh\\lib\\bin.js'), undefined);
 });
 
-test('shouldSkipForeignTarget：目录不存在 → 可写；仅含本扩展产物 → 可写', () => {
+test('shouldSkipForeignTarget：按父目录判定——不存在 → 可写；仅含本扩展包 → 可写', () => {
   const empty = { exists: () => false, readdir: () => [] };
-  assert.equal(shouldSkipForeignTarget('C:\\any\\dsh-vscode-bridge', empty), false);
+  assert.equal(shouldSkipForeignTarget('C:\\any\\node_modules', empty), false);
 
   const ours = {
     exists: () => true,
     readdir: () => [BRIDGE_PACKAGE_NAME],
   };
-  assert.equal(shouldSkipForeignTarget('C:\\npm\\node_modules\\dsh-vscode-bridge', ours), false);
+  assert.equal(shouldSkipForeignTarget('C:\\npm\\node_modules', ours), false);
 });
 
-test('shouldSkipForeignTarget：目录含他人产物（如 DSH Desktop 的 dsh.cmd）→ 跳过', () => {
+test('shouldSkipForeignTarget：父目录含他人产物（如 DSH Desktop 的 dsh.cmd）→ 跳过', () => {
   // 复刻 issue #20 的受害目录：%APPDATA%\DSH Desktop\host-commands\desktop\bin
+  // 注意判定对象是**父目录**：目标子目录 dsh-vscode-bridge 还不存在，但父目录被桌面独占。
   const victim = {
     exists: () => true,
     readdir: () => ['dsh.cmd'],
   };
-  assert.equal(shouldSkipForeignTarget('C:\\Users\\u\\AppData\\Roaming\\DSH Desktop\\host-commands\\desktop\\bin\\dsh-vscode-bridge', victim), true);
+  assert.equal(shouldSkipForeignTarget('C:\\Users\\u\\AppData\\Roaming\\DSH Desktop\\host-commands\\desktop\\bin', victim), true);
 });
 
-test('shouldSkipForeignTarget：目录不可读 → 保守跳过（不冒写坏他人目录的风险）', () => {
+test('shouldSkipForeignTarget：父目录不可读 → 保守跳过（不冒写坏他人目录的风险）', () => {
   const boom = {
     exists: () => true,
     readdir: () => { throw new Error('EACCES'); },
   };
-  assert.equal(shouldSkipForeignTarget('C:\\locked\\dsh-vscode-bridge', boom), true);
+  assert.equal(shouldSkipForeignTarget('C:\\locked\\node_modules', boom), true);
+});
+
+test('installBridge：父目录被他人占用时不写入其子目录（issue #20 的核心场景）', () => {
+  // 端到端复刻：目标 `…/desktop/bin/dsh-vscode-bridge` 不存在，但父目录 `…/desktop/bin` 里有 dsh.cmd。
+  // 修复前会新建子目录（污染宿主私有目录）；修复后必须跳过。
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const desktopBin = 'C:\\Users\\u\\AppData\\Roaming\\DSH Desktop\\host-commands\\desktop\\bin';
+  const memFs = makeMemFs({ [patchPath]: '[]\n' });
+  memFs.mkdir(profile);
+  const fs: InstallerFs = {
+    ...memFs,
+    exists: (p) => (p === desktopBin ? true : memFs.exists(p)),
+    readdir: (p) => (p === desktopBin ? ['dsh.cmd'] : memFs.readdir(p)),
+  };
+
+  const r = installBridge({
+    dshHome: '/home/u/.dsh',
+    bridgeSourceDir: '/ext/bridge-client',
+    fs,
+    npmGlobalNodeModules: desktopBin,
+  });
+  assert.equal(r.status, 'ok');
+  assert.ok(memFs.exists(`${profile}/node_modules/dsh-vscode-bridge/package.json`), 'profiles 位置照常安装');
+  assert.equal(memFs.exists(`${desktopBin}\\dsh-vscode-bridge/package.json`), false, '不得在宿主私有目录里新建条目');
+  assert.equal(fs.readdir(desktopBin).length, 1, '宿主目录条目数不变');
 });
 
 test('installBridge：npm 目标目录含他人产物时跳过该目标，其余位置照常安装（issue #20）', () => {
@@ -613,11 +640,11 @@ test('installBridge：npm 目标目录含他人产物时跳过该目标，其余
   const desktopBinBridge = `${desktopBin}\\dsh-vscode-bridge`;
   const memFs = makeMemFs({ [patchPath]: '[]\n' });
   memFs.mkdir(profile);
-  // 让第三方私有目录"已存在且含 dsh.cmd"（模拟真实受害目录的内容）
+  // 模拟真实受害目录：父目录里只有桌面自己的 dsh.cmd（子目录不存在）
   const fs: InstallerFs = {
     ...memFs,
-    exists: (p) => (p === desktopBinBridge ? true : memFs.exists(p)),
-    readdir: (p) => (p === desktopBinBridge ? ['dsh.cmd'] : memFs.readdir(p)),
+    exists: (p) => (p === desktopBin ? true : memFs.exists(p)),
+    readdir: (p) => (p === desktopBin ? ['dsh.cmd'] : memFs.readdir(p)),
   };
 
   const r = installBridge({

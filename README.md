@@ -205,7 +205,7 @@ The panel toolbar shows the current file with **Add** and **Auto-follow** contro
 | `dsh.startTimeoutMs` | `45000` | How long to wait for `dsh web` to become ready, in milliseconds (5000–600000). Raise it on slow machines (Windows cold start measured at 17–23 s); this is the first knob to turn when the log says the service was not ready in time although it did start |
 | `dsh.env` | `{}` | Extra environment variables injected into the DSH child process (merged with the parent environment). Typical use on proxy networks: `{"NODE_OPTIONS":"--use-env-proxy"}` |
 | `dsh.useEnvProxy` | `false` | Append `--use-env-proxy` to the child process's `NODE_OPTIONS` (existing options are kept). Enable it when the model API is only reachable through an HTTP/HTTPS proxy |
-| `dsh.panel.zoomLevel` | `1` | Zoom level of the embedded page (`0.5`/`0.75`/`0.9`/`1`/`1.1`/`1.25`/`1.5`/`2`): shrink it when the text is too large in the sidebar, enlarge it for demos |
+| `dsh.panel.zoomLevel` | `1` | Zoom level of the embedded page (`0.5`/`0.6`/`0.7`/`0.8`/`0.9`/`1`): shrink it when the text is too large in the sidebar (shrink-only) |
 
 ## 🌍 Localization
 

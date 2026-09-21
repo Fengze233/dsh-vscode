@@ -100,8 +100,11 @@ export const DEFAULTS: DshConfig = {
   panelZoomLevel: 1,
 };
 
-/** 面板缩放允许的档位（issue #8）：离散档位便于设置 UI 用下拉选择，也避免极端值把布局搞坏 */
-export const PANEL_ZOOM_LEVELS = [0.5, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 2] as const;
+/** 面板缩放允许的档位（issue #8）：只提供"缩小"方向。
+ *  原因（真机几何实测）：放大方向（zoom > 1）时 iframe 的逻辑视口会大于面板物理尺寸，
+ *  内容右/下必然留白；而该 issue 的真实诉求是"侧边栏里字太大"，缩小方向可做到
+ *  完美铺满、无滚动条、点击命中正常。 */
+export const PANEL_ZOOM_LEVELS = [0.5, 0.6, 0.7, 0.8, 0.9, 1] as const;
 
 /** 启动超时允许的下限（毫秒）：低于 5s 对真实 DSH 冷启动没有意义 */
 export const MIN_START_TIMEOUT_MS = 5000;

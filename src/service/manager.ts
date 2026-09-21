@@ -467,6 +467,10 @@ export class ServiceManager {
     const prev = { host: this.opts.host, port: this.opts.port, cwd: this.opts.cwd };
     const targetChanged = prev.host !== opts.host || prev.port !== opts.port || prev.cwd !== opts.cwd;
     this.opts = opts;
+    // 同步启动超时（issue #23）：设置项改后立即生效，否则要重载窗口才生效
+    if (opts.startTimeoutMs !== undefined) {
+      this.deps.startTimeoutMs = opts.startTimeoutMs;
+    }
     if (targetChanged) {
       if (this.child) return this.restart();
       // 复用外部服务时只更新地址展示，实际可达性由下次 ensureRunning 重新探测

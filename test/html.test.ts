@@ -232,14 +232,22 @@ test('readyPage 默认不缩放：不写 zoom 变量（保持历史 DOM）', () 
   assert.ok(!html2.includes('style="--dshv-zoom'), '显式传 1 同样不输出');
 });
 
-test('readyPage 缩放：写入 zoom 变量并按比例放大 iframe 尺寸（不产生横向滚动条）', () => {
-  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 1.25);
-  assert.ok(html.includes('--dshv-zoom:1.25'), '应写入 1.25 的缩放变量');
-  // 1/1.25 = 80%：缩小显示时 iframe 反而要更宽，缩放后才正好铺满容器
-  assert.ok(html.includes('--dshv-frame-w:80.0000%'), '宽度按 1/zoom 放大');
-  assert.ok(html.includes('--dshv-frame-h:80.0000%'), '高度按 1/zoom 放大');
+test('readyPage 缩放：写入 zoom 变量并把 iframe 逻辑尺寸按 1/zoom 放大', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 0.8);
+  assert.ok(html.includes('--dshv-zoom:0.8'), '应写入 0.8 的缩放变量');
+  // 1/0.8 = 125%：zoom 后物理尺寸正好等于容器（真机几何实测：8 种组合均完美铺满且命中 iframe）
+  assert.ok(html.includes('--dshv-frame-w:125.0000%'), '宽度按 1/zoom 放大');
+  assert.ok(html.includes('--dshv-frame-h:125.0000%'), '高度按 1/zoom 放大');
   // 缩放由容器变量驱动；iframe 自身仍保留 id/class（桥接脚本依赖它们）
   assert.ok(html.includes('class="frame-zoom"'));
   assert.ok(html.includes('id="dsh-frame"'));
   assert.ok(html.includes('allow="clipboard-write"'));
+});
+
+test('缩放布局：iframe 不参与 flex（flex:1 会固定 width，压过 --dshv-frame-w 导致缩放失效）', () => {
+  // 回归防线：曾用 `.has-bar .frame-zoom { position: relative; flex: 1 }` + `iframe { flex: 1 }`，
+  // 真机实测出现横向滚动条与内容不满。现改为容器绝对定位 + iframe 不用 flex。
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 0.9);
+  assert.ok(!/\.has-bar iframe\.frame \{[^}]*flex/.test(html), '不得再给 iframe 加 flex');
+  assert.ok(/\.has-bar \.frame-zoom \{[^}]*position: absolute/.test(html), '工具栏下容器应绝对定位铺满剩余区域');
 });

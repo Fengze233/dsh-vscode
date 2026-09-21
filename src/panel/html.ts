@@ -70,14 +70,20 @@ iframe.frame { position: fixed; inset: 0; width: 100%; height: 100%; border: non
 .ctx-bar button { padding: 2px 8px; margin: 0; font-size: 12px; }
 .ctx-bar label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
 body.frame-body.has-bar { display: flex; flex-direction: column; }
-.has-bar iframe.frame { position: static; flex: 1; }
-/* 面板缩放（issue #8）：用 CSS zoom 作用于 iframe，指针命中测试原生生效
-   （不用 transform: scale——它会让点击坐标偏移）。宽度按比例放大以填满容器：
-   1/zoom 后仍等于容器宽度，因此不会因缩放产生横向滚动条。
+/* 注：这里不要给 iframe 加 flex:1——缩放态下 iframe 尺寸由 --dshv-frame-w/h 决定，
+   flex 会固定 width 把它压过（真机实测会出现滚动条/内容不满）。容器自己绝对定位铺满即可。 */
+/* 面板缩放（issue #8）：CSS zoom 作用于 iframe，指针命中测试原生生效
+   （不用 transform: scale——它会让点击坐标偏移）。
+   关键点（真机几何实测得出）：
+   1) 必须让容器“绝对定位”铺满可用区域，不能给 iframe 用 flex:1——flex 会固定 iframe 的
+      width，压过 --dshv-frame-w，导致缩放后尺寸不对（横向滚动条 / 内容不满）；
+   2) iframe 的尺寸按 1/zoom 放大，zoom 后物理尺寸正好等于容器 → 铺满且无滚动条。
    变量名刻意用 --dshv- 前缀，避免与页面里 iframe 元素的 id 子串互相干扰。 */
 .frame-zoom { position: absolute; inset: 0; }
-.has-bar .frame-zoom { position: relative; flex: 1; min-height: 0; }
-.frame-zoom > iframe.frame { position: static; width: var(--dshv-frame-w, 100%); height: var(--dshv-frame-h, 100%); zoom: var(--dshv-zoom, 1); }
+/* 顶部工具条存在时，缩放容器铺满工具条以下的剩余区域。
+   注：这里的 28px 与上面 .ctx-bar 的固定高度对齐（工具条是固定高的一条），改其高度需同步此处。 */
+.has-bar .frame-zoom { position: absolute; left: 0; right: 0; bottom: 0; top: 28px; }
+.frame-zoom > iframe.frame { position: static; display: block; width: var(--dshv-frame-w, 100%); height: var(--dshv-frame-h, 100%); zoom: var(--dshv-zoom, 1); }
 `;
 
 /** 按钮点击 → postMessage 的内联脚本（nonce 放行） */

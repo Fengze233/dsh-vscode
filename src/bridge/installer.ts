@@ -111,20 +111,23 @@ export function npmNodeModulesRootFrom(p: string): string | undefined {
 }
 
 /**
- * 判断该安装目标是否应当跳过：目录已存在、且含有非本扩展产物（issue #20）。
+ * 判断该安装目标是否应当跳过：其**父目录**已存在、且含有非本扩展产物（issue #20）。
  *
- * 背景：DSH Desktop 的私有命令目录（`%APPDATA%\DSH Desktop\host-commands\desktop\bin`）
- * 只允许存在它自己生成的 `dsh.cmd`，多一个条目就会让桌面下次启动硬失败
- * （`assertOwnedDirectoryEntries`）。因此只要目录里已有别的东西，就判定"这是别人的目录"，
- * 绝不往里写；目录不存在（由本扩展创建）或只含本扩展的包目录时正常安装。
+ * 关键点（真实文件系统验证时踩到）：危险的不是"目标目录里有什么"，而是"**往父目录里新增条目**"。
+ * 受害目录 `%APPDATA%\DSH Desktop\host-commands\desktop\bin` 被 DSH Desktop 以硬断言独占
+ * （`assertOwnedDirectoryEntries([...], ['dsh.cmd'])`）：只要该目录里多出任何条目（包括
+ * 我们新建的 `dsh-vscode-bridge/`），桌面下次启动就会硬失败。因此必须按父目录判定：
+ * 父目录不存在（由本扩展创建）或只含本扩展的包目录 → 可写；父目录含其它条目 → 跳过。
+ *
+ * @param parentDir 目标目录的父目录（如 `…/node_modules` 或 `…/desktop/bin`）
  */
 export function shouldSkipForeignTarget(
-  targetDir: string,
+  parentDir: string,
   fs: Pick<InstallerFs, 'exists' | 'readdir'>,
 ): boolean {
-  if (!fs.exists(targetDir)) return false; // 目录不存在：由本扩展创建，安全
+  if (!fs.exists(parentDir)) return false; // 父目录不存在：由本扩展创建，安全
   try {
-    return fs.readdir(targetDir).some((name) => name !== BRIDGE_PACKAGE_NAME);
+    return fs.readdir(parentDir).some((name) => name !== BRIDGE_PACKAGE_NAME);
   } catch {
     // 读不到目录内容（权限/IO）时保守跳过：宁可少装一处，也不冒写坏他人目录的风险
     return true;
@@ -188,10 +191,10 @@ export function installBridge(opts: BridgeInstallOptions): BridgeInstallResult {
   }
   const patchPath = join(profileDir, 'cordis.patch.yml');
   const allTargets = bridgeTargetDirs(profileDir, opts.npmGlobalNodeModules);
-  // 写入前的白名单校验（issue #20）：跳过"已存在且含非本扩展产物"的目录。
-  // 典型受害目录是 DSH Desktop 的私有命令目录（只允许它自己的 dsh.cmd），
-  // 往里写会让桌面下次启动直接硬失败。
-  const targets = allTargets.filter((t) => !shouldSkipForeignTarget(t, opts.fs));
+  // 写入前的白名单校验（issue #20）：按**父目录**判定——父目录里已有非本扩展产物就跳过该目标。
+  // 典型受害目录是 DSH Desktop 的私有命令目录（只允许它自己的 dsh.cmd）：哪怕目标子目录
+  // 还不存在，只要往那里新建 `dsh-vscode-bridge/`，桌面下次启动就会硬失败。
+  const targets = allTargets.filter((t) => !shouldSkipForeignTarget(dirname(t), opts.fs));
   // primary 路径保持兼容语义（BridgeInstallResult.bridgeDir）
   const bridgeDir = targets[0] ?? allTargets[0];
 
