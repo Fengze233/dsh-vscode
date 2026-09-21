@@ -205,7 +205,7 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 | `dsh.startTimeoutMs` | `45000` | 等待 `dsh web` 就绪的总超时（毫秒，5000–600000）。冷启动慢的机器（Windows 实测 17–23 秒）可调大；日志提示「未在 N 秒内就绪」但服务其实已起来时优先调此项 |
 | `dsh.env` | `{}` | 注入 DSH 子进程的额外环境变量（键值对，与父进程环境合并）。典型用法：代理网络下设 `{"NODE_OPTIONS":"--use-env-proxy"}` |
 | `dsh.useEnvProxy` | `false` | 自动为子进程的 `NODE_OPTIONS` 追加 `--use-env-proxy`（不覆盖已有选项）。必须经 HTTP/HTTPS 代理才能访问模型 API 时开启 |
-| `dsh.panel.zoomLevel` | `1` | 面板内网页缩放档位（`0.5`/`0.6`/`0.7`/`0.8`/`0.9`/`1`）：侧边栏里字太大时调小（只提供缩小方向） |
+| `dsh.panel.zoomLevel` | `1` | 面板内网页缩放（`0.5`–`1.5`，可自定义任意数值）：侧边栏里字太大时调小、太小则放大 |
 
 ## 🌍 多语言
 

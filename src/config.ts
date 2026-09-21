@@ -100,11 +100,13 @@ export const DEFAULTS: DshConfig = {
   panelZoomLevel: 1,
 };
 
-/** 面板缩放允许的档位（issue #8）：只提供"缩小"方向。
- *  原因（真机几何实测）：放大方向（zoom > 1）时 iframe 的逻辑视口会大于面板物理尺寸，
- *  内容右/下必然留白；而该 issue 的真实诉求是"侧边栏里字太大"，缩小方向可做到
- *  完美铺满、无滚动条、点击命中正常。 */
-export const PANEL_ZOOM_LEVELS = [0.5, 0.6, 0.7, 0.8, 0.9, 1] as const;
+/** 面板缩放允许的范围（issue #8）：0.5–1.5 之间的任意数值都接受，用于"自定义缩放"。
+ *  下面的档位只作为设置 UI 的下拉候选。上下限经真机几何实测：区间内缩放后 iframe 物理尺寸
+ *  恰好覆盖面板可用区域（无留白、无滚动条、点击命中准确）。 */
+export const MIN_PANEL_ZOOM = 0.5;
+export const MAX_PANEL_ZOOM = 1.5;
+/** 设置 UI 的推荐档位（含自定义输入） */
+export const PANEL_ZOOM_LEVELS = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.5] as const;
 
 /** 启动超时允许的下限（毫秒）：低于 5s 对真实 DSH 冷启动没有意义 */
 export const MIN_START_TIMEOUT_MS = 5000;
@@ -237,14 +239,19 @@ export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors:
   // useEnvProxy（dsh.useEnvProxy）：布尔设置沿用既有缺省处理（非法静默回退）
   const useEnvProxy = typeof raw.useEnvProxy === 'boolean' ? raw.useEnvProxy : DEFAULTS.useEnvProxy;
 
-  // panelZoomLevel（dsh.panel.zoomLevel）：只接受预设档位，非档位值回退默认并记录错误
-  // （手改 settings.json 可能写入任意数字，故此处做白名单校验）
+  // panelZoomLevel（dsh.panel.zoomLevel）：接受 0.5–1.5 的任意数值（支持自定义缩放，
+  // 例如 1.15）；越界或非数字回退默认并记录错误（手改 settings.json 可能写入脏值）
   let panelZoomLevel: number;
   if (raw.panelZoomLevel === undefined) {
     panelZoomLevel = DEFAULTS.panelZoomLevel;
-  } else if (!(PANEL_ZOOM_LEVELS as readonly number[]).includes(raw.panelZoomLevel)) {
+  } else if (
+    typeof raw.panelZoomLevel !== 'number' ||
+    !Number.isFinite(raw.panelZoomLevel) ||
+    raw.panelZoomLevel < MIN_PANEL_ZOOM ||
+    raw.panelZoomLevel > MAX_PANEL_ZOOM
+  ) {
     errors.push(
-      `dsh.panel.zoomLevel must be one of ${PANEL_ZOOM_LEVELS.join(', ')}, got ${JSON.stringify(raw.panelZoomLevel)}`,
+      `dsh.panel.zoomLevel must be a number in ${MIN_PANEL_ZOOM}..${MAX_PANEL_ZOOM}, got ${JSON.stringify(raw.panelZoomLevel)}`,
     );
     panelZoomLevel = DEFAULTS.panelZoomLevel;
   } else {

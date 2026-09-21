@@ -257,18 +257,18 @@ test('buildChildEnv：不改动入参对象（纯函数）', () => {
   assert.deepEqual(input, { NODE_OPTIONS: '--a' });
 });
 
-// ——— issue #8：面板缩放档位 ———
-test('panelZoomLevel 默认 1，且所有预设档位都合法', () => {
+// ——— issue #8：面板缩放（范围 0.5–1.5，支持自定义值） ———
+test('panelZoomLevel 默认 1；档位与自定义值都合法', () => {
   assert.equal(normalizeConfig({}).config.panelZoomLevel, 1);
-  for (const lv of PANEL_ZOOM_LEVELS) {
+  for (const lv of [...PANEL_ZOOM_LEVELS, 1.15, 0.55, 1.5, 0.5]) {
     const r = normalizeConfig({ panelZoomLevel: lv });
     assert.equal(r.config.panelZoomLevel, lv, `level=${lv}`);
     assert.deepEqual(r.errors, [], `level=${lv} 不应报错`);
   }
 });
 
-test('panelZoomLevel 非档位值（手改 settings.json）→ 回退默认并记录错误', () => {
-  for (const bad of [0, 0.3, 1.05, 3, -1, NaN]) {
+test('panelZoomLevel 越界或非数字 → 回退默认并记录错误', () => {
+  for (const bad of [0, 0.3, 0.49, 1.51, 3, -1, NaN, Infinity]) {
     const r = normalizeConfig({ panelZoomLevel: bad });
     assert.equal(r.config.panelZoomLevel, 1, `bad=${bad}`);
     assert.ok(r.errors.length > 0, `bad=${bad} 应记录错误`);

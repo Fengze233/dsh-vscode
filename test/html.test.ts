@@ -232,19 +232,29 @@ test('readyPage 默认不缩放：不写 zoom 变量（保持历史 DOM）', () 
   assert.ok(!html2.includes('style="--dshv-zoom'), '显式传 1 同样不输出');
 });
 
-test('readyPage 缩放：写入 zoom 变量并把 iframe 逻辑尺寸按 1/zoom 放大', () => {
+test('readyPage 缩放：注入 zoom 变量，iframe 用 calc(100%/zoom) + scale(zoom) 铺满', () => {
   const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 0.8);
-  assert.ok(html.includes('--dshv-zoom:0.8'), '应写入 0.8 的缩放变量');
-  // 1/0.8 = 125%：zoom 后物理尺寸正好等于容器（真机几何实测：8 种组合均完美铺满且命中 iframe）
-  assert.ok(html.includes('--dshv-frame-w:125.0000%'), '宽度按 1/zoom 放大');
-  assert.ok(html.includes('--dshv-frame-h:125.0000%'), '高度按 1/zoom 放大');
+  assert.ok(html.includes('style="--dshv-zoom:0.8"'), '应写入 0.8 的缩放变量（内联）');
+  // 逻辑尺寸 100%/zoom 再 scale(zoom) → 物理尺寸恒等于容器：缩小/放大两方向都铺满
+  // （真机几何实测：0.5/0.75/1/1.25/1.5 × 有/无工具条，留白 0、无滚动条、三点命中均为 iframe）
+  assert.ok(/width: calc\(100% \/ var\(--dshv-zoom, 1\)\)/.test(html), '宽度按 1/zoom 计算');
+  assert.ok(/height: calc\(100% \/ var\(--dshv-zoom, 1\)\)/.test(html), '高度按 1/zoom 计算');
+  assert.ok(/transform: scale\(var\(--dshv-zoom, 1\)\)/.test(html), '用 scale 还原物理尺寸');
+  assert.ok(/transform-origin: 0 0/.test(html), '缩放原点必须在左上角');
   // 缩放由容器变量驱动；iframe 自身仍保留 id/class（桥接脚本依赖它们）
   assert.ok(html.includes('class="frame-zoom"'));
   assert.ok(html.includes('id="dsh-frame"'));
   assert.ok(html.includes('allow="clipboard-write"'));
 });
 
-test('缩放布局：iframe 不参与 flex（flex:1 会固定 width，压过 --dshv-frame-w 导致缩放失效）', () => {
+test('缩放支持放大方向（>1）与自定义值（如 1.15）', () => {
+  const up = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 1.5);
+  assert.ok(up.includes('style="--dshv-zoom:1.5"'), '放大档位同样只写 zoom 变量');
+  const custom = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 1.15);
+  assert.ok(custom.includes('style="--dshv-zoom:1.15"'), '自定义值应原样注入');
+});
+
+test('缩放布局：iframe 不参与 flex（flex:1 会固定 width，与百分比尺寸冲突）', () => {
   // 回归防线：曾用 `.has-bar .frame-zoom { position: relative; flex: 1 }` + `iframe { flex: 1 }`，
   // 真机实测出现横向滚动条与内容不满。现改为容器绝对定位 + iframe 不用 flex。
   const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 0.9);
