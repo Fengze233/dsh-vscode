@@ -544,6 +544,8 @@ export function activate(context: vscode.ExtensionContext): void {
     frameBaseOverride: () =>
       authProxyStarted && authSessionState === 'ok' && manager?.getSnapshot().state === 'ready' ? (authProxy?.baseUrl ?? null) : null,
     onAuthUrlSubmit: (url) => void handleAuthUrlSubmit(url),
+    // 面板缩放：由 dsh.panel.zoomLevel 驱动（issue #8）
+    zoomLevel: () => readConfig().config.panelZoomLevel,
   });
 
   /** 用户浏览器可打开的 DSH 地址：优先带 token 的启动网址（0.1.2 起浏览器需要它完成登录） */

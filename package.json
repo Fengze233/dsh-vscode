@@ -365,6 +365,31 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "%dsh.config.useEnvProxy%"
+        },
+        "dsh.panel.zoomLevel": {
+          "type": "number",
+          "default": 1,
+          "enum": [
+            0.5,
+            0.75,
+            0.9,
+            1,
+            1.1,
+            1.25,
+            1.5,
+            2
+          ],
+          "enumDescriptions": [
+            "50%（字最小，一屏看最多内容）",
+            "75%",
+            "90%",
+            "100%（默认，与 DSH 原始大小一致）",
+            "110%",
+            "125%",
+            "150%",
+            "200%（字最大，适合演示/投屏）"
+          ],
+          "markdownDescription": "%dsh.config.panelZoom%"
         }
       }
     }

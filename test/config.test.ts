@@ -8,6 +8,7 @@ import {
   MIN_START_TIMEOUT_MS,
   MAX_START_TIMEOUT_MS,
   buildChildEnv,
+  PANEL_ZOOM_LEVELS,
 } from '../src/config';
 
 test('合法配置原样通过', () => {
@@ -25,6 +26,8 @@ test('合法配置原样通过', () => {
     startTimeoutMs: 45000,
     // issue #18：子进程环境变量注入（默认关闭/为空，保持既有行为）
     env: {}, useEnvProxy: false,
+    // issue #8：面板缩放（默认 1 = 不缩放）
+    panelZoomLevel: 1,
   });
 });
 
@@ -252,4 +255,28 @@ test('buildChildEnv：不改动入参对象（纯函数）', () => {
   const input = { NODE_OPTIONS: '--a' };
   buildChildEnv(input, true);
   assert.deepEqual(input, { NODE_OPTIONS: '--a' });
+});
+
+// ——— issue #8：面板缩放档位 ———
+test('panelZoomLevel 默认 1，且所有预设档位都合法', () => {
+  assert.equal(normalizeConfig({}).config.panelZoomLevel, 1);
+  for (const lv of PANEL_ZOOM_LEVELS) {
+    const r = normalizeConfig({ panelZoomLevel: lv });
+    assert.equal(r.config.panelZoomLevel, lv, `level=${lv}`);
+    assert.deepEqual(r.errors, [], `level=${lv} 不应报错`);
+  }
+});
+
+test('panelZoomLevel 非档位值（手改 settings.json）→ 回退默认并记录错误', () => {
+  for (const bad of [0, 0.3, 1.05, 3, -1, NaN]) {
+    const r = normalizeConfig({ panelZoomLevel: bad });
+    assert.equal(r.config.panelZoomLevel, 1, `bad=${bad}`);
+    assert.ok(r.errors.length > 0, `bad=${bad} 应记录错误`);
+  }
+});
+
+test('panelZoomLevel 非数字类型 → 回退默认并记录错误', () => {
+  const r = normalizeConfig({ panelZoomLevel: '1.25' as unknown as number });
+  assert.equal(r.config.panelZoomLevel, 1);
+  assert.ok(r.errors.length > 0);
 });

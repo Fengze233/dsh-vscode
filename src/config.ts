@@ -34,6 +34,8 @@ export interface RawDshConfig {
   env?: Record<string, string>;
   /** 是否自动为子进程追加 Node 的 --use-env-proxy（dsh.useEnvProxy） */
   useEnvProxy?: boolean;
+  /** 面板内网页缩放档位（dsh.panel.zoomLevel，issue #8） */
+  panelZoomLevel?: number;
 }
 
 /** 规范化后的配置（均有合法默认值） */
@@ -67,6 +69,8 @@ export interface DshConfig {
   env: Record<string, string>;
   /** 是否自动为子进程追加 --use-env-proxy（dsh.useEnvProxy） */
   useEnvProxy: boolean;
+  /** 面板内网页缩放档位（dsh.panel.zoomLevel） */
+  panelZoomLevel: number;
 }
 
 /** 默认配置 */
@@ -92,7 +96,12 @@ export const DEFAULTS: DshConfig = {
   env: {},
   // 是否自动追加 --use-env-proxy：默认关，避免改变任何现有用户的行为（issue #18）
   useEnvProxy: false,
+  // 面板缩放：默认 1（= 当前行为，零变化）
+  panelZoomLevel: 1,
 };
+
+/** 面板缩放允许的档位（issue #8）：离散档位便于设置 UI 用下拉选择，也避免极端值把布局搞坏 */
+export const PANEL_ZOOM_LEVELS = [0.5, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 2] as const;
 
 /** 启动超时允许的下限（毫秒）：低于 5s 对真实 DSH 冷启动没有意义 */
 export const MIN_START_TIMEOUT_MS = 5000;
@@ -225,11 +234,25 @@ export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors:
   // useEnvProxy（dsh.useEnvProxy）：布尔设置沿用既有缺省处理（非法静默回退）
   const useEnvProxy = typeof raw.useEnvProxy === 'boolean' ? raw.useEnvProxy : DEFAULTS.useEnvProxy;
 
+  // panelZoomLevel（dsh.panel.zoomLevel）：只接受预设档位，非档位值回退默认并记录错误
+  // （手改 settings.json 可能写入任意数字，故此处做白名单校验）
+  let panelZoomLevel: number;
+  if (raw.panelZoomLevel === undefined) {
+    panelZoomLevel = DEFAULTS.panelZoomLevel;
+  } else if (!(PANEL_ZOOM_LEVELS as readonly number[]).includes(raw.panelZoomLevel)) {
+    errors.push(
+      `dsh.panel.zoomLevel must be one of ${PANEL_ZOOM_LEVELS.join(', ')}, got ${JSON.stringify(raw.panelZoomLevel)}`,
+    );
+    panelZoomLevel = DEFAULTS.panelZoomLevel;
+  } else {
+    panelZoomLevel = raw.panelZoomLevel;
+  }
+
   return {
     config: {
       host, port, autoStart, stopOnExit, extraArgs, bridgeEnabled, workspaceRootIndex,
       silenceWarning, executablePath, openInBrowser, remoteEnabled, imageFallback,
-      autoFollow, followDebounceMs, startTimeoutMs, env, useEnvProxy,
+      autoFollow, followDebounceMs, startTimeoutMs, env, useEnvProxy, panelZoomLevel,
     },
     errors,
   };
@@ -278,5 +301,6 @@ export function readConfig(): { config: DshConfig; errors: string[] } {
     startTimeoutMs: ws.get<number>('startTimeoutMs'),
     env: ws.get<Record<string, string>>('env'),
     useEnvProxy: ws.get<boolean>('useEnvProxy'),
+    panelZoomLevel: ws.get<number>('panel.zoomLevel'),
   });
 }

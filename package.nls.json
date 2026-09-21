@@ -40,5 +40,6 @@
   "dsh.config.contextDebounce": "Debounce in milliseconds for auto-follow (300-5000).",
   "dsh.config.startTimeoutMs": "How long to wait for `dsh web` to become ready, in milliseconds (default 45000). Cold start time depends on machine speed and the number of DSH plugins; raise this if the log says the service was not ready in time while it actually did start.",
   "dsh.config.env": "Extra environment variables injected into the DSH child process (key/value pairs, values must be strings); merged with the parent environment instead of replacing it. Typical use: on networks that require a proxy, set `NODE_OPTIONS=--use-env-proxy` so Node's native fetch honours HTTP(S)_PROXY.",
-  "dsh.config.useEnvProxy": "Append `--use-env-proxy` to the DSH child process's `NODE_OPTIONS` (your existing NODE_OPTIONS options are kept). Useful when the model API must be reached through an HTTP/HTTPS proxy."
+  "dsh.config.useEnvProxy": "Append `--use-env-proxy` to the DSH child process's `NODE_OPTIONS` (your existing NODE_OPTIONS options are kept). Useful when the model API must be reached through an HTTP/HTTPS proxy.",
+  "dsh.config.panelZoom": "Zoom level of the embedded `dsh web` page inside the panel — enlarge or shrink the whole page (100% is the default, identical to today). The page still fits the panel width exactly, with no horizontal scrollbar."
 }

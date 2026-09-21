@@ -44,6 +44,8 @@ export interface PanelProviderUiOpts {
   frameBaseOverride?: () => string | null;
   /** 「需要登录」页提交启动网址的回调（扩展校验并兑换） */
   onAuthUrlSubmit?: (url: string) => void;
+  /** 面板缩放 getter（dsh.panel.zoomLevel，issue #8；缺省 1 = 不缩放） */
+  zoomLevel?: () => number;
 }
 
 export class DshPanelProvider implements vscode.WebviewViewProvider {
@@ -344,6 +346,8 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
             this.context
               ? { fileLabel: this.context.getFileLabel(), autoFollow: this.context.getAutoFollow() }
               : undefined,
+            // 面板缩放（issue #8）：未接线时 1（不缩放）
+            this.ui.zoomLevel?.() ?? 1,
           );
           break;
         }

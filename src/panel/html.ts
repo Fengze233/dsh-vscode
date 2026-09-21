@@ -71,6 +71,13 @@ iframe.frame { position: fixed; inset: 0; width: 100%; height: 100%; border: non
 .ctx-bar label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
 body.frame-body.has-bar { display: flex; flex-direction: column; }
 .has-bar iframe.frame { position: static; flex: 1; }
+/* 面板缩放（issue #8）：用 CSS zoom 作用于 iframe，指针命中测试原生生效
+   （不用 transform: scale——它会让点击坐标偏移）。宽度按比例放大以填满容器：
+   1/zoom 后仍等于容器宽度，因此不会因缩放产生横向滚动条。
+   变量名刻意用 --dshv- 前缀，避免与页面里 iframe 元素的 id 子串互相干扰。 */
+.frame-zoom { position: absolute; inset: 0; }
+.has-bar .frame-zoom { position: relative; flex: 1; min-height: 0; }
+.frame-zoom > iframe.frame { position: static; width: var(--dshv-frame-w, 100%); height: var(--dshv-frame-h, 100%); zoom: var(--dshv-zoom, 1); }
 `;
 
 /** 按钮点击 → postMessage 的内联脚本（nonce 放行） */
@@ -392,12 +399,15 @@ export function stoppedPage(t: T, ctx: PageCtx): string {
  * 桥接启用时注入握手脚本，让顶层 webview 与 DSH 页面 iframe 建立握手并转发跳转/剪贴板消息。
  * @param bridge 桥接配置（可选，向后兼容既有调用）：token 为握手凭据，enabled 为是否注入握手脚本
  * @param contextBar 上下文工具条状态（可选，不传则不渲染工具条，向后兼容）
+ * @param zoomLevel 面板缩放（issue #8，可选，默认 1）；非 1 时用 CSS zoom 缩放 iframe，
+ *   并按比例放大 iframe 尺寸，使缩放后仍正好铺满容器（不产生横向滚动条）
  */
 export function readyPage(
   url: string,
   ctx: PageCtx,
   bridge?: { token: string; enabled: boolean; imageFallback?: boolean },
   contextBar?: ContextBarState,
+  zoomLevel = 1,
 ): string {
   // 桥接启用时注入握手脚本；未传入或 enabled=false 时保持向后兼容，不注入
   const extraScripts = bridge?.enabled
@@ -408,11 +418,16 @@ export function readyPage(
     ? `<script nonce="${ctx.nonce}">${CONTEXT_BAR_SCRIPT}</script>${contextBarHtml(t, contextBar)}`
     : '';
   const bodyClass = contextBar ? 'frame-body has-bar' : 'frame-body';
+  // 缩放：只对非 1 的档位写入内联变量（1 时保持历史 DOM，零行为变化）
+  const zoomAttr =
+    zoomLevel !== undefined && zoomLevel !== 1
+      ? ` style="--dshv-zoom:${zoomLevel};--dshv-frame-w:${(100 / zoomLevel).toFixed(4)}%;--dshv-frame-h:${(100 / zoomLevel).toFixed(4)}%"`
+      : '';
   return shell(
     ctx,
     'DSH',
     bodyClass,
-    `${bar}<iframe id="dsh-frame" class="frame" allow="clipboard-write" src="${url}"></iframe>`,
+    `${bar}<div class="frame-zoom"${zoomAttr}><iframe id="dsh-frame" class="frame" allow="clipboard-write" src="${url}"></iframe></div>`,
     extraScripts,
   );
 }
