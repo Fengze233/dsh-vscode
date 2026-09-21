@@ -633,3 +633,57 @@ test('installBridge：npm 目标目录含他人产物时跳过该目标，其余
   // 第三方私有目录未被写入：memfs 的 copyDir 会在此路径落 package.json，不存在即证明被跳过
   assert.equal(memFs.exists(`${desktopBinBridge}/package.json`), false);
 });
+
+// ——— issue #19：cordis.patch.yml 的桥接条目不得重复（重复会让插件树崩溃） ———
+test('installBridge 对含重复桥接条目的 patch 自愈去重（issue #19）', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const block = [
+    `${BRIDGE_BEGIN_MARK}`,
+    '- insert:',
+    `    - id: ${BRIDGE_PACKAGE_NAME}`,
+    `      name: ${BRIDGE_PACKAGE_NAME}`,
+    `${BRIDGE_END_MARK}`,
+  ].join('\n');
+  // 复刻用户现场：同一段条目被追加了两次
+  const fs = makeMemFs({ [patchPath]: `# 用户自己的内容\n- id: user-plugin\n  name: user-plugin\n\n${block}\n\n${block}\n` });
+  fs.mkdir(profile);
+
+  const r = installBridge({ dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs });
+  assert.equal(r.status, 'ok');
+  const after = fs.readFile(patchPath);
+  // 只保留一份 begin 标记
+  assert.equal(after.split(BRIDGE_BEGIN_MARK).length - 1, 1, '重复条目应被去重');
+  assert.equal(after.split(BRIDGE_END_MARK).length - 1, 1);
+  // 用户自己的内容不能被动
+  assert.ok(after.includes('user-plugin'));
+});
+
+test('installBridge 并发/重复调用不产生重复条目（issue #19）', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const fs = makeMemFs({ [patchPath]: '# 用户插件\n- id: u\n  name: u\n' });
+  fs.mkdir(profile);
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs };
+  // 模拟两个扩展宿主（多个 VS Code 窗口）几乎同时安装
+  const r1 = installBridge(opts);
+  const r2 = installBridge(opts);
+  assert.equal(r1.status, 'ok');
+  assert.equal(r2.status, 'ok');
+  const after = fs.readFile(patchPath);
+  assert.equal(after.split(BRIDGE_BEGIN_MARK).length - 1, 1, '两次安装后仍只应有一条桥接条目');
+  assert.ok(after.includes('id: u'), '用户插件条目保留');
+});
+
+test('installBridge 在 patch 为默认空数组模板时也只写一条条目（issue #19）', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const fs = makeMemFs({ [patchPath]: '# 注释头\n# 再一行\n[]\n' });
+  fs.mkdir(profile);
+  const opts = { dshHome: '/home/u/.dsh', bridgeSourceDir: '/ext/bridge-client', fs };
+  installBridge(opts);
+  installBridge(opts);
+  const after = fs.readFile(patchPath);
+  assert.equal(after.split(BRIDGE_BEGIN_MARK).length - 1, 1);
+  assert.ok(after.includes('# 注释头'), '头部注释保留（卸载时才能字节级还原）');
+});

@@ -199,10 +199,15 @@ export function installBridge(opts: BridgeInstallOptions): BridgeInstallResult {
   const existing = opts.fs.exists(patchPath) ? opts.fs.readFile(patchPath) : '';
 
   if (existing.includes(BRIDGE_BEGIN_MARK)) {
-    // 已存在条目：全部目标目录都必须可用（能读到含 `"name"` 的 package.json，
+    // 已存在条目：先把可能出现的重复副本自愈掉（issue #19——重复条目会让 DSH 插件树崩溃），
+    // 再做"全部目标目录都必须可用"的判定（能读到含 `"name"` 的 package.json，
     // 且版本与插件随附版本一致——版本不一致说明是升级前的旧包，需强制重装刷新）。
     // 仅 exists 会漏掉「目录在但 package.json 不可读」的坏包（chmod 000 事故），
     // 且 Windows 场景某目标缺失但其余完好时也需自愈补回。
+    const deduped = dedupeBridgeEntries(existing);
+    if (deduped !== existing) {
+      opts.fs.writeFile(patchPath, deduped);
+    }
     const wantVersion = bridgeVersion(opts.bridgeSourceDir, opts.fs);
     const unusable = targets.filter((t) => !isBridgeUsable(t, opts.fs, wantVersion, opts.bridgeSourceDir));
     if (unusable.length === 0) {
@@ -244,6 +249,38 @@ export function installBridge(opts: BridgeInstallOptions): BridgeInstallResult {
     return { status: 'degraded', reason: `copy failed at ${failedTarget}: ${errMsg(e)}`, profileDir, bridgeDir };
   }
   return { status: 'ok', profileDir, bridgeDir };
+}
+
+/**
+ * 去掉重复的桥接条目，只保留第一段（issue #19）。
+ *
+ * 现场：多个 VS Code 窗口同时激活、或旧版本残留，会让 cordis.patch.yml 里出现两段
+ * `# dsh-vscode-bridge: begin/end`。DSH 侧同一 id 出现多条 insert 会让插件树崩溃
+ * （用户报告：必须手工删掉重复项才能进入）。这里做幂等自愈：保留首段、删除后续段落。
+ *
+ * @returns 去重后的 patch 文本；本来只有一段（或没有）时原样返回
+ */
+export function dedupeBridgeEntries(patch: string): string {
+  if (!patch.includes(BRIDGE_BEGIN_MARK)) return patch;
+  // 逐段提取 begin..end（含标记行本身）；用全局匹配定位所有段落
+  const segRe = new RegExp(
+    `${escapeRegExp(BRIDGE_BEGIN_MARK)}[^\\n]*\\n[\\s\\S]*?${escapeRegExp(BRIDGE_END_MARK)}[^\\n]*`,
+    'g',
+  );
+  const segs = patch.match(segRe);
+  if (segs === null || segs.length <= 1) return patch;
+  let out = patch;
+  // 从后往前删，避免前面的删除影响后续匹配到的位置
+  for (let i = segs.length - 1; i >= 1; i -= 1) {
+    out = out.replace(segs[i], '');
+  }
+  // 删段后可能留下多余空行：折叠连续 3 个以上换行，避免文件越来越"松散"
+  return out.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+}
+
+/** 转义正则特殊字符（用于把标记文本当字面量匹配） */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /** 提取 Error 的 message（未知抛出物兜底为字符串化） */
