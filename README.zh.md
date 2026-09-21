@@ -291,6 +291,36 @@ src/
 - 问题反馈：<https://github.com/Fengze233/dsh-vscode/issues>
 - DSH 社区讨论：<https://github.com/deepseek-ai/deepseek-harness/discussions>
 
+## 🙏 贡献者与致谢
+
+本扩展的许多改进来自社区。以下贡献按类型列出（对应提交/讨论可在仓库对应编号查看）：
+
+### 代码贡献
+
+| 贡献者 | 贡献内容 | 关联 |
+|---|---|---|
+| [@BingMoeNone](https://github.com/BingMoeNone) | 编辑器上下文联动（面板工具条 + 自动跟随）、编辑器/资源管理器右键菜单、工作区自适应；以及 DSH ≥0.1.2 线格式适配（斜杠端点、`payload.args` 包装、`requestId`、经本地代办注入会话） | PR #11（v0.4.1 落地） |
+| [@HansonFeng123](https://github.com/HansonFeng123) | 工作区自动选中与侧边栏单工作区视图方向的实现尝试；其中「启动超时过短」的排查结论已在 v0.4.1 中落地（见 #23） | PR #21（审查中） |
+
+### 问题报告
+
+| 报告者 | 报告内容 | 关联 |
+|---|---|---|
+| [@Joshuayang228](https://github.com/Joshuayang228) | 点文件不转发到编辑器：定位到 CSS Module 哈希类名根因，并附完整实测证据与修法 | #22 |
+| [@lizhuoyuan41-droid](https://github.com/lizhuoyuan41-droid) | 桥接包被写进 DSH Desktop 私有命令目录导致桌面启动失败：给出根因与白名单建议 | #20 |
+| [@Minelenbolan](https://github.com/Minelenbolan) | `cordis.patch.yml` 桥接条目重复导致插件树崩溃 | #19 |
+| [@HafenYin](https://github.com/HafenYin) | Windows 冷启动超过 15 秒被误报超时（附完整启动日志） | #23 |
+| [@NOIPJohnny](https://github.com/NOIPJohnny) | 代理环境下 DSH 无法请求模型，建议注入子进程环境变量 | #18 |
+| [@ThinBuffalo](https://github.com/ThinBuffalo) | 面板内网页缩放需求 | #8 |
+| [@smallshieh](https://github.com/smallshieh) | 编辑器上下文注入需求（当前文件/选区随消息发送） | #10 |
+| [@Tsechiyuan](https://github.com/Tsechiyuan) | 选中代码直接发送到会话的需求 | #7 |
+| [@sseryling](https://github.com/sseryling) | WSL Remote 下面板白屏与桥接握手失败：附实测修复方案 | #13 |
+| [@Zanford](https://github.com/Zanford) | VS Code 中 DSH 无法正常拉起 | #12 |
+
+### 上游
+
+- 窄视口下输入框中文光标问题（#9）经核查位于 DSH 官方前端 composer（旧版「可见字形 backdrop + 透明 textarea」双层度量），上游已重构为 Lexical 编辑器，故按上游结论关闭。
+
 ## 📄 License
 
 [MIT](./LICENSE) © 2026 Fengze233

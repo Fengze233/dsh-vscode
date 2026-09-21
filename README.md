@@ -262,6 +262,36 @@ This is a DeepSeek Harness community plugin (topic: [`dsh-plugin`](https://githu
 - Issue tracker: <https://github.com/Fengze233/dsh-vscode/issues>
 - DSH community discussions: <https://github.com/deepseek-ai/deepseek-harness/discussions>
 
+## 🙏 Contributors & Acknowledgements
+
+Many improvements here came from the community. Contributions are grouped by type (IDs link to the corresponding issue/PR in this repository):
+
+### Code contributions
+
+| Contributor | Contribution | Ref |
+|---|---|---|
+| [@BingMoeNone](https://github.com/BingMoeNone) | Editor context integration (panel toolbar + auto-follow), editor/explorer context menus, workspace adaptation; plus the DSH ≥0.1.2 wire-format adaptation (slash endpoints, `payload.args` wrapping, `requestId`, session cookie via the local relay) | PR #11 (shipped in v0.4.1) |
+| [@HansonFeng123](https://github.com/HansonFeng123) | An implementation attempt at workspace auto-select and single-workspace sidebar; its finding that the startup timeout was too short landed in v0.4.1 (see #23) | PR #21 (under review) |
+
+### Issue reports
+
+| Reporter | Report | Ref |
+|---|---|---|
+| [@Joshuayang228](https://github.com/Joshuayang228) | File clicks not forwarded to the editor: pinpointed the CSS Module hashed class name and provided full reproduction evidence and a fix sketch | #22 |
+| [@lizhuoyuan41-droid](https://github.com/lizhuoyuan41-droid) | Bridge package written into DSH Desktop's private command directory, breaking desktop startup: root cause plus an allow-list suggestion | #20 |
+| [@Minelenbolan](https://github.com/Minelenbolan) | Duplicate bridge entry in `cordis.patch.yml` crashing the plugin tree | #19 |
+| [@HafenYin](https://github.com/HafenYin) | Windows cold start exceeding the hard-coded 15 s timeout (with full startup log) | #23 |
+| [@NOIPJohnny](https://github.com/NOIPJohnny) | DSH unable to reach the model API behind a proxy; suggested injecting child-process environment variables | #18 |
+| [@ThinBuffalo](https://github.com/ThinBuffalo) | Request for zoom control of the embedded page | #8 |
+| [@smallshieh](https://github.com/smallshieh) | Request for editor context injection (send the active file/selection with a message) | #10 |
+| [@Tsechiyuan](https://github.com/Tsechiyuan) | Request to send the current selection straight into the conversation | #7 |
+| [@sseryling](https://github.com/sseryling) | WSL Remote blank panel and bridge handshake failure: provided measured fixes | #13 |
+| [@Zanford](https://github.com/Zanford) | DSH failing to start from VS Code | #12 |
+
+### Upstream
+
+- The narrow-viewport CJK caret issue (#9) was traced to the DSH frontend composer (the older "visible glyph backdrop + transparent textarea" dual-metric implementation). Upstream has since rewritten it as a Lexical editor, so the issue was closed with that conclusion.
+
 ## 📄 License
 
 [MIT](./LICENSE) © 2026 Fengze233
