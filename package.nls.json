@@ -37,5 +37,6 @@
   "dsh.cmd.askAboutPath.title": "Ask DSH About This",
   "dsh.cmd.openContextPanel.title": "Open DSH Panel",
   "dsh.config.contextAutoFollow": "Automatically add the current file to the DSH context when switching files.",
-  "dsh.config.contextDebounce": "Debounce in milliseconds for auto-follow (300-5000)."
+  "dsh.config.contextDebounce": "Debounce in milliseconds for auto-follow (300-5000).",
+  "dsh.config.startTimeoutMs": "How long to wait for `dsh web` to become ready, in milliseconds (default 45000). Cold start time depends on machine speed and the number of DSH plugins; raise this if the log says the service was not ready in time while it actually did start."
 }

@@ -1,7 +1,13 @@
 // test/config.test.ts — 配置规范化与回环地址校验的单元测试
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeConfig, isLoopbackHost, DEFAULTS } from '../src/config';
+import {
+  normalizeConfig,
+  isLoopbackHost,
+  DEFAULTS,
+  MIN_START_TIMEOUT_MS,
+  MAX_START_TIMEOUT_MS,
+} from '../src/config';
 
 test('合法配置原样通过', () => {
   const { config, errors } = normalizeConfig({
@@ -14,6 +20,8 @@ test('合法配置原样通过', () => {
     openInBrowser: false, remoteEnabled: false, imageFallback: true,
     // PR #11：新增 context 设置项后须补充完整对象断言（deepEqual 要求键完全一致）
     autoFollow: false, followDebounceMs: 800,
+    // issue #23：启动总超时改为可配，默认 45s（旧硬编码 15s 会把已就绪的服务判超时）
+    startTimeoutMs: 45000,
   });
 });
 
@@ -149,4 +157,34 @@ test('autoFollow 非布尔 → 静默回退默认(不记错误)', () => {
   const r = normalizeConfig({ autoFollow: 'yes' as unknown as boolean });
   assert.equal(r.config.autoFollow, false);
   assert.deepEqual(r.errors, []);
+});
+
+// ——— issue #23：启动总超时可配 ———
+// 背景：Windows 冷启动实测 17–23s，旧的硬编码 15s 会让已就绪的服务被判「未就绪」。
+test('startTimeoutMs 默认 45 秒（issue #23：替代原先 15s 硬编码）', () => {
+  const r = normalizeConfig({});
+  assert.equal(r.config.startTimeoutMs, 45000);
+  assert.equal(DEFAULTS.startTimeoutMs, 45000);
+});
+
+test('startTimeoutMs 合法值(含边界)原样保留且不报错', () => {
+  for (const ok of [MIN_START_TIMEOUT_MS, 45000, MAX_START_TIMEOUT_MS]) {
+    const r = normalizeConfig({ startTimeoutMs: ok });
+    assert.equal(r.config.startTimeoutMs, ok, `ok=${ok}`);
+    assert.deepEqual(r.errors, [], `ok=${ok}`);
+  }
+});
+
+test('startTimeoutMs 越界/非整数 → 回退默认并记录错误', () => {
+  for (const bad of [MIN_START_TIMEOUT_MS - 1, MAX_START_TIMEOUT_MS + 1, 15000.5, -1, NaN]) {
+    const r = normalizeConfig({ startTimeoutMs: bad });
+    assert.equal(r.config.startTimeoutMs, 45000, `bad=${bad}`);
+    assert.ok(r.errors.length > 0, `bad=${bad} 应记录错误`);
+  }
+});
+
+test('startTimeoutMs 非数字类型 → 回退默认并记录错误', () => {
+  const r = normalizeConfig({ startTimeoutMs: '45000' as unknown as number });
+  assert.equal(r.config.startTimeoutMs, 45000);
+  assert.ok(r.errors.length > 0);
 });

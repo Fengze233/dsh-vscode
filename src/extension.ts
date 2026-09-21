@@ -78,6 +78,8 @@ function toManagerOptions(config: DshConfig): ManagerOptions {
     openInBrowser: config.openInBrowser,
     timeoutMs: 3000,
     pollMs: 500,
+    // 启动总超时由 dsh.startTimeoutMs 驱动（默认 45s；Windows 冷启动实测 17–23s，issue #23）
+    startTimeoutMs: config.startTimeoutMs,
   };
 }
 

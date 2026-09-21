@@ -345,6 +345,13 @@
           "minimum": 300,
           "maximum": 5000,
           "markdownDescription": "%dsh.config.contextDebounce%"
+        },
+        "dsh.startTimeoutMs": {
+          "type": "number",
+          "default": 45000,
+          "minimum": 5000,
+          "maximum": 600000,
+          "markdownDescription": "%dsh.config.startTimeoutMs%"
         }
       }
     }

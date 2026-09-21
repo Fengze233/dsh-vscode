@@ -89,9 +89,12 @@ function makeHarness(opts?: Partial<Parameters<ServiceManager['reconfigure']>[0]
   h.manager = new ServiceManager(
     {
       host: '127.0.0.1', port: 3080, extraArgs: [], autoStart: true,
-      timeoutMs: 100, pollMs: 5, ...opts,
+      timeoutMs: 100, pollMs: 5,
+      // 测试统一用很短的启动超时（50ms）：默认 45s 会让超时用例等太久（issue #23 起可配）
+      startTimeoutMs: 50,
+      ...opts,
     },
-    { probeService, processRunner, log: () => {}, startTimeoutMs: 50, ...depsOpts },
+    { probeService, processRunner, log: () => {}, ...depsOpts },
   );
   h.manager.onChange((s) => h.states.push(s.state));
   return h;
@@ -189,7 +192,32 @@ test('启动超时：failed + err.startTimeout', async () => {
   const s = await h.manager.ensureRunning();
   assert.equal(s.state, 'failed');
   assert.equal(s.error, 'err.startTimeout');
-  assert.equal(s.errorVars?.seconds, 0); // startTimeoutMs=50 → round(50/1000)=0（真实环境为 15 秒）
+  assert.equal(s.errorVars?.seconds, 0); // startTimeoutMs=50 → round(50/1000)=0（dsh.startTimeoutMs 默认 45 秒）
+  h.manager.dispose();
+});
+
+// ——— issue #23：启动总超时可配（默认 45s，可经 dsh.startTimeoutMs 调整） ———
+test('启动超时可经 ManagerOptions.startTimeoutMs 配置（issue #23）', async () => {
+  // harness 默认 50ms；这里用 options 覆盖成 2500ms，验证配置真的驱动超时判定与文案秒数
+  const h = makeHarness({ startTimeoutMs: 2500 });
+  h.probeQueue = ['down'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.startTimeout');
+  // 报错文案里的秒数取自生效的超时值：2500ms → 3 秒（round 到最近整数秒）
+  assert.equal(s.errorVars?.seconds, 3);
+  h.manager.dispose();
+});
+
+test('ManagerOptions.startTimeoutMs 优先于 deps 注入值（配置必须能覆盖测试默认）', async () => {
+  // 语义：配置（options）优先，deps 只作默认。
+  // 反向实现（deps 优先）会让 dsh.startTimeoutMs 永远不生效——issue #23 实现时踩过。
+  const h = makeHarness({ startTimeoutMs: 1500 }, { startTimeoutMs: 600 });
+  h.probeQueue = ['down'];
+  const s = await h.manager.ensureRunning();
+  assert.equal(s.state, 'failed');
+  assert.equal(s.error, 'err.startTimeout');
+  assert.equal(s.errorVars?.seconds, 2); // options 的 1500ms 生效（round→2），而非 deps 的 600ms（round→1）
   h.manager.dispose();
 });
 

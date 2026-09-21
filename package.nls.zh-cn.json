@@ -37,5 +37,6 @@
   "dsh.cmd.askAboutPath.title": "用 DSH 询问此项",
   "dsh.cmd.openContextPanel.title": "打开 DSH 面板",
   "dsh.config.contextAutoFollow": "切换文件时自动把当前文件注入 DSH 上下文。",
-  "dsh.config.contextDebounce": "自动跟随防抖毫秒数(300-5000)。"
+  "dsh.config.contextDebounce": "自动跟随防抖毫秒数(300-5000)。",
+  "dsh.config.startTimeoutMs": "等待 `dsh web` 就绪的总超时（毫秒，默认 45000）。DSH 冷启动耗时与机器性能、插件数量相关；若日志提示「服务未在 N 秒内就绪」但服务其实已经起来，请调大此项。"
 }

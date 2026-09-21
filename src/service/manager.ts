@@ -37,6 +37,8 @@ export interface ManagerOptions {
   executablePath?: string;
   /** 是否允许 dsh web 打开浏览器（true=不传 --no-open；默认追加 --no-open） */
   openInBrowser?: boolean;
+  /** 启动总超时（毫秒，默认 45000，可用 dsh.startTimeoutMs 调整；issue #23） */
+  startTimeoutMs?: number;
 }
 
 /**
@@ -64,8 +66,9 @@ export interface ManagerDeps {
   onLaunchUrl?: (url: string) => void;
 }
 
-/** 启动总超时默认值（毫秒） */
-const DEFAULT_START_TIMEOUT_MS = 15000;
+/** 启动总超时默认值（毫秒）：45s。Windows 冷启动实测可达 17–23s，
+ *  旧的 15s 会让已就绪的服务被判超时（issue #23）；用户可用 dsh.startTimeoutMs 调整。 */
+const DEFAULT_START_TIMEOUT_MS = 45000;
 /** 就绪后健康探测间隔默认值（毫秒） */
 const DEFAULT_HEALTH_INTERVAL_MS = 30000;
 /** 「崩溃后换端口重启」的最大轮数（防死循环；超过后报启动崩溃） */
@@ -99,6 +102,12 @@ export class ServiceManager {
   };
 
   constructor(private opts: ManagerOptions, private deps: ManagerDeps) {
+    // 启动总超时以 ManagerOptions 为准（dsh.startTimeoutMs 经 toManagerOptions 传入）；
+    // deps.startTimeoutMs 仅作为测试注入默认使用。注意不能反过来判"deps 没值才取 options"：
+    // 测试 harness 总会塞 deps 默认值，那样配置将永远不生效（issue #23 实现时踩过）。
+    if (opts.startTimeoutMs !== undefined) {
+      this.deps.startTimeoutMs = opts.startTimeoutMs;
+    }
     process.once('exit', this.parentExitHook);
   }
 
