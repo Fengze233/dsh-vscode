@@ -9,6 +9,8 @@ import {
   detectProfileDir,
   createNodeFs,
   bridgeTargetDirs,
+  npmNodeModulesRootFrom,
+  shouldSkipForeignTarget,
   BRIDGE_BEGIN_MARK,
   BRIDGE_END_MARK,
   BRIDGE_BEGIN_MARK_WAS_EMPTY,
@@ -558,4 +560,76 @@ test('不传 npmGlobalNodeModules：目标数组仅两项，与旧双位置行�
     '/home/u/.dsh/profiles/web/node_modules/dsh-vscode-bridge',
     '/home/u/.dsh/profiles/node_modules/dsh-vscode-bridge',
   ]);
+});
+
+// ——— issue #20：安装目标不得写进第三方私有目录 ———
+test('npmNodeModulesRootFrom：从包内 bin.js 上溯到 node_modules 根', () => {
+  // DSH Desktop 场景（issue #20 报告的配置）
+  assert.equal(
+    npmNodeModulesRootFrom('C:\\App\\DSH Desktop\\resources\\app.asar.unpacked\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js'),
+    'C:\\App\\DSH Desktop\\resources\\app.asar.unpacked\\node_modules',
+  );
+  // npm 全局安装（pnpm/npm 包内入口）
+  assert.equal(
+    npmNodeModulesRootFrom('C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js'),
+    'C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules',
+  );
+  // 路径中没有 node_modules 段 → 放弃该目标（宁可只装 profiles 双位置）
+  assert.equal(npmNodeModulesRootFrom('C:\\tools\\dsh\\lib\\bin.js'), undefined);
+});
+
+test('shouldSkipForeignTarget：目录不存在 → 可写；仅含本扩展产物 → 可写', () => {
+  const empty = { exists: () => false, readdir: () => [] };
+  assert.equal(shouldSkipForeignTarget('C:\\any\\dsh-vscode-bridge', empty), false);
+
+  const ours = {
+    exists: () => true,
+    readdir: () => [BRIDGE_PACKAGE_NAME],
+  };
+  assert.equal(shouldSkipForeignTarget('C:\\npm\\node_modules\\dsh-vscode-bridge', ours), false);
+});
+
+test('shouldSkipForeignTarget：目录含他人产物（如 DSH Desktop 的 dsh.cmd）→ 跳过', () => {
+  // 复刻 issue #20 的受害目录：%APPDATA%\DSH Desktop\host-commands\desktop\bin
+  const victim = {
+    exists: () => true,
+    readdir: () => ['dsh.cmd'],
+  };
+  assert.equal(shouldSkipForeignTarget('C:\\Users\\u\\AppData\\Roaming\\DSH Desktop\\host-commands\\desktop\\bin\\dsh-vscode-bridge', victim), true);
+});
+
+test('shouldSkipForeignTarget：目录不可读 → 保守跳过（不冒写坏他人目录的风险）', () => {
+  const boom = {
+    exists: () => true,
+    readdir: () => { throw new Error('EACCES'); },
+  };
+  assert.equal(shouldSkipForeignTarget('C:\\locked\\dsh-vscode-bridge', boom), true);
+});
+
+test('installBridge：npm 目标目录含他人产物时跳过该目标，其余位置照常安装（issue #20）', () => {
+  const profile = '/home/u/.dsh/profiles/web';
+  const patchPath = `${profile}/cordis.patch.yml`;
+  const desktopBin = 'C:\\Users\\u\\AppData\\Roaming\\DSH Desktop\\host-commands\\desktop\\bin';
+  const desktopBinBridge = `${desktopBin}\\dsh-vscode-bridge`;
+  const memFs = makeMemFs({ [patchPath]: '[]\n' });
+  memFs.mkdir(profile);
+  // 让第三方私有目录"已存在且含 dsh.cmd"（模拟真实受害目录的内容）
+  const fs: InstallerFs = {
+    ...memFs,
+    exists: (p) => (p === desktopBinBridge ? true : memFs.exists(p)),
+    readdir: (p) => (p === desktopBinBridge ? ['dsh.cmd'] : memFs.readdir(p)),
+  };
+
+  const r = installBridge({
+    dshHome: '/home/u/.dsh',
+    bridgeSourceDir: '/ext/bridge-client',
+    fs,
+    npmGlobalNodeModules: desktopBin,
+  });
+  assert.equal(r.status, 'ok');
+  // profiles 双位置照常安装
+  assert.ok(memFs.exists(`${profile}/node_modules/dsh-vscode-bridge/package.json`));
+  assert.ok(memFs.exists('/home/u/.dsh/profiles/node_modules/dsh-vscode-bridge/package.json'));
+  // 第三方私有目录未被写入：memfs 的 copyDir 会在此路径落 package.json，不存在即证明被跳过
+  assert.equal(memFs.exists(`${desktopBinBridge}/package.json`), false);
 });

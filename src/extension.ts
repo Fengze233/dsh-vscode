@@ -26,6 +26,7 @@ import {
   installBridge,
   uninstallBridge,
   createNodeFs,
+  npmNodeModulesRootFrom,
   type BridgeInstallResult,
 } from './bridge/installer';
 import { cleanupAllImageCaches, cleanupStaleImageCaches } from './bridge/host';
@@ -92,21 +93,27 @@ function toManagerOptions(config: DshConfig): ManagerOptions {
  * 进程不同，profiles 双位置仍可能解析不到桥接包；而 npm 全局 node_modules
  * （AppData\Roaming\npm\node_modules）是确定可达的位置。本函数据此返回该目录作为第三安装目标。
  *
- * 规则（仅 win32）：
- * - 优先 config.executablePath（非空且不以 .js 结尾）→ dirname；
- * - 否则 findInPath('dsh.cmd', process.env.PATH) → dirname；
- * - 都找不到 → undefined（不传，保持双位置向后兼容）。
+ * 规则（仅 win32，issue #20 修正）：
+ * - config.executablePath 以 .js 结尾（包内入口，如 DSH Desktop 的 `…\@deepseek-ai\dsh\lib\bin.js`）
+ *   → 从该路径**向上寻找第一个 node_modules 目录**；找不到就放弃该目标；
+ * - config.executablePath 指向垫片（.cmd）→ 用 `dirname(垫片)/node_modules`
+ *   （垫片目录本身不是 node_modules 根，直接返回它会把桥接包写进别人的私有目录）；
+ * - 否则 findInPath('dsh.cmd', PATH) → 同上推导；
+ * - 推导不出真正的 node_modules 根 → undefined（只装 profiles 双位置）。
  * - 非 win32 → undefined。
  */
 function resolveNpmGlobalNodeModules(config: DshConfig): string | undefined {
   if (process.platform !== 'win32') return undefined;
   const exec = config.executablePath;
-  if (exec && !exec.endsWith('.js')) {
-    return dirname(exec);
+  if (exec && exec.endsWith('.js')) {
+    return npmNodeModulesRootFrom(exec);
+  }
+  if (exec) {
+    return join(dirname(exec), 'node_modules');
   }
   const found = findInPath('dsh.cmd', process.env.PATH ?? '');
   if (found) {
-    return dirname(found);
+    return join(dirname(found), 'node_modules');
   }
   return undefined;
 }

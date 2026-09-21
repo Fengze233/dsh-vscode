@@ -9,7 +9,7 @@
 // 2. 新增条目必须用 `insert:` 包裹；裸 `- id:` 条目是「按 id 覆盖既有行」的 patch，
 //    目标行不存在时只会告警并跳过，不会真正新增条目。
 // 3. 卸载时按 begin/end 标记精确删除条目段；若删除后仅剩空白，还原为 `[]`。
-import { join, dirname } from 'node:path';
+import { join, dirname, win32 } from 'node:path';
 import * as nodeFs from 'node:fs';
 
 /** 桥接条目在 cordis.patch.yml 中的包裹标记（卸载时按标记精确删除） */
@@ -91,6 +91,47 @@ export function bridgeTargetDirs(profileDir: string, npmGlobalNodeModules?: stri
 }
 
 /**
+ * 从「dsh 包内文件路径」向上寻找第一个 `node_modules` 目录（issue #20）。
+ *
+ * 场景：`dsh.executablePath` 指向 `…\app.asar.unpacked\node_modules\@deepseek-ai\dsh\lib\bin.js`
+ * 这类包内入口时，`dirname` 得到的是包内目录而非 node_modules 根；逐级上溯才能拿到真正的根。
+ * 全程用 path.win32，避免在非 Windows 上单测这条 Windows 逻辑时被平台路径规则干扰。
+ *
+ * @returns node_modules 根目录；路径中不含 node_modules 段时返回 undefined（调用方放弃该目标）
+ */
+export function npmNodeModulesRootFrom(p: string): string | undefined {
+  let dir = win32.dirname(p);
+  for (let i = 0; i < 12; i += 1) {
+    if (win32.basename(dir).toLowerCase() === 'node_modules') return dir;
+    const parent = win32.dirname(dir);
+    if (parent === dir) break; // 到盘符根仍未找到
+    dir = parent;
+  }
+  return undefined;
+}
+
+/**
+ * 判断该安装目标是否应当跳过：目录已存在、且含有非本扩展产物（issue #20）。
+ *
+ * 背景：DSH Desktop 的私有命令目录（`%APPDATA%\DSH Desktop\host-commands\desktop\bin`）
+ * 只允许存在它自己生成的 `dsh.cmd`，多一个条目就会让桌面下次启动硬失败
+ * （`assertOwnedDirectoryEntries`）。因此只要目录里已有别的东西，就判定"这是别人的目录"，
+ * 绝不往里写；目录不存在（由本扩展创建）或只含本扩展的包目录时正常安装。
+ */
+export function shouldSkipForeignTarget(
+  targetDir: string,
+  fs: Pick<InstallerFs, 'exists' | 'readdir'>,
+): boolean {
+  if (!fs.exists(targetDir)) return false; // 目录不存在：由本扩展创建，安全
+  try {
+    return fs.readdir(targetDir).some((name) => name !== BRIDGE_PACKAGE_NAME);
+  } catch {
+    // 读不到目录内容（权限/IO）时保守跳过：宁可少装一处，也不冒写坏他人目录的风险
+    return true;
+  }
+}
+
+/**
  * 判定 cordis.patch.yml 的顶层是否为「流式空数组 []」。
  *
  * 规则：去掉注释行与空行后：
@@ -146,9 +187,13 @@ export function installBridge(opts: BridgeInstallOptions): BridgeInstallResult {
     return { status: 'degraded', reason: 'web profile not found' };
   }
   const patchPath = join(profileDir, 'cordis.patch.yml');
-  const targets = bridgeTargetDirs(profileDir, opts.npmGlobalNodeModules);
+  const allTargets = bridgeTargetDirs(profileDir, opts.npmGlobalNodeModules);
+  // 写入前的白名单校验（issue #20）：跳过"已存在且含非本扩展产物"的目录。
+  // 典型受害目录是 DSH Desktop 的私有命令目录（只允许它自己的 dsh.cmd），
+  // 往里写会让桌面下次启动直接硬失败。
+  const targets = allTargets.filter((t) => !shouldSkipForeignTarget(t, opts.fs));
   // primary 路径保持兼容语义（BridgeInstallResult.bridgeDir）
-  const bridgeDir = targets[0];
+  const bridgeDir = targets[0] ?? allTargets[0];
 
   // 读取现有 patch（不存在视为空，避免真实环境首次运行时 readFile 抛错）
   const existing = opts.fs.exists(patchPath) ? opts.fs.readFile(patchPath) : '';
