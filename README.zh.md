@@ -207,6 +207,31 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 | `dsh.useEnvProxy` | `false` | 自动为子进程的 `NODE_OPTIONS` 追加 `--use-env-proxy`（不覆盖已有选项）。必须经 HTTP/HTTPS 代理才能访问模型 API 时开启 |
 | `dsh.panel.zoomLevel` | `1` | 面板内网页缩放（`0.5`–`1.5`，可自定义任意数值）：侧边栏里字太大时调小、太小则放大 |
 
+### 设置界面中英对照
+
+设置界面的**条目名**由配置键推导（点号变空格、中间段加冒号），**说明文案**来自扩展的本地化文件。若你的环境没有加载中文（条目与说明仍是英文），按下表对照即可；搜索时**直接输配置键**（如 `panel.zoomLevel`、`useEnvProxy`）比输标题更容易命中。
+
+| 设置界面显示的英文名 | 配置键 | 含义 |
+|---|---|---|
+| Dsh: Auto Start | `dsh.autoStart` | 服务未运行时自动启动 `dsh web` |
+| Dsh: Bridge: Enabled | `dsh.bridge.enabled` | 启用面板与 DSH 之间的桥接（外链、文件跳转） |
+| Dsh: Bridge: Silence Warning | `dsh.bridge.silenceWarning` | 抑制桥接警告 |
+| Dsh: Context: Auto Follow | `dsh.context.autoFollow` | 切换文件时自动把当前文件注入 DSH 上下文 |
+| Dsh: Context: Follow Debounce Ms | `dsh.context.followDebounceMs` | 自动跟随的防抖毫秒数（300–5000） |
+| Dsh: Env | `dsh.env` | 注入 DSH 子进程的环境变量（键值对） |
+| Dsh: Executable Path | `dsh.executablePath` | `dsh` 可执行文件绝对路径（留空则从 PATH 查找） |
+| Dsh: Extra Args | `dsh.extraArgs` | 启动 `dsh web` 时附加的参数 |
+| Dsh: Host | `dsh.host` | 服务地址（仅允许回环地址） |
+| Dsh: Image: Fallback | `dsh.image.fallback` | 模型无视觉能力时把图片降级为路径转发 |
+| Dsh: Open In Browser | `dsh.openInBrowser` | 启动后在默认浏览器打开 DSH 页面 |
+| **Dsh: Panel: Zoom Level** | `dsh.panel.zoomLevel` | **面板内网页缩放**：0.5–1.5，可自定义数值 |
+| Dsh: Port | `dsh.port` | 期望端口（探测与启动共用） |
+| Dsh: Remote: Enabled | `dsh.remote.enabled` | 启用远程场景（SSH Remote / WSL / Dev Containers） |
+| Dsh: Start Timeout Ms | `dsh.startTimeoutMs` | 等待 `dsh web` 就绪的总超时（毫秒，默认 45000） |
+| Dsh: Stop On Exit | `dsh.stopOnExit` | 关闭最后一个窗口时停止插件启动的服务 |
+| **Dsh: Use Env Proxy** | `dsh.useEnvProxy` | **自动为子进程追加 `NODE_OPTIONS=--use-env-proxy`**（代理环境用） |
+| Dsh: Workspace Root Index | `dsh.workspaceRootIndex` | 多根工作区取第几个根目录（从 0 起） |
+
 ## 🌍 多语言
 
 界面文案跟随 VS Code 显示语言（`Configure Display Language`）：`zh-*` → 简体中文，其余语言 → 英文。
