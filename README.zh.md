@@ -237,13 +237,16 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 
 界面文案跟随 VS Code 显示语言（`Configure Display Language`）：`zh-*` → 简体中文，其余语言 → 英文。
 
+扩展包内提供 `package.nls.json` / `package.nls.zh-cn.json` / `package.nls.zh-hans.json`。
+但在 **VS Code + WSL Remote** 场景实测：即使扩展宿主的 locale 已是 `zh-cn`、本地化文件与键覆盖均正确，设置界面仍显示英文（同一界面里官方 `Remote.*` 扩展为中文）——属该环境的清单本地化限制，非扩展缺陷。因此上文《设置界面中英对照》表作为长期可用的对照方案。
+
 ## 🧑‍💻 开发
 
 环境要求：Node.js ≥ 22、VS Code ≥ 1.91。
 
 ```bash
 npm install
-npm run test          # 320 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话、上下文注入）
+npm run test          # 326 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话、上下文注入）
 npm run compile       # 构建 out/extension.js
 npm run watch         # 监听构建
 npm run typecheck     # 类型检查

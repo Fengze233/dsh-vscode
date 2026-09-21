@@ -217,7 +217,7 @@ Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 320 unit/integration tests (including real dsh web flows: service lifecycle, auth session, context injection)
+npm run test          # 326 unit/integration tests (including real dsh web flows: service lifecycle, auth session, context injection)
 npm run compile       # builds out/extension.js
 npm run watch         # watch build
 npm run typecheck     # type check
