@@ -69,3 +69,41 @@ test('桥接版本与插件版本统一（一同随包发布），且卸载钩�
   // ④ 构建产物应包含卸载脚本（build.mjs 在两种模式下都会构建 out/uninstall.js）
   assert.ok(existsSync(join(__dirname, '..', 'uninstall.js')), '构建产物应包含 out/uninstall.js');
 });
+
+// ——— issue #27 回归防线（0.4.2 撤回 PR #11 后固化） ———
+// 背景：#27 的现象是「切一次活动编辑器，面板整页重载一次」。根因是活动编辑器变化 →
+// 工具条刷新 → render() → webview 文档重建（nonce 每次重生成）。该链路随 PR #11 撤回移除。
+// 这里用源码静态断言把「不得复活该链路」固化下来——它同时是自动化回归证据：
+// 一旦有人重新接上"文件切换触发刷新"，本测试立即失败。
+test('#27 回归：活动编辑器变化不得触发面板刷新/重载链路', () => {
+  const root = join(__dirname, '..', '..');
+  const src = readFileSync(join(root, 'src', 'extension.ts'), 'utf8');
+  const provider = readFileSync(join(root, 'src', 'panel', 'provider.ts'), 'utf8');
+
+  // ① 不得监听活动编辑器变化（v0.5.0 的 tracker.setFile 入口）
+  assert.ok(!src.includes('onDidChangeActiveTextEditor'), '不得订阅 onDidChangeActiveTextEditor');
+  // ② 上下文跟踪器整体不存在（含 onSettled / setFile / setDebounceMs 等入口）
+  assert.ok(!/tracker/i.test(src), 'extension.ts 不得再有 tracker 相关代码');
+  // ③ 刷新入口只允许由配置变更触发：extension.ts 中恰好 2 处调用（两个面板各一次）
+  const total = (src.match(/refreshContextBar/g) ?? []).length;
+  assert.equal(total, 2, 'extension.ts 中只应有 2 处 refreshContextBar 调用（配置变更时两个面板）');
+  const fnStart = src.indexOf('function onConfigChanged()');
+  assert.ok(fnStart > 0, '存在 onConfigChanged');
+  const fnBody = src.slice(fnStart, src.indexOf('\n}', fnStart));
+  assert.equal((fnBody.match(/refreshContextBar/g) ?? []).length, 2, '仅配置变更回调内调用（两个面板各一次）');
+  // ④ 工具条下行消息同步通道不得复活（它只服务于已撤回的上下文工具条）
+  assert.ok(!provider.includes("kind: 'updateContextBar'"), '不得再有 updateContextBar 下行消息');
+});
+
+// 缩放（issue #8）在 0.4.2 中保留：它是唯一需要"重渲染才生效"的设置项，
+// 上面 ③ 的断言依赖它仍然接线，这里同时固化"缩放不能被误删"。
+test('#27 回归：面板缩放仍接线且传参位置正确（0.4.2 保留 issue #8）', () => {
+  const root = join(__dirname, '..', '..');
+  const provider = readFileSync(join(root, 'src', 'panel', 'provider.ts'), 'utf8');
+  const html = readFileSync(join(root, 'src', 'panel', 'html.ts'), 'utf8');
+  assert.ok(provider.includes('this.ui.zoomLevel?.() ?? 1'), 'provider 仍读取 zoomLevel');
+  // readyPage 第 4 个参数必须是 zoomLevel（撤回 contextBar 后不能还留着 undefined 占位）
+  assert.ok(/readyPage\(\s*frameUrl,\s*ctx,\s*\{[\s\S]*?\},\s*\/\/[^\n]*\n\s*this\.ui\.zoomLevel/.test(provider),
+    'readyPage 第 4 参应为 zoomLevel');
+  assert.ok(html.includes('--dshv-zoom'), '缩放 CSS 变量仍在');
+});
