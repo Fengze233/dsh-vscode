@@ -93,6 +93,13 @@ test('#27 回归：活动编辑器变化不得触发面板刷新/重载链路', 
   assert.equal((fnBody.match(/refreshContextBar/g) ?? []).length, 2, '仅配置变更回调内调用（两个面板各一次）');
   // ④ 工具条下行消息同步通道不得复活（它只服务于已撤回的上下文工具条）
   assert.ok(!provider.includes("kind: 'updateContextBar'"), '不得再有 updateContextBar 下行消息');
+  // ⑤ 渲染不得注入"当前文件名"（#27 的放大器：文件名进 HTML → 每次文件切换 HTML 都不同）
+  assert.ok(!provider.includes('fileLabel'), 'provider 不得再向模板注入 fileLabel');
+  // ⑥ 已撤回的右键菜单块不得复活
+  const p = pkg();
+  for (const menu of ['editor/context', 'explorer/context', 'editor/title/context']) {
+    assert.equal(p.contributes.menus[menu], undefined, `菜单块 ${menu} 应已移除`);
+  }
 });
 
 // 缩放（issue #8）在 0.4.2 中保留：它是唯一需要"重渲染才生效"的设置项，
