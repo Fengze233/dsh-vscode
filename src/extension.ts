@@ -32,8 +32,6 @@ import {
 import { cleanupAllImageCaches, cleanupStaleImageCaches } from './bridge/host';
 import * as nodeFs from 'node:fs/promises';
 import { evaluateBridgeStatus, bridgeWarningText } from './bridge/status';
-import { ContextController } from './context/controller';
-import { createCurrentFileTracker, describeFileRef } from './context/tracker';
 
 let manager: ServiceManager | null = null;
 let output: vscode.OutputChannel | null = null;
@@ -59,7 +57,7 @@ function appendLog(line: string): void {
   if (logBuffer.length > LOG_BUFFER_MAX) logBuffer.shift();
   output?.appendLine(full);
 }
-let tracker: ReturnType<typeof createCurrentFileTracker> | null = null;
+/** 两个面板实例（模块级可空变量：onConfigChanged 需要刷新它们的缩放等渲染期设置） */
 let panelPrimary: DshPanelProvider | null = null;
 let panelSecondary: DshPanelProvider | null = null;
 
@@ -584,43 +582,6 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   manager.setExitBehavior(!config.stopOnExit);
 
-  // —— 上下文联动装配：控制器 + 当前文件跟踪器 ——
-  const controller = new ContextController({
-    manager,
-    // DSH ≥0.1.2：/api 需会话 cookie，故上下文注入经扩展的本地代办（代办注入 cookie 并适配
-    // browser-trust fence）。代办未就绪（会话兑换中）时返回 undefined，controller 会短暂等待。
-    getApiBaseUrl: () => {
-      if (!authProxyStarted || authSessionState !== 'ok') return undefined;
-      const base = authProxy?.baseUrl ?? '';
-      return base === '' ? undefined : base;
-    },
-    getWorkspaceRoot: () =>
-      resolveWorkspaceRoot(vscode.workspace.workspaceFolders ?? [], readConfig().config.workspaceRootIndex),
-    getAutoFollow: () => readConfig().config.autoFollow,
-    setAutoFollow: async (v) => {
-      await vscode.workspace.getConfiguration('dsh').update('context.autoFollow', v, true);
-    },
-    messages: {
-      t,
-      showInformation: (m) => void vscode.window.showInformationMessage(m),
-      showWarning: (m) => void vscode.window.showWarningMessage(m),
-      // 注:简报原样返回 vscode 的 Thenable,而 ControllerMessages.showInputBox 要求 Promise,
-      // 严格模式下类型不兼容,用 Promise.resolve 包装(语义等价)。
-      showInputBox: (o) => Promise.resolve(vscode.window.showInputBox({ prompt: o.prompt, placeHolder: o.placeHolder })),
-    },
-  });
-
-  // 防抖跟踪器：结算后驱动自动跟随与工具条刷新
-  tracker = createCurrentFileTracker({ debounceMs: readConfig().config.followDebounceMs });
-  tracker.onSettled((absPath) => {
-    if (absPath !== undefined && readConfig().config.autoFollow) {
-      void controller.autoInject(absPath);
-    }
-    // 注:panel 已按 9f 提升为模块级可空变量,回调内需 ?.(简报原样会触发 strict null checks 报错)
-    panelPrimary?.refreshContextBar();
-    panelSecondary?.refreshContextBar();
-  });
-
   // 工作区根目录解析：多根工作区按 dsh.workspaceRootIndex 取根（越界回退第一个）。
   // 该 getter 仅用于 provider 的文件相对路径解析（openFile 的 workspaceRoot 兜底基准）。
   const workspaceRootGetter = (): string | undefined =>
@@ -636,26 +597,6 @@ export function activate(context: vscode.ExtensionContext): void {
     asExternalUri: async (uri) => await vscode.env.asExternalUri(vscode.Uri.parse(uri.toString())),
   });
 
-  /** 两个面板共享的上下文依赖(当前文件标签/自动跟随/加入动作) */
-  function makeContextPanelDeps() {
-    return {
-      getFileLabel: () => {
-        const p = tracker?.getCurrent();
-        return p === undefined ? null : describeFileRef(p, workspaceRootGetter()).ref;
-      },
-      getAutoFollow: () => readConfig().config.autoFollow,
-      addFileContext: () => {
-        const p = tracker?.getCurrent();
-        if (p === undefined) {
-          void vscode.window.showWarningMessage(t('ctx.noActiveFile'));
-          return;
-        }
-        void controller.addFileContext(p);
-      },
-      toggleAutoFollow: () => controller.toggleAutoFollow(),
-    };
-  }
-
   // 左右两侧各一个 provider 实例，共享同一 manager（服务状态一致）
   panelPrimary = new DshPanelProvider(
     manager,
@@ -670,7 +611,6 @@ export function activate(context: vscode.ExtensionContext): void {
     resolveExternalUrl, // resolveExternalUrl：远程窗口的 URL 隧道解析
     imageFallbackGetter, // imageFallback：dsh.image.fallback 驱动图片降级
     panelUi(), // 会话三态 / 代理地址覆盖 / 登录提交（DSH ≥0.1.2 鉴权适配）
-    makeContextPanelDeps(),
   );
   panelSecondary = new DshPanelProvider(
     manager,
@@ -682,7 +622,6 @@ export function activate(context: vscode.ExtensionContext): void {
     resolveExternalUrl,
     imageFallbackGetter,
     panelUi(),
-    makeContextPanelDeps(),
   );
   panels.push(panelPrimary, panelSecondary);
   new StatusBarController(manager);
@@ -716,61 +655,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('dsh.bridge.retry', () => void retryBridge()),
     vscode.commands.registerCommand('dsh.bridge.uninstall', () => void uninstallBridgeCmd()),
     vscode.commands.registerCommand('dsh.cleanupImageCache', () => void cleanupImageCacheCmd()),
-    // —— 上下文联动命令 ——
-    // 注:tracker 为模块级可空变量,命令回调内访问需 ?.(回调仅在激活后触发,tracker 必已赋值,语义等价)
-    vscode.commands.registerCommand('dsh.addFileContext', () => {
-      const p = tracker?.getCurrent();
-      if (p === undefined) {
-        void vscode.window.showWarningMessage(t('ctx.noActiveFile'));
-        return;
-      }
-      void controller.addFileContext(p);
-    }),
-    vscode.commands.registerCommand('dsh.askAboutFile', () => {
-      const p = tracker?.getCurrent();
-      if (p === undefined) {
-        void vscode.window.showWarningMessage(t('ctx.noActiveFile'));
-        return;
-      }
-      void controller.askAboutFile(p);
-    }),
-    vscode.commands.registerCommand('dsh.sendSelection', () => {
-      const ed = vscode.window.activeTextEditor;
-      if (!ed || ed.selection.isEmpty) {
-        void vscode.window.showWarningMessage(t('ctx.noSelection'));
-        return;
-      }
-      void controller.sendSelection({
-        fileAbsPath: ed.document.uri.fsPath,
-        startLine: ed.selection.start.line + 1, // 1-based 行号(与编辑器显示一致)
-        code: ed.document.getText(ed.selection),
-      });
-    }),
-    vscode.commands.registerCommand('dsh.addPathContext', (uri?: vscode.Uri) => {
-      if (uri) void controller.addFileContext(uri.fsPath);
-    }),
-    vscode.commands.registerCommand('dsh.askAboutPath', (uri?: vscode.Uri) => {
-      if (uri) void controller.askAboutFile(uri.fsPath);
-    }),
-    vscode.commands.registerCommand('dsh.openContextPanel', () => openPanel()),
-    // —— 活动编辑器跟踪：驱动工具条显示与自动跟随 ——
-    vscode.window.onDidChangeActiveTextEditor((ed) => {
-      const doc = ed?.document;
-      tracker?.setFile(doc !== undefined && doc.uri.scheme === 'file' ? doc.uri.fsPath : undefined);
-    }),
-    // —— 工作区自适应：切换项目时自动重启服务(cwd)+ 幂等注册新工作区 ——
-    vscode.workspace.onDidChangeWorkspaceFolders(() => {
-      void (async () => {
-        const snap = await manager?.reconfigure(toManagerOptions(readConfig().config));
-        const root = resolveWorkspaceRoot(
-          vscode.workspace.workspaceFolders ?? [],
-          readConfig().config.workspaceRootIndex,
-        );
-        if (snap?.state === 'ready' && root !== undefined) {
-          await controller.registerWorkspace(); // 失败静默(内部已捕获)
-        }
-      })();
-    }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('dsh')) onConfigChanged();
     }),
@@ -868,14 +752,13 @@ async function cleanupImageCacheCmd(): Promise<void> {
 }
 
 /** 配置变更：host/port 变化时自动重启自启服务，退出策略实时生效 */
-/** 配置变更：host/port/cwd 变化时自动重启自启服务，退出策略与上下文设置实时生效 */
 function onConfigChanged(): void {
   const m = manager;
   if (!m) return;
   const { config } = readConfig();
   void m.reconfigure(toManagerOptions(config));
   m.setExitBehavior(!config.stopOnExit);
-  tracker?.setDebounceMs(config.followDebounceMs);
+  // 面板缩放（dsh.panel.zoomLevel）等"渲染期读取"的设置项：就地重渲染即可生效，无需重载窗口
   panelPrimary?.refreshContextBar();
   panelSecondary?.refreshContextBar();
 }

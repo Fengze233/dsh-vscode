@@ -193,47 +193,18 @@ test('每个占位页 acquireVsCodeApi 恰好声明一次（顶层 const 重复�
   }
 });
 
-test('readyPage 传入 contextBar 时渲染工具条(标签/加入按钮/自动跟随开关)', () => {
-  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, { fileLabel: 'src/extension.ts', autoFollow: true });
-  assert.ok(html.includes('id="dsh-ctx-bar"'), '应渲染工具条容器');
-  assert.ok(html.includes('id="dsh-ctx-label"'), '应渲染文件标签');
-  assert.ok(html.includes('src/extension.ts'), '应显示文件引用');
-  assert.ok(html.includes('data-action="addFileContext"'), '应渲染加入按钮');
-  assert.ok(html.includes('id="dsh-ctx-autofollow"'), '应渲染自动跟随开关');
-  assert.ok(html.includes('checked'), 'autoFollow=true 时开关应为选中态');
-});
-
-test('readyPage 未传 contextBar 时不渲染工具条(向后兼容)', () => {
-  const html = readyPage('http://127.0.0.1:3080/', ctx());
-  assert.ok(!html.includes('dsh-ctx-bar'));
-});
-
-test('工具条下行脚本:监听 updateContextBar 更新标签与开关', () => {
-  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, { fileLabel: null, autoFollow: false });
-  assert.ok(html.includes("'updateContextBar'"), '应包含下行消息监听');
-  assert.ok(html.includes('dsh-ctx-label'), '监听脚本应引用标签元素');
-  assert.ok(html.includes('dsh-ctx-autofollow'), '监听脚本应引用开关元素');
-});
-
-test('工具条 fileLabel 为空时显示空标签', () => {
-  initI18n('en');
-  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, { fileLabel: null, autoFollow: false });
-  assert.ok(html.includes('Current file'), '无文件时仍显示「当前文件」前缀文案');
-  assert.ok(html.includes('id="dsh-ctx-label"></span>'), '标签内容为空(不渲染 null 字样)');
-});
-
 // ——— issue #8：面板缩放 ———
 test('readyPage 默认不缩放：不写 zoom 变量（保持历史 DOM）', () => {
   // 注意断言口径：CSS 里定义了 --dshv-zoom 的默认值，所以不能直接找子串，
   // 要确认"元素上没有被写入内联缩放变量"
   const html = readyPage('http://127.0.0.1:3080/', ctx());
   assert.ok(!html.includes('style="--dshv-zoom'), '默认 1 时不应输出内联 zoom 变量');
-  const html2 = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 1);
+  const html2 = readyPage('http://127.0.0.1:3080/', ctx(), undefined, 1);
   assert.ok(!html2.includes('style="--dshv-zoom'), '显式传 1 同样不输出');
 });
 
 test('readyPage 缩放：注入 zoom 变量，iframe 用 calc(100%/zoom) + scale(zoom) 铺满', () => {
-  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 0.8);
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, 0.8);
   assert.ok(html.includes('style="--dshv-zoom:0.8"'), '应写入 0.8 的缩放变量（内联）');
   // 逻辑尺寸 100%/zoom 再 scale(zoom) → 物理尺寸恒等于容器：缩小/放大两方向都铺满
   // （真机几何实测：0.5/0.75/1/1.25/1.5 × 有/无工具条，留白 0、无滚动条、三点命中均为 iframe）
@@ -248,16 +219,16 @@ test('readyPage 缩放：注入 zoom 变量，iframe 用 calc(100%/zoom) + scale
 });
 
 test('缩放支持放大方向（>1）与自定义值（如 1.15）', () => {
-  const up = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 1.5);
+  const up = readyPage('http://127.0.0.1:3080/', ctx(), undefined, 1.5);
   assert.ok(up.includes('style="--dshv-zoom:1.5"'), '放大档位同样只写 zoom 变量');
-  const custom = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 1.15);
+  const custom = readyPage('http://127.0.0.1:3080/', ctx(), undefined, 1.15);
   assert.ok(custom.includes('style="--dshv-zoom:1.15"'), '自定义值应原样注入');
 });
 
 test('缩放布局：iframe 不参与 flex（flex:1 会固定 width，与百分比尺寸冲突）', () => {
-  // 回归防线：曾用 `.has-bar .frame-zoom { position: relative; flex: 1 }` + `iframe { flex: 1 }`，
-  // 真机实测出现横向滚动条与内容不满。现改为容器绝对定位 + iframe 不用 flex。
-  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, undefined, 0.9);
-  assert.ok(!/\.has-bar iframe\.frame \{[^}]*flex/.test(html), '不得再给 iframe 加 flex');
-  assert.ok(/\.has-bar \.frame-zoom \{[^}]*position: absolute/.test(html), '工具栏下容器应绝对定位铺满剩余区域');
+  // 回归防线：曾用 `iframe { flex: 1 }`，真机实测出现横向滚动条与内容不满。
+  // 现改为容器 .frame-zoom 绝对定位铺满 + iframe 不用 flex。
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, 0.9);
+  assert.ok(!/iframe\.frame \{[^}]*flex/.test(html), '不得给 iframe 加 flex');
+  assert.ok(/\.frame-zoom \{[^}]*position: absolute/.test(html), '缩放容器应绝对定位铺满');
 });
