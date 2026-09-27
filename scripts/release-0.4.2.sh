@@ -77,7 +77,10 @@ git tag -a "$TAG" -m "v$RELEASE_VERSION"
 git push -q origin "$TAG"
 
 echo "=== 7/7 构建 vsix 并放到 Windows 桌面 ==="
-npm run package -- --out "dsh-vscode-$RELEASE_VERSION.vsix"
+# 注：不能用 `npm run package -- --out X`——npm 会把参数追加到脚本末尾，
+# 变成 `vsce package -o dsh-vscode.vsix --out X`，产物文件名仍是 dsh-vscode.vsix。
+npm run compile
+node_modules/.bin/vsce package --no-dependencies -o "dsh-vscode-$RELEASE_VERSION.vsix"
 cp "dsh-vscode-$RELEASE_VERSION.vsix" "$WIN_DESKTOP/"
 sha256sum "dsh-vscode-$RELEASE_VERSION.vsix" "$WIN_DESKTOP/dsh-vscode-$RELEASE_VERSION.vsix"
 ls -la "$WIN_DESKTOP/dsh-vscode-$RELEASE_VERSION.vsix"
