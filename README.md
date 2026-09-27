@@ -39,9 +39,6 @@ Works with **DSH 0.1.2 and newer**, including its one-time-token browser authent
 - 🌐 **SSH Remote (opt-in)**: when connected to a remote host, run dsh on the remote and open the panel through a VS Code tunnel (`dsh.remote.enabled`, off by default);
 - 🖼️ **Free image upload**: send images even when the active model has no vision — the image is cached in the workspace and dispatched as a file-path reference, letting the model inspect it with an image tool (files are cleaned up when the panel closes; opt-out via `dsh.image.fallback`);
 - 🪟 **No surprise browser window**: `dsh web` is started with `--no-open` by default (restore with `dsh.openInBrowser`).
-- 🧠 **File context integration**: the panel toolbar shows the current file with an *Add* button and an *Auto-follow* toggle — inject the current file into the AI context in one click, or let it follow automatically as you switch files (injected into the most recent session of the current project, auto-created if none);
-- 🖱️ **Right-click menus**: "Add to Context / Ask DSH / Send Selection" directly from the editor, the explorer, and the editor title bar;
-- 📁 **Workspace adaptation**: switching VS Code workspaces restarts the DSH service with the new project as its working directory and idempotently registers the DSH workspace.
 
 ## 📥 Installation
 
@@ -172,23 +169,6 @@ The bridge only works inside the panel. If it is inactive (e.g. you open the DSH
 - **Image upload works seamlessly even for non-vision models**: attach images freely in the dialog. When the active model has no image input, the image is saved into your workspace and the message is sent back out as the original text plus a `image: <absolute-path>` reference — no error, no popup; the model inspects the file with its own image tool and answers normally. Vision-capable models keep the native image upload untouched.
 - **No browser auto-open**: `dsh web` is started with `--no-open`, so the plugin no longer pops a browser window; turn that back on with `dsh.openInBrowser`.
 
-## 🧠 Context integration
-
-The panel toolbar shows the current file with **Add** and **Auto-follow** controls: **Add** injects the current file into the AI context; with auto-follow enabled, switching files automatically injects the current file into the most recent session of the current project (creating a new session if none exists).
-
-### Context integration settings (`dsh.context.*`)
-
-| Setting | Default | Description |
-|---|---|---|
-| `dsh.context.autoFollow` | `false` | Automatically inject the current file into the AI context when switching files |
-| `dsh.context.followDebounceMs` | `800` | Auto-follow debounce delay in milliseconds (300-5000) |
-
-### Right-click menus
-
-- Editor: Add to Context / Ask DSH / Send Selection;
-- Explorer: Add to Context / Ask DSH;
-- Editor title bar: Open Panel / Open in Browser / Restart / Stop / Copy URL.
-
 ## ⚙️ Settings (`dsh.*`)
 
 | Setting | Default | Description |
@@ -217,7 +197,7 @@ Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 326 unit/integration tests (including real dsh web flows: service lifecycle, auth session, context injection)
+npm run test          # 275 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
 npm run compile       # builds out/extension.js
 npm run watch         # watch build
 npm run typecheck     # type check
@@ -270,8 +250,7 @@ Many improvements here came from the community. Contributions are grouped by typ
 
 | Contributor | Contribution | Ref |
 |---|---|---|
-| [@BingMoeNone](https://github.com/BingMoeNone) | Editor context integration (panel toolbar + auto-follow), editor/explorer context menus, workspace adaptation; plus the DSH ≥0.1.2 wire-format adaptation (slash endpoints, `payload.args` wrapping, `requestId`, session cookie via the local relay) | PR #11 (shipped in v0.4.1) |
-| [@HansonFeng123](https://github.com/HansonFeng123) | An implementation attempt at workspace auto-select and single-workspace sidebar; its finding that the startup timeout was too short landed in v0.4.1 (see #23) | PR #21 (under review) |
+| (none yet) | No community code contributions are merged in the current release | — |
 
 ### Issue reports
 
