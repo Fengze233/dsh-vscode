@@ -1,7 +1,7 @@
-// test/panel/provider.test.ts — 面板 provider 的消息路由与工具条推送
+// test/panel/provider.test.ts — 面板 provider 的重渲染入口与消息路由
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DshPanelProvider, type ContextPanelDeps } from '../../src/panel/provider';
+import { DshPanelProvider } from '../../src/panel/provider';
 
 /** 假 ServiceManager(仅 provider 用到的接口) */
 function fakeManager() {
@@ -37,57 +37,17 @@ function fakeView() {
   };
 }
 
-interface CtxHarness {
-  calls: string[];
-  provider: DshPanelProvider;
-  view: ReturnType<typeof fakeView>;
-  deps: ContextPanelDeps;
-}
-
-function makeCtx(): CtxHarness {
-  const calls: string[] = [];
-  const deps: ContextPanelDeps = {
-    getFileLabel: () => 'src/extension.ts',
-    getAutoFollow: () => false,
-    addFileContext: () => calls.push('addFileContext'),
-    toggleAutoFollow: () => calls.push('toggleAutoFollow'),
-  };
-  // 参数顺序按合并后的构造签名（main 的鉴权/代理接线参数在前，PR 的 context 依赖在最后）
-  const provider = new DshPanelProvider(
-    fakeManager() as never,
-    undefined, // onFirstOpen
-    undefined, // onBridgeAck
-    () => '/proj', // workspaceRoot
-    () => true, // bridgeEnabled
-    () => false, // remoteEnabled
-    async (u) => u, // resolveExternalUrl
-    () => true, // imageFallback
-    {}, // ui（未接线时按旧行为）
-    deps, // context（PR #11：上下文工具条依赖）
-  );
-  const view = fakeView();
-  provider.resolveWebviewView(view as never);
-  return { calls, provider, view, deps };
-}
-
-test('resolveWebviewView 注入 context 时渲染工具条(含文件标签)', () => {
-  const h = makeCtx();
-  assert.ok(h.view.webview.html.includes('id="dsh-ctx-bar"'));
-  assert.ok(h.view.webview.html.includes('src/extension.ts'));
-});
-
-// 自审回归：缩放档位等"渲染期读取"的设置项也依赖 refreshContextBar 重渲染。
-// 若在未注入 context 时提前 return，改设置后必须重载窗口才生效。
-test('refreshContextBar 在未注入 context 时仍然重渲染（缩放置变更即时生效）', () => {
-  const manager = fakeManager();
+// 自审回归：缩放档位等"渲染期读取"的设置项依赖 refreshContextBar 重渲染。
+// 该入口在 v0.4.2 起不再与"上下文工具条"绑定，任何情况下都必须重渲染，
+// 否则改设置后要重载窗口才生效。
+test('refreshContextBar 重渲染并让新的缩放档位即时生效', () => {
   let zoom = 1;
   const provider = new DshPanelProvider(
-    manager as never,
+    fakeManager() as never,
     undefined, undefined,
     () => '/proj', () => true, () => false,
     async (u) => u, () => true,
     { zoomLevel: () => zoom }, // ui：只接线缩放
-    undefined, // context 未注入
   );
   const view = fakeView();
   provider.resolveWebviewView(view as never);
@@ -96,32 +56,10 @@ test('refreshContextBar 在未注入 context 时仍然重渲染（缩放置变�
   zoom = 0.8;
   provider.refreshContextBar();
   assert.ok(view.webview.html.includes('style="--dshv-zoom:0.8'), '重渲染后应写入新的内联缩放变量');
-  assert.equal(view.posted.length, 0, '未注入 context 时不应发工具条消息');
+  assert.equal(view.posted.length, 0, '重渲染不应顺带发任何下行消息');
 });
 
-test('addFileContext 消息 → context.addFileContext()', () => {
-  const h = makeCtx();
-  h.view.fire({ type: 'addFileContext' });
-  assert.deepEqual(h.calls, ['addFileContext']);
-});
-
-test('toggleAutoFollow 消息 → context.toggleAutoFollow() 并重渲染', () => {
-  const h = makeCtx();
-  h.view.fire({ type: 'toggleAutoFollow' });
-  assert.deepEqual(h.calls, ['toggleAutoFollow']);
-  assert.ok(h.view.webview.html.includes('id="dsh-ctx-bar"')); // 重渲染仍含工具条
-});
-
-test('refreshContextBar 推送下行 updateContextBar 消息', () => {
-  const h = makeCtx();
-  h.provider.refreshContextBar();
-  assert.deepEqual(h.view.posted[0], { kind: 'updateContextBar', fileLabel: 'src/extension.ts', autoFollow: false });
-});
-
-test('未注入 context 时:无工具条渲染,消息不崩溃', () => {
+test('未打开面板时 refreshContextBar 安全返回(不抛异常)', () => {
   const provider = new DshPanelProvider(fakeManager() as never);
-  const view = fakeView();
-  provider.resolveWebviewView(view as never);
-  assert.ok(!view.webview.html.includes('dsh-ctx-bar'));
-  view.fire({ type: 'addFileContext' }); // 无 context:静默忽略,不抛异常
+  provider.refreshContextBar(); // 无 view：内部判空直接返回
 });

@@ -1,7 +1,7 @@
 // test/package.test.ts — package.json 静态贡献与设置的回归校验（v0.3.0）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 function pkg() {
@@ -68,4 +68,89 @@ test('桥接版本与插件版本统一（一同随包发布），且卸载钩�
   assert.ok(client.includes('buildSyncWorkspaceAck(true, undefined, BRIDGE_VERSION)'), '握手回执应携带桥接版本');
   // ④ 构建产物应包含卸载脚本（build.mjs 在两种模式下都会构建 out/uninstall.js）
   assert.ok(existsSync(join(__dirname, '..', 'uninstall.js')), '构建产物应包含 out/uninstall.js');
+});
+
+// ——— issue #27 回归防线（0.4.2 撤回 PR #11 后固化） ———
+// 背景：#27 的现象是「切一次活动编辑器，面板整页重载一次」。根因是活动编辑器变化 →
+// 工具条刷新 → render() → webview 文档重建（nonce 每次重生成）。该链路随 PR #11 撤回移除。
+// 这里用源码静态断言把「不得复活该链路」固化下来——它同时是自动化回归证据：
+// 一旦有人重新接上"文件切换触发刷新"，本测试立即失败。
+test('#27 回归：活动编辑器变化不得触发面板刷新/重载链路', () => {
+  const root = join(__dirname, '..', '..');
+  const src = readFileSync(join(root, 'src', 'extension.ts'), 'utf8');
+  const provider = readFileSync(join(root, 'src', 'panel', 'provider.ts'), 'utf8');
+
+  // ① 不得监听活动编辑器变化（v0.5.0 的 tracker.setFile 入口）
+  assert.ok(!src.includes('onDidChangeActiveTextEditor'), '不得订阅 onDidChangeActiveTextEditor');
+  // ② 上下文跟踪器整体不存在（含 onSettled / setFile / setDebounceMs 等入口）
+  assert.ok(!/tracker/i.test(src), 'extension.ts 不得再有 tracker 相关代码');
+  // ③ 刷新入口只允许由配置变更触发：extension.ts 中恰好 2 处调用（两个面板各一次）
+  const total = (src.match(/refreshContextBar/g) ?? []).length;
+  assert.equal(total, 2, 'extension.ts 中只应有 2 处 refreshContextBar 调用（配置变更时两个面板）');
+  const fnStart = src.indexOf('function onConfigChanged()');
+  assert.ok(fnStart > 0, '存在 onConfigChanged');
+  const fnBody = src.slice(fnStart, src.indexOf('\n}', fnStart));
+  assert.equal((fnBody.match(/refreshContextBar/g) ?? []).length, 2, '仅配置变更回调内调用（两个面板各一次）');
+  // ④ 工具条下行消息同步通道不得复活（它只服务于已撤回的上下文工具条）
+  assert.ok(!provider.includes("kind: 'updateContextBar'"), '不得再有 updateContextBar 下行消息');
+  // ⑤ 渲染不得注入"当前文件名"（#27 的放大器：文件名进 HTML → 每次文件切换 HTML 都不同）
+  assert.ok(!provider.includes('fileLabel'), 'provider 不得再向模板注入 fileLabel');
+  // ⑥ 已撤回的右键菜单块不得复活
+  const p = pkg();
+  for (const menu of ['editor/context', 'explorer/context', 'editor/title/context']) {
+    assert.equal(p.contributes.menus[menu], undefined, `菜单块 ${menu} 应已移除`);
+  }
+});
+
+// 缩放（issue #8）在 0.4.2 中保留：它是唯一需要"重渲染才生效"的设置项，
+// 上面 ③ 的断言依赖它仍然接线，这里同时固化"缩放不能被误删"。
+test('#27 回归：面板缩放仍接线且传参位置正确（0.4.2 保留 issue #8）', () => {
+  const root = join(__dirname, '..', '..');
+  const provider = readFileSync(join(root, 'src', 'panel', 'provider.ts'), 'utf8');
+  const html = readFileSync(join(root, 'src', 'panel', 'html.ts'), 'utf8');
+  assert.ok(provider.includes('this.ui.zoomLevel?.() ?? 1'), 'provider 仍读取 zoomLevel');
+  // readyPage 第 4 个参数必须是 zoomLevel（撤回 contextBar 后不能还留着 undefined 占位）
+  assert.ok(/readyPage\(\s*frameUrl,\s*ctx,\s*\{[\s\S]*?\},\s*\/\/[^\n]*\n\s*this\.ui\.zoomLevel/.test(provider),
+    'readyPage 第 4 参应为 zoomLevel');
+  assert.ok(html.includes('--dshv-zoom'), '缩放 CSS 变量仍在');
+});
+
+// ——— 文档与测试数一致性 ———
+// README/CHANGELOG 里的测试数在发布流程中被反复手改（326 → 275 → 277 → 283），
+// 极易漏改或写错。这里用"源码里 test( 的静态计数"当基准，把漂移钉死。
+test('README 中英与 CHANGELOG 声明的测试数等于实际测试数', () => {
+  const root = join(__dirname, '..', '..');
+  // ① 静态计数：递归 test/ 下所有 *.test.ts 的顶层 test( 调用
+  const stack = [join(root, 'test')];
+  let count = 0;
+  while (stack.length > 0) {
+    const dir = stack.pop()!;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(p);
+      } else if (entry.name.endsWith('.test.ts')) {
+        count += (readFileSync(p, 'utf8').match(/^test\(/gm) ?? []).length;
+      }
+    }
+  }
+  assert.ok(count > 200, `静态计数应达到数百条，实际 ${count}`);
+
+  // ② README（中英）在 npm run test 的注释里声明了同一个数字
+  for (const file of ['README.md', 'README.zh.md']) {
+    const text = readFileSync(join(root, file), 'utf8');
+    const m = /npm run test\s+# (\d+) /.exec(text);
+    assert.ok(m, `${file} 应声明测试数`);
+    assert.equal(Number(m[1]), count, `${file} 声明的测试数应与实际一致（实际 ${count}）`);
+  }
+
+  // ③ CHANGELOG：0.4.2 段落的 "npm test X/X 全绿" 与 "由 A 降至 X"
+  const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
+  const green = /`npm test` (\d+)\/\1 全绿/.exec(changelog);
+  assert.ok(green, 'CHANGELOG 应写明 npm test 全绿的数量');
+  assert.equal(Number(green[1]), count, 'CHANGELOG 的 npm test 数字应与实际一致');
+  const dropped = /测试用例由 (\d+) 降至 (\d+)/.exec(changelog);
+  assert.ok(dropped, 'CHANGELOG 应写明测试数的变化');
+  assert.equal(Number(dropped[2]), count, 'CHANGELOG 的"降至"数字应与实际一致');
+  assert.ok(Number(dropped[1]) > Number(dropped[2]), '撤回后测试数应下降');
 });

@@ -462,10 +462,9 @@ export class ServiceManager {
     }
   }
 
-  /** 应用新配置;host/port/cwd 任一变化且自启服务在跑时自动重启(其余项原地生效) */
+  /** 应用新配置；仅 host/port 变化且自启服务在跑时自动重启（其余项原地生效） */
   reconfigure(opts: ManagerOptions): Promise<ServiceSnapshot> {
-    const prev = { host: this.opts.host, port: this.opts.port, cwd: this.opts.cwd };
-    const targetChanged = prev.host !== opts.host || prev.port !== opts.port || prev.cwd !== opts.cwd;
+    const targetChanged = this.opts.host !== opts.host || this.opts.port !== opts.port;
     this.opts = opts;
     // 同步启动超时（issue #23）：设置项改后立即生效，否则要重载窗口才生效
     if (opts.startTimeoutMs !== undefined) {

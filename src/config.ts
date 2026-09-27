@@ -24,10 +24,6 @@ export interface RawDshConfig {
   remoteEnabled?: boolean;
   /** 模型无视觉能力时是否自动把图片降级为文本+路径转发（默认开启） */
   imageFallback?: boolean;
-  /** 是否自动跟随当前文件注入上下文（dsh.context.autoFollow） */
-  autoFollow?: boolean;
-  /** 自动跟随防抖毫秒（dsh.context.followDebounceMs） */
-  followDebounceMs?: number;
   /** 等待 dsh web 就绪的总超时毫秒（dsh.startTimeoutMs） */
   startTimeoutMs?: number;
   /** 注入 DSH 子进程的额外环境变量（dsh.env） */
@@ -59,10 +55,6 @@ export interface DshConfig {
   remoteEnabled: boolean;
   /** 非视觉模型下发图自动降级为文本+路径转发 */
   imageFallback: boolean;
-  /** 是否自动跟随当前文件注入上下文（dsh.context.autoFollow） */
-  autoFollow: boolean;
-  /** 自动跟随防抖毫秒（dsh.context.followDebounceMs） */
-  followDebounceMs: number;
   /** 等待 dsh web 就绪的总超时毫秒（dsh.startTimeoutMs） */
   startTimeoutMs: number;
   /** 注入 DSH 子进程的额外环境变量（dsh.env；未配置为空对象） */
@@ -87,8 +79,6 @@ export const DEFAULTS: DshConfig = {
   openInBrowser: false,
   remoteEnabled: false,
   imageFallback: true,
-  autoFollow: false,
-  followDebounceMs: 800,
   // 启动总超时：默认 45s。Windows 冷启动（插件多、磁盘慢）实测可达 17–23s，
   // 旧的 15s 硬编码会让服务其实已起来却报「未就绪」（issue #23）。
   startTimeoutMs: 45000,
@@ -182,25 +172,6 @@ export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors:
   const remoteEnabled = typeof raw.remoteEnabled === 'boolean' ? raw.remoteEnabled : DEFAULTS.remoteEnabled;
   const imageFallback = typeof raw.imageFallback === 'boolean' ? raw.imageFallback : DEFAULTS.imageFallback;
 
-  // 自动跟随开关：布尔设置沿用 autoStart 的缺省处理（非法静默回退）
-  const autoFollow = typeof raw.autoFollow === 'boolean' ? raw.autoFollow : DEFAULTS.autoFollow;
-
-  // followDebounceMs：300..5000 整数，非法回退默认并记录错误
-  let followDebounceMs: number;
-  if (raw.followDebounceMs === undefined) {
-    followDebounceMs = DEFAULTS.followDebounceMs;
-  } else if (
-    typeof raw.followDebounceMs !== 'number' ||
-    !Number.isInteger(raw.followDebounceMs) ||
-    raw.followDebounceMs < 300 ||
-    raw.followDebounceMs > 5000
-  ) {
-    errors.push(`dsh.context.followDebounceMs must be an integer in 300..5000, got ${JSON.stringify(raw.followDebounceMs)}`);
-    followDebounceMs = DEFAULTS.followDebounceMs;
-  } else {
-    followDebounceMs = raw.followDebounceMs;
-  }
-
   // startTimeoutMs：5000..600000 整数，非法回退默认并记录错误（issue #23）
   let startTimeoutMs: number;
   if (raw.startTimeoutMs === undefined) {
@@ -262,7 +233,7 @@ export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors:
     config: {
       host, port, autoStart, stopOnExit, extraArgs, bridgeEnabled, workspaceRootIndex,
       silenceWarning, executablePath, openInBrowser, remoteEnabled, imageFallback,
-      autoFollow, followDebounceMs, startTimeoutMs, env, useEnvProxy, panelZoomLevel,
+      startTimeoutMs, env, useEnvProxy, panelZoomLevel,
     },
     errors,
   };
@@ -306,8 +277,6 @@ export function readConfig(): { config: DshConfig; errors: string[] } {
     openInBrowser: ws.get<boolean>('openInBrowser'),
     remoteEnabled: ws.get<boolean>('remote.enabled'),
     imageFallback: ws.get<boolean>('image.fallback'),
-    autoFollow: ws.get<boolean>('context.autoFollow'),
-    followDebounceMs: ws.get<number>('context.followDebounceMs'),
     startTimeoutMs: ws.get<number>('startTimeoutMs'),
     env: ws.get<Record<string, string>>('env'),
     useEnvProxy: ws.get<boolean>('useEnvProxy'),
