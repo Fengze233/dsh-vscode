@@ -1,7 +1,7 @@
 // test/package.test.ts — package.json 静态贡献与设置的回归校验（v0.3.0）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 function pkg() {
@@ -113,4 +113,44 @@ test('#27 回归：面板缩放仍接线且传参位置正确（0.4.2 保留 iss
   assert.ok(/readyPage\(\s*frameUrl,\s*ctx,\s*\{[\s\S]*?\},\s*\/\/[^\n]*\n\s*this\.ui\.zoomLevel/.test(provider),
     'readyPage 第 4 参应为 zoomLevel');
   assert.ok(html.includes('--dshv-zoom'), '缩放 CSS 变量仍在');
+});
+
+// ——— 文档与测试数一致性 ———
+// README/CHANGELOG 里的测试数在发布流程中被反复手改（326 → 275 → 277 → 283），
+// 极易漏改或写错。这里用"源码里 test( 的静态计数"当基准，把漂移钉死。
+test('README 中英与 CHANGELOG 声明的测试数等于实际测试数', () => {
+  const root = join(__dirname, '..', '..');
+  // ① 静态计数：递归 test/ 下所有 *.test.ts 的顶层 test( 调用
+  const stack = [join(root, 'test')];
+  let count = 0;
+  while (stack.length > 0) {
+    const dir = stack.pop()!;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(p);
+      } else if (entry.name.endsWith('.test.ts')) {
+        count += (readFileSync(p, 'utf8').match(/^test\(/gm) ?? []).length;
+      }
+    }
+  }
+  assert.ok(count > 200, `静态计数应达到数百条，实际 ${count}`);
+
+  // ② README（中英）在 npm run test 的注释里声明了同一个数字
+  for (const file of ['README.md', 'README.zh.md']) {
+    const text = readFileSync(join(root, file), 'utf8');
+    const m = /npm run test\s+# (\d+) /.exec(text);
+    assert.ok(m, `${file} 应声明测试数`);
+    assert.equal(Number(m[1]), count, `${file} 声明的测试数应与实际一致（实际 ${count}）`);
+  }
+
+  // ③ CHANGELOG：0.4.2 段落的 "npm test X/X 全绿" 与 "由 A 降至 X"
+  const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
+  const green = /`npm test` (\d+)\/\1 全绿/.exec(changelog);
+  assert.ok(green, 'CHANGELOG 应写明 npm test 全绿的数量');
+  assert.equal(Number(green[1]), count, 'CHANGELOG 的 npm test 数字应与实际一致');
+  const dropped = /测试用例由 (\d+) 降至 (\d+)/.exec(changelog);
+  assert.ok(dropped, 'CHANGELOG 应写明测试数的变化');
+  assert.equal(Number(dropped[2]), count, 'CHANGELOG 的"降至"数字应与实际一致');
+  assert.ok(Number(dropped[1]) > Number(dropped[2]), '撤回后测试数应下降');
 });
