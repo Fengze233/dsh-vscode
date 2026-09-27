@@ -256,6 +256,7 @@ Many improvements here came from the community. Contributions are grouped by typ
 
 | Reporter | Report | Ref |
 |---|---|---|
+| [@AAAwoshi](https://github.com/AAAwoshi) | Panel reloading wholesale on every active-editor switch: traced it to the redundant `render()` inside `refreshContextBar()` plus a regenerated nonce per render, with sampled log evidence, a minimal patch and post-patch measurements | #27 |
 | [@Joshuayang228](https://github.com/Joshuayang228) | File clicks not forwarded to the editor: pinpointed the CSS Module hashed class name and provided full reproduction evidence and a fix sketch | #22 |
 | [@lizhuoyuan41-droid](https://github.com/lizhuoyuan41-droid) | Bridge package written into DSH Desktop's private command directory, breaking desktop startup: root cause plus an allow-list suggestion | #20 |
 | [@Minelenbolan](https://github.com/Minelenbolan) | Duplicate bridge entry in `cordis.patch.yml` crashing the plugin tree | #19 |
