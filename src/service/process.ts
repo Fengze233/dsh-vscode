@@ -19,6 +19,8 @@ export type SpawnFn = (command: string, args: string[], options: SpawnOptions) =
 
 /** 启动参数 */
 export interface StartOptions {
+  /** DSH profile 名称（默认 web） */
+  profile?: string;
   host: string;
   port: number;
   extraArgs: string[];
@@ -122,7 +124,7 @@ export function binJsFromShim(dshCmdPath: string): string {
 export interface WindowsDshInvocation {
   /** 实际 spawn 的命令（node 可执行文件绝对路径） */
   command: string;
-  /** 需排在 'web ...' 之前的参数前缀（即 bin.js 绝对路径） */
+  /** 需排在 '--profile ...' 之前的参数前缀（即 bin.js 绝对路径） */
   argsPrefix: string[];
 }
 
@@ -131,7 +133,7 @@ export interface WindowsDshInvocation {
  *
  * 背景：Windows 上 `spawn('dsh.cmd')` 会因 .cmd 是批处理 shim 而在 Node v24 下同步抛
  * EINVAL，改用 `node <bin.js>` 直跑真实入口即可绕过。本函数返回 { command: execPath,
- * argsPrefix: [binJsPath] }，调用方将其作为 spawn(command, [...argsPrefix, 'web', ...])。
+ * argsPrefix: [binJsPath] }，调用方将其作为 spawn(command, [...argsPrefix, '--profile', ...])。
  *
  * @param dshCmdPath dsh.cmd（或直接 bin.js）的绝对路径；bin.js 路径由其 dirname 推导
  * @param execPath   node 可执行文件绝对路径（生产为 process.execPath）
@@ -231,9 +233,9 @@ export function createProcessRunner(
   let lastStart: { command: string; args: string[] } | null = null;
 
   return {
-    startDsh({ host, port, extraArgs, cwd, executablePath, openInBrowser, env: extraEnv }) {
-      // 基础参数（web 子命令 + host/port + 用户额外参数），两种平台共用
-      const webArgs = ['web', '--host', host, '--port', String(port), ...extraArgs];
+    startDsh({ profile = 'web', host, port, extraArgs, cwd, executablePath, openInBrowser, env: extraEnv }) {
+      // 基础参数（所选 profile + host/port + 用户额外参数），两种平台共用
+      const webArgs = ['--profile', profile, '--host', host, '--port', String(port), ...extraArgs];
       // 默认不让 dsh 弹浏览器（嵌入面板场景无需浏览器）：除非用户打开 openInBrowser 开关
       if (openInBrowser !== true) webArgs.push('--no-open');
       // 工作目录容错：过滤掉 Windows 上的 UNC / 不存在 / 相对路径，避免 spawn 抛 EINVAL
@@ -282,7 +284,7 @@ export function createProcessRunner(
         //    必须解析系统 PATH 里的 node.exe（详见 resolveWindowsNodeExecutable 注释）。
         const nodeExecutable = resolveWindowsNodeExecutable(shimPath, env, existsImpl);
 
-        // 4) spawn(node, [binJs, 'web', --host, --port, ...extraArgs], options)
+        // 4) spawn(node, [binJs, '--profile', profile, --host, --port, ...extraArgs], options)
         command = nodeExecutable;
         spawnArgs = [...argsPrefix, ...webArgs];
         child = spawnImpl(command, spawnArgs, spawnOptions);

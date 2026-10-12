@@ -36,37 +36,41 @@ class FakeChild implements ChildProcessLike {
 }
 
 test('Linux/macOS：命令为 dsh，detached 为 true，参数顺序正确', () => {
-  const calls: { cmd: string; args: string[]; opts: { detached?: boolean } }[] = [];
-  const spawnImpl: SpawnFn = (cmd, args, opts) => {
-    calls.push({ cmd, args, opts });
-    return new FakeChild();
-  };
-  const runner = createProcessRunner(spawnImpl, 'linux');
-  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: ['--trusted-host', 'x:1'] });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].cmd, 'dsh');
-  assert.deepEqual(calls[0].args, ['web', '--host', '127.0.0.1', '--port', '3080', '--trusted-host', 'x:1', '--no-open']);
-  assert.equal(calls[0].opts.detached, true);
+  for (const profile of [undefined, 'web', 'custom-profile']) {
+    const calls: { cmd: string; args: string[]; opts: { detached?: boolean } }[] = [];
+    const spawnImpl: SpawnFn = (cmd, args, opts) => {
+      calls.push({ cmd, args, opts });
+      return new FakeChild();
+    };
+    const runner = createProcessRunner(spawnImpl, 'linux');
+    runner.startDsh({ profile, host: '127.0.0.1', port: 3081, extraArgs: ['--trusted-host', 'x:1'] });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].cmd, 'dsh');
+    assert.deepEqual(calls[0].args, ['--profile', profile ?? 'web', '--host', '127.0.0.1', '--port', '3081', '--trusted-host', 'x:1', '--no-open']);
+    assert.equal(calls[0].opts.detached, true);
+  }
 });
 
 test('Windows：注入 PATH 命中 dsh.cmd 后以 node 直跑 bin.js 启动，detached 为 false', () => {
-  const calls: { cmd: string; args: string[]; opts: { detached?: boolean } }[] = [];
-  const spawnImpl: SpawnFn = (cmd, args, opts) => {
-    calls.push({ cmd, args, opts });
-    return new FakeChild();
-  };
-  const runner = createProcessRunner(spawnImpl, 'win32', 3000, () => true, {
-    execPath: 'C:\\node\\node.exe',
-    path: 'C:\\npm-global',
-  });
-  runner.startDsh({ host: '127.0.0.1', port: 0, extraArgs: [] });
-  // node 解析顺序：shim 目录旁的 node.exe 优先（exists 注入全 true，命中 npm-global 目录旁）
-  assert.equal(calls[0].cmd, 'C:\\npm-global\\node.exe');
-  assert.deepEqual(calls[0].args, [
-    'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
-    'web', '--host', '127.0.0.1', '--port', '0', '--no-open',
-  ]);
-  assert.equal(calls[0].opts.detached, false);
+  for (const profile of [undefined, 'web', 'custom-profile']) {
+    const calls: { cmd: string; args: string[]; opts: { detached?: boolean } }[] = [];
+    const spawnImpl: SpawnFn = (cmd, args, opts) => {
+      calls.push({ cmd, args, opts });
+      return new FakeChild();
+    };
+    const runner = createProcessRunner(spawnImpl, 'win32', 3000, () => true, {
+      execPath: 'C:\\node\\node.exe',
+      path: 'C:\\npm-global',
+    });
+    runner.startDsh({ profile, host: '127.0.0.1', port: 0, extraArgs: [] });
+    // node 解析顺序：shim 目录旁的 node.exe 优先（exists 注入全 true，命中 npm-global 目录旁）
+    assert.equal(calls[0].cmd, 'C:\\npm-global\\node.exe');
+    assert.deepEqual(calls[0].args, [
+      'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
+      '--profile', profile ?? 'web', '--host', '127.0.0.1', '--port', '0', '--no-open',
+    ]);
+    assert.equal(calls[0].opts.detached, false);
+  }
 });
 
 test('stopChild 先发 SIGTERM，graceMs 后补 SIGKILL', async () => {
@@ -91,9 +95,9 @@ test('lastStart 记录最近一次启动的实际命令与参数（供 manager �
   assert.ok(runner.lastStart);
   // command 为解析出的 node 可执行文件（shim 目录旁优先），args 首位为 bin.js 路径
   assert.equal(runner.lastStart.command, 'C:\\npm-global\\node.exe');
-  assert.deepEqual(runner.lastStart.args.slice(0, 2), [
+  assert.deepEqual(runner.lastStart.args.slice(0, 3), [
     'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
-    'web',
+    '--profile', 'web',
   ]);
 });
 
@@ -147,7 +151,7 @@ test('startDsh 传 executablePath 指向 dsh.cmd 时以 node 直跑其 bin.js（
   assert.equal(calls[0].cmd, 'C:\\tools\\node.exe');
   assert.deepEqual(calls[0].args, [
     'C:\\tools\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
-    'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
+    '--profile', 'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
 });
 
@@ -166,7 +170,7 @@ test('startDsh 传 executablePath 指向 .js 时直接将其作为 argsPrefix（
   assert.equal(calls[0].cmd, 'C:\\repo\\dsh\\lib\\node.exe');
   assert.deepEqual(calls[0].args, [
     'C:\\repo\\dsh\\lib\\bin.js',
-    'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
+    '--profile', 'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
 });
 
@@ -185,7 +189,7 @@ test('startDsh 未传 executablePath 时 win32 从 PATH 推导 bin.js（PATH 注
   assert.equal(calls[0].cmd, 'C:\\node\\node.exe');
   assert.deepEqual(calls[0].args, [
     `${npmDir}\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js`,
-    'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
+    '--profile', 'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
 });
 
@@ -219,7 +223,7 @@ test('startDsh win32 + Electron 环境：绝不使用 execPath（Code.exe），�
   assert.equal(calls[0].cmd, nodeExe);
   assert.deepEqual(calls[0].args, [
     'C:\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
-    'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
+    '--profile', 'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
 });
 

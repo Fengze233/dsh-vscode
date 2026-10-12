@@ -130,7 +130,7 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 
 为让 DSH 网页能与 VS Code 通信，插件会：
 
-1. 在你的 DSH 用户目录（`$DSH_HOME/profiles/web`，默认 `~/.dsh/profiles/web`）安装本扩展的桥接包 `dsh-vscode-bridge`（经 DSH 官方客户端插件扩展点安装）；
+1. 在你的 DSH 用户目录（`$DSH_HOME/profiles/<dsh.profile>`，默认 `~/.dsh/profiles/web`）安装本扩展的桥接包 `dsh-vscode-bridge`（经 DSH 官方客户端插件扩展点安装）；
 2. 在 `cordis.patch.yml` 中写入一段带 `# dsh-vscode-bridge: begin` / `# dsh-vscode-bridge: end` 标记的 `insert:` 条目，把桥接包注册为 DSH 的官方 client 插件（只写用户目录，绝不触碰 DSH 安装目录）。
 
 如需移除，两种方式任选：
@@ -171,6 +171,7 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 
 | 设置项 | 默认值 | 说明 |
 |---|---|---|
+| `dsh.profile` | `web` | 启动 DSH 及安装桥接所用的 profile（自定义 profile 需提供网页界面） |
 | `dsh.port` | `3080` | 期望端口（探测与启动共用） |
 | `dsh.host` | `127.0.0.1` | 服务地址（仅允许回环地址） |
 | `dsh.autoStart` | `true` | 服务未运行时自动启动 |
@@ -184,6 +185,13 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 | `dsh.env` | `{}` | 注入 DSH 子进程的额外环境变量（键值对，与父进程环境合并）。典型用法：代理网络下设 `{"NODE_OPTIONS":"--use-env-proxy"}` |
 | `dsh.useEnvProxy` | `false` | 自动为子进程的 `NODE_OPTIONS` 追加 `--use-env-proxy`（不覆盖已有选项）。必须经 HTTP/HTTPS 代理才能访问模型 API 时开启 |
 | `dsh.panel.zoomLevel` | `1` | 面板内网页缩放：下拉可选 `0.5`–`1.5`（每 0.05 一档）；更细的值可直接写 `settings.json` |
+
+设置 `"dsh.profile": "custom-profile"` 和 `"dsh.port": 3081` 后，启动命令为
+`dsh --profile custom-profile --host 127.0.0.1 --port 3081 --no-open`，桥接安装到
+`$DSH_HOME/profiles/custom-profile`。修改 profile 会重启扩展自己启动的服务；
+外部服务仍按端口复用。默认 `web` 保持现有行为。
+profile 名称可包含 ASCII 字母、数字、点、下划线与连字符，不能以连字符开头，
+也不能是 `.` 或 `..`；首尾空白会自动去除。
 
 ### 设置界面中英对照
 
@@ -202,6 +210,7 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 | Dsh: Image: Fallback | `dsh.image.fallback` | 模型无视觉能力时把图片降级为路径转发 |
 | Dsh: Open In Browser | `dsh.openInBrowser` | 启动后在默认浏览器打开 DSH 页面 |
 | **Dsh: Panel: Zoom Level** | `dsh.panel.zoomLevel` | **面板内网页缩放**：0.5–1.5，可自定义数值 |
+| Dsh: Profile | `dsh.profile` | 启动 DSH 及安装桥接所用的 profile，默认 `web` |
 | Dsh: Port | `dsh.port` | 期望端口（探测与启动共用） |
 | Dsh: Remote: Enabled | `dsh.remote.enabled` | 启用远程场景（SSH Remote / WSL / Dev Containers） |
 | Dsh: Start Timeout Ms | `dsh.startTimeoutMs` | 等待 `dsh web` 就绪的总超时（毫秒，默认 45000） |
@@ -222,7 +231,7 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 
 ```bash
 npm install
-npm run test          # 284 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话）
+npm run test          # 285 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话）
 npm run compile       # 构建 out/extension.js
 npm run watch         # 监听构建
 npm run typecheck     # 类型检查

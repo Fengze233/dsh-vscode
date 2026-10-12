@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 
 /** 用户可配置的原始值（可能缺失/非法） */
 export interface RawDshConfig {
+  profile?: string;
   host?: string;
   port?: number;
   autoStart?: boolean;
@@ -36,6 +37,7 @@ export interface RawDshConfig {
 
 /** 规范化后的配置（均有合法默认值） */
 export interface DshConfig {
+  profile: string;
   host: string;
   port: number;
   autoStart: boolean;
@@ -67,6 +69,7 @@ export interface DshConfig {
 
 /** 默认配置 */
 export const DEFAULTS: DshConfig = {
+  profile: 'web',
   host: '127.0.0.1',
   port: 3080,
   autoStart: true,
@@ -103,6 +106,9 @@ export const MIN_START_TIMEOUT_MS = 5000;
 /** 启动超时允许的上限（毫秒）：超过 10 分钟视为配置错误 */
 export const MAX_START_TIMEOUT_MS = 600000;
 
+/** profile 名称允许字母、数字、点、下划线与连字符，不能是路径或命令行选项。 */
+export const PROFILE_NAME_PATTERN = /^(?!\.{1,2}$)[A-Za-z0-9._][A-Za-z0-9._-]*$/;
+
 /** 安全边界：仅允许回环地址 */
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
@@ -117,6 +123,13 @@ export function isLoopbackHost(host: string): boolean {
  */
 export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors: string[] } {
   const errors: string[] = [];
+
+  // profile 必须是 DSH_HOME/profiles 下的目录名，不能是路径。
+  let profile = typeof raw.profile === 'string' ? raw.profile.trim() : raw.profile ?? DEFAULTS.profile;
+  if (typeof profile !== 'string' || !PROFILE_NAME_PATTERN.test(profile)) {
+    errors.push(`dsh.profile must be a valid profile name (letters, numbers, dots, underscores, hyphens; no leading hyphen), got ${JSON.stringify(raw.profile)}`);
+    profile = DEFAULTS.profile;
+  }
 
   // 缺失与非法需区分：字段未配置时静默回退默认（不算错误），
   // 只有提供了非法值才记录错误并回退默认。
@@ -231,7 +244,7 @@ export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors:
 
   return {
     config: {
-      host, port, autoStart, stopOnExit, extraArgs, bridgeEnabled, workspaceRootIndex,
+      profile, host, port, autoStart, stopOnExit, extraArgs, bridgeEnabled, workspaceRootIndex,
       silenceWarning, executablePath, openInBrowser, remoteEnabled, imageFallback,
       startTimeoutMs, env, useEnvProxy, panelZoomLevel,
     },
@@ -265,6 +278,7 @@ export function buildChildEnv(
 export function readConfig(): { config: DshConfig; errors: string[] } {
   const ws = vscode.workspace.getConfiguration('dsh');
   return normalizeConfig({
+    profile: ws.get<string>('profile'),
     host: ws.get<string>('host'),
     port: ws.get<number>('port'),
     autoStart: ws.get<boolean>('autoStart'),
