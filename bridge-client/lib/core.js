@@ -26,6 +26,22 @@ export function buildOpenFileMessage(path, cwd) {
 }
 
 /**
+ * 从 DSH 客户端根上下文里安全取「当前会话的工作目录」（issue #32）。
+ *
+ * 取法依据 DSH 官方前端自身实现（dsh-client-ui-chat：`ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd`）。
+ * 防御式实现：DSH 页面内部结构可能随版本变化，任何一层缺失都返回 undefined，
+ * 由调用方退回「不带 cwd」的旧行为——绝不能让取不到 cwd 变成点击无反应。
+ */
+export function resolveSessionCwd(ctx, sessionId) {
+  if (!ctx || typeof sessionId !== 'string' || sessionId === '') return undefined;
+  const byId = ctx.sessions && ctx.sessions.list && typeof ctx.sessions.list.getSnapshot === 'function'
+    ? ctx.sessions.list.getSnapshot().byId
+    : undefined;
+  const cwd = byId && byId[sessionId] ? byId[sessionId].cwd : undefined;
+  return typeof cwd === 'string' && cwd !== '' ? cwd : undefined;
+}
+
+/**
  * DSH 页面里「文件入口」按钮的稳定选择器（issue #22）。
  *
  * 背景与实证（DSH 0.1.5-rc.2 产物）：

@@ -5,6 +5,7 @@ import {
   isAllowedExternalUrl,
   buildOpenExternalMessage,
   buildOpenFileMessage,
+  resolveSessionCwd,
   buildSyncWorkspaceAck,
   buildCopyTextMessage,
   buildCopyTextAck,
@@ -100,6 +101,20 @@ test('buildOpenExternalMessage 构造消息', () => {
 test('buildOpenFileMessage 携带可选 cwd', () => {
   assert.deepEqual(buildOpenFileMessage('src/main.ts', '/proj'), { kind: 'openFile', path: 'src/main.ts', cwd: '/proj' });
   assert.deepEqual(buildOpenFileMessage('/abs/a.ts', undefined), { kind: 'openFile', path: '/abs/a.ts' });
+});
+
+// issue #32：相对路径要按「会话 cwd」解析，而不是一律按 VS Code 工作区根。
+// 取法必须防御式：DSH 页面结构变化时返回 undefined，由调用方退回旧行为（不能抛错、不能丢点击）。
+test('resolveSessionCwd 从 ctx 安全取会话 cwd，任何一层缺失都返回 undefined', () => {
+  const ctx = (byId: unknown) => ({ sessions: { list: { getSnapshot: () => ({ byId }) } } });
+  assert.equal(resolveSessionCwd(ctx({ s1: { cwd: '/proj' } }), 's1'), '/proj');
+  assert.equal(resolveSessionCwd(ctx({ s1: { cwd: '' } }), 's1'), undefined);
+  assert.equal(resolveSessionCwd(ctx({ s1: {} }), 's1'), undefined);
+  assert.equal(resolveSessionCwd(ctx({}), 's1'), undefined);
+  assert.equal(resolveSessionCwd(ctx({ s1: { cwd: '/proj' } }), ''), undefined);
+  assert.equal(resolveSessionCwd(undefined, 's1'), undefined);
+  assert.equal(resolveSessionCwd({ sessions: {} } as never, 's1'), undefined);
+  assert.equal(resolveSessionCwd({} as never, 's1'), undefined);
 });
 
 test('buildSyncWorkspaceAck 构造回执', () => {

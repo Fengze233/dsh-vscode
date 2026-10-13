@@ -11,6 +11,12 @@ export function buildOpenExternalMessage(url: string): { kind: 'openExternal'; u
 export function buildOpenFileMessage(path: string, cwd: string | undefined): { kind: 'openFile'; path: string; cwd?: string };
 
 /**
+ * 从 DSH 客户端根上下文取当前会话的工作目录（issue #32）；
+ * 任何一层缺失或值非法都返回 undefined（调用方退回不带 cwd 的旧行为）。
+ */
+export function resolveSessionCwd(ctx: unknown, sessionId: unknown): string | undefined;
+
+/**
  * DSH 页面里「文件入口」按钮的稳定选择器（issue #22）：
  * 覆盖 markdown 文件名（CSS Module 哈希类名）/ produced 芯片 / present 卡片，
  * 并排除 aria-haspopup 的宿主菜单按钮。
