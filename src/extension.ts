@@ -67,6 +67,7 @@ const BRIDGE_SILENCE_KEY = 'dsh.bridgeWarningSilenced';
 /** DshConfig → ManagerOptions（探测 3s、轮询 0.5s，与规格一致） */
 function toManagerOptions(config: DshConfig): ManagerOptions {
   return {
+    profile: config.profile,
     host: config.host,
     port: config.port,
     extraArgs: config.extraArgs,
@@ -190,6 +191,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   /** 桥接安装参数（dshHome / bridgeSourceDir 全插件共用，避免三处重复拼接；Windows 装配第三安装目标） */
   const installOpts = {
+    profile: config.profile,
     dshHome: process.env.DSH_HOME ?? join(homedir(), '.dsh'),
     bridgeSourceDir: join(__dirname, 'bridge-client'),
     fs: createNodeFs(),
@@ -656,6 +658,19 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('dsh.bridge.uninstall', () => void uninstallBridgeCmd()),
     vscode.commands.registerCommand('dsh.cleanupImageCache', () => void cleanupImageCacheCmd()),
     vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('dsh.profile')) {
+        const next = readConfig().config;
+        if (installOpts.profile !== next.profile) {
+          installOpts.profile = next.profile;
+          // 仅就绪的外部服务继续复用现有握手；其它情况等待新服务重新握手。
+          const snapshot = manager?.getSnapshot();
+          if (!(snapshot?.state === 'ready' && !snapshot.owned)) {
+            clearHandshakeTimer();
+            handshakeOk = undefined;
+          }
+          install = next.bridgeEnabled ? safeInstallBridge() : null;
+        }
+      }
       if (e.affectsConfiguration('dsh')) onConfigChanged();
     }),
     { dispose: () => manager?.dispose() },
@@ -751,7 +766,7 @@ async function cleanupImageCacheCmd(): Promise<void> {
   void vscode.window.showInformationMessage(t('msg.imageCacheCleaned', { count: removed }));
 }
 
-/** 配置变更：host/port 变化时自动重启自启服务，退出策略实时生效 */
+/** 配置变更：profile/host/port 变化时自动重启自启服务，退出策略实时生效 */
 function onConfigChanged(): void {
   const m = manager;
   if (!m) return;

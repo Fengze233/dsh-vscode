@@ -17,6 +17,7 @@ test('合法配置原样通过', () => {
   });
   assert.deepEqual(errors, []);
   assert.deepEqual(config, {
+    profile: 'web',
     host: 'localhost', port: 4000, autoStart: false, stopOnExit: false, extraArgs: ['--trusted-host', 'x:1'],
     bridgeEnabled: true, workspaceRootIndex: 0, silenceWarning: false, executablePath: '',
     openInBrowser: false, remoteEnabled: false, imageFallback: true,
@@ -29,9 +30,25 @@ test('合法配置原样通过', () => {
   });
 });
 
-test('缺省值回退默认', () => {
+test('缺省值回退默认，profile 默认 web，支持自定义 profile', () => {
   const { config } = normalizeConfig({});
   assert.deepEqual(config, DEFAULTS);
+  assert.equal(config.profile, 'web');
+  assert.equal(normalizeConfig({ profile: 'web' }).config.profile, 'web');
+  const custom = normalizeConfig({ profile: 'custom-profile' });
+  assert.equal(custom.config.profile, 'custom-profile');
+  assert.deepEqual(custom.errors, []);
+  const trimmed = normalizeConfig({ profile: ' custom-profile ' });
+  assert.equal(trimmed.config.profile, 'custom-profile');
+  assert.deepEqual(trimmed.errors, []);
+  for (const profile of ['a', 'profile_2', '.custom', 'test.profile-3']) {
+    assert.equal(normalizeConfig({ profile }).config.profile, profile);
+  }
+  for (const profile of ['', ' ', '.', '..', '../other', 'a/b', 'a\\b', 'a\0b', '--help', '-custom', 'custom profile', 'C:profile', 42]) {
+    const invalid = normalizeConfig({ profile: profile as string });
+    assert.equal(invalid.config.profile, 'web');
+    assert.equal(invalid.errors.length, 1);
+  }
 });
 
 test('非回环地址回退默认并记录错误', () => {

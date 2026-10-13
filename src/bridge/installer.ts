@@ -1,7 +1,7 @@
 // src/bridge/installer.ts — DSH 桥接包的探测与幂等安装/卸载
-// 职责：把 bridge-client 包安装进用户 profile 目录（$DSH_HOME/profiles/web），
+// 职责：把 bridge-client 包安装进用户 profile 目录（$DSH_HOME/profiles/<profile>），
 // 并通过 cordis.patch.yml 的 insert: 条目把它注册为 DSH 的官方 client 插件。
-// 安全边界：只写用户目录（$DSH_HOME/profiles/web），绝不触碰 DSH 安装目录。
+// 安全边界：只写用户目录（$DSH_HOME/profiles/<profile>），绝不触碰 DSH 安装目录。
 //
 // 关键约束（来自 Task 0 spike 实测，见 task-0-report.md）：
 // 1. cordis.patch.yml 顶层是流式空数组 `[]` 时，不能在其后直接追加块序列条目，
@@ -42,11 +42,12 @@ export interface BridgeInstallResult {
   status: BridgeInstallStatus;
   reason?: string;   // degraded 时的原因（英文短句，日志用）
   profileDir?: string;
-  bridgeDir?: string; // 安装目标目录（保持兼容：语义为 primary 路径 profiles/web/node_modules/dsh-vscode-bridge；secondary 见 bridgeTargetDirs）
+  bridgeDir?: string; // primary 路径 profiles/<profile>/node_modules/dsh-vscode-bridge；secondary 见 bridgeTargetDirs
 }
 
 /** 安装参数 */
 export interface BridgeInstallOptions {
+  profile?: string;          // DSH profile 名称，默认 web
   dshHome: string;            // $DSH_HOME 或 ~/.dsh
   bridgeSourceDir: string;    // 插件随附 bridge-client 目录绝对路径
   fs: InstallerFs;            // 注入的 fs 子集
@@ -55,11 +56,11 @@ export interface BridgeInstallOptions {
 }
 
 /**
- * 定位 web profile 目录：dshHome/profiles/web。
+ * 定位所选 profile 目录：dshHome/profiles/<profile>。
  * 不存在时返回 null（调用方据此判定为 degraded）。
  */
-export function detectProfileDir(dshHome: string, fs: InstallerFs): string | null {
-  const dir = join(dshHome, 'profiles', 'web');
+export function detectProfileDir(dshHome: string, fs: InstallerFs, profile = 'web'): string | null {
+  const dir = join(dshHome, 'profiles', profile);
   return fs.exists(dir) ? dir : null;
 }
 
@@ -67,7 +68,7 @@ export function detectProfileDir(dshHome: string, fs: InstallerFs): string | nul
  * 桥接包的全部安装目标目录。
  *
  * 背景（Windows 实测，见 bridge-locations-fix-report.md）：
- * - primary：profiles/web/node_modules/dsh-vscode-bridge（WSL 模块解析锚点）；
+ * - primary：profiles/<profile>/node_modules/dsh-vscode-bridge（WSL 模块解析锚点）；
  * - secondary：profiles/node_modules/dsh-vscode-bridge（Windows profile 插件解析 fallback 真实目录）；
  * - npm 全局位置（可选）：Windows 下 VS Code 扩展宿主 spawn 的 dsh 进程对 profile 插件的 ESM
  *   解析与普通命令行进程不同，profiles 双位置仍可能解析不到桥接包；而 npm 全局 node_modules
@@ -76,7 +77,7 @@ export function detectProfileDir(dshHome: string, fs: InstallerFs): string | nul
  *
  * 顺序固定：[primary, secondary, ...(npmGlobalNodeModules ? [join(npmGlobalNodeModules, NAME)] : [])]
  *
- * @param profileDir            web profile 目录绝对路径
+ * @param profileDir            所选 profile 目录绝对路径
  * @param npmGlobalNodeModules  npm 全局 node_modules 目录绝对路径（可选，缺省仅双位置）
  */
 export function bridgeTargetDirs(profileDir: string, npmGlobalNodeModules?: string): string[] {
@@ -192,9 +193,9 @@ function findEmptyArrayHead(content: string): string {
  * - 已有用户内容 → 去尾随空白后追加 insert: 条目。
  */
 export function installBridge(opts: BridgeInstallOptions): BridgeInstallResult {
-  const profileDir = detectProfileDir(opts.dshHome, opts.fs);
+  const profileDir = detectProfileDir(opts.dshHome, opts.fs, opts.profile);
   if (profileDir === null) {
-    return { status: 'degraded', reason: 'web profile not found' };
+    return { status: 'degraded', reason: `${opts.profile ?? 'web'} profile not found` };
   }
   const patchPath = join(profileDir, 'cordis.patch.yml');
   const allTargets = bridgeTargetDirs(profileDir, opts.npmGlobalNodeModules);
@@ -298,9 +299,24 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** 其它 profile 仍注册桥接时保留共享副本；读取失败时也保留，避免破坏其它服务。 */
+function hasOtherBridgeProfile(opts: BridgeInstallOptions, profileDir: string): boolean {
+  const profilesDir = dirname(profileDir);
+  try {
+    return opts.fs.readdir(profilesDir).some((name) => {
+      const otherDir = join(profilesDir, name);
+      if (otherDir === profileDir) return false;
+      const patchPath = join(otherDir, 'cordis.patch.yml');
+      return opts.fs.exists(patchPath) && opts.fs.readFile(patchPath).includes(BRIDGE_BEGIN_MARK);
+    });
+  } catch {
+    return true;
+  }
+}
+
 /** 卸载：删除带标记的 insert: 条目段（其余内容原样保留）+ 删除桥接目录 */
 export function uninstallBridge(opts: BridgeInstallOptions): void {
-  const profileDir = detectProfileDir(opts.dshHome, opts.fs);
+  const profileDir = detectProfileDir(opts.dshHome, opts.fs, opts.profile);
   if (profileDir === null) return;
   const patchPath = join(profileDir, 'cordis.patch.yml');
   if (!opts.fs.exists(patchPath)) return;
@@ -328,9 +344,11 @@ export function uninstallBridge(opts: BridgeInstallOptions): void {
     }
   }
   const targets = bridgeTargetDirs(profileDir, opts.npmGlobalNodeModules);
+  // 当前 profile 的私有副本始终删除，共享副本仅在最后一个使用者卸载后删除。
+  const removableTargets = hasOtherBridgeProfile(opts, profileDir) ? targets.slice(0, 1) : targets;
   // 全部目标目录删除均为尽力而为：权限锁死等场景下 rmDir 可能抛错，
   // 卸载的核心是回滚 patch 条目（保证 DSH 可干净启动），目录删除失败不应中断卸载。
-  for (const dir of targets) {
+  for (const dir of removableTargets) {
     if (opts.fs.exists(dir)) {
       try {
         opts.fs.rmDir(dir);

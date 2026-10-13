@@ -186,6 +186,13 @@
     "configuration": {
       "title": "DSH",
       "properties": {
+        "dsh.profile": {
+          "type": "string",
+          "default": "web",
+          "minLength": 1,
+          "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._][A-Za-z0-9._-]*$",
+          "markdownDescription": "%dsh.config.profile%"
+        },
         "dsh.host": {
           "type": "string",
           "default": "127.0.0.1",

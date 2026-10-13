@@ -23,6 +23,8 @@ export interface ServiceSnapshot {
 
 /** 管理器配置 */
 export interface ManagerOptions {
+  /** DSH profile 名称（默认 web） */
+  profile?: string;
   host: string;
   port: number;
   extraArgs: string[];
@@ -252,6 +254,7 @@ export class ServiceManager {
     for (;;) {
       try {
         child = this.deps.processRunner.startDsh({
+          profile: this.opts.profile,
           host: this.opts.host,
           port: this.opts.port,
           extraArgs: this.opts.extraArgs,
@@ -462,9 +465,10 @@ export class ServiceManager {
     }
   }
 
-  /** 应用新配置；仅 host/port 变化且自启服务在跑时自动重启（其余项原地生效） */
+  /** 应用新配置；profile/host/port 变化且自启服务在跑时自动重启 */
   reconfigure(opts: ManagerOptions): Promise<ServiceSnapshot> {
-    const targetChanged = this.opts.host !== opts.host || this.opts.port !== opts.port;
+    const targetChanged = this.opts.host !== opts.host || this.opts.port !== opts.port ||
+      (this.opts.profile ?? 'web') !== (opts.profile ?? 'web');
     this.opts = opts;
     // 同步启动超时（issue #23）：设置项改后立即生效，否则要重载窗口才生效
     if (opts.startTimeoutMs !== undefined) {

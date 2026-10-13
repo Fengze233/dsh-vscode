@@ -132,7 +132,7 @@ After installation, the extension installs its own bridge package `dsh-vscode-br
 
 To let the DSH page communicate with VS Code, the extension will:
 
-1. Install its bridge package `dsh-vscode-bridge` into your DSH user directory (`$DSH_HOME/profiles/web`, default `~/.dsh/profiles/web`) via DSH's official client-plugin extension point;
+1. Install its bridge package `dsh-vscode-bridge` into your DSH user directory (`$DSH_HOME/profiles/<dsh.profile>`, default `~/.dsh/profiles/web`) via DSH's official client-plugin extension point;
 2. Write a marked `insert:` entry (wrapped in `# dsh-vscode-bridge: begin` / `# dsh-vscode-bridge: end`) into `cordis.patch.yml`, registering the bridge as a DSH client plugin — writing only to the user directory and never touching the DSH installation directory.
 
 To remove, either way works:
@@ -173,6 +173,7 @@ The bridge only works inside the panel. If it is inactive (e.g. you open the DSH
 
 | Setting | Default | Description |
 |---|---|---|
+| `dsh.profile` | `web` | DSH profile used for startup and bridge installation (custom profiles must provide the web UI) |
 | `dsh.port` | `3080` | Desired port (used for both detection and startup) |
 | `dsh.host` | `127.0.0.1` | Service address (loopback only) |
 | `dsh.autoStart` | `true` | Auto-start the service when it is not running |
@@ -187,6 +188,14 @@ The bridge only works inside the panel. If it is inactive (e.g. you open the DSH
 | `dsh.useEnvProxy` | `false` | Append `--use-env-proxy` to the child process's `NODE_OPTIONS` (existing options are kept). Enable it when the model API is only reachable through an HTTP/HTTPS proxy |
 | `dsh.panel.zoomLevel` | `1` | Zoom of the embedded page: pick `0.5`–`1.5` from the dropdown (0.05 steps); finer values via `settings.json` |
 
+Set `"dsh.profile": "custom-profile"` and `"dsh.port": 3081` to launch
+`dsh --profile custom-profile --host 127.0.0.1 --port 3081 --no-open` and install
+the bridge into `$DSH_HOME/profiles/custom-profile`. Changing the profile restarts
+an extension-owned service; an existing external service is still reused by port.
+The default `web` profile preserves the current behavior.
+Profile names may contain ASCII letters, numbers, dots, underscores and hyphens;
+they cannot start with a hyphen or be `.` or `..`. Surrounding whitespace is trimmed.
+
 ## 🌍 Localization
 
 UI copy follows the VS Code display language (`Configure Display Language`): `zh-*` → Simplified Chinese, anything else → English.
@@ -197,7 +206,7 @@ Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 284 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
+npm run test          # 285 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
 npm run compile       # builds out/extension.js
 npm run watch         # watch build
 npm run typecheck     # type check
