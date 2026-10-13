@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DshPanelProvider } from '../../src/panel/provider';
+import * as vscodeStub from '../vscode-stub';
 
 /** 假 ServiceManager(仅 provider 用到的接口) */
 function fakeManager() {
@@ -62,4 +63,27 @@ test('refreshContextBar 重渲染并让新的缩放档位即时生效', () => {
 test('未打开面板时 refreshContextBar 安全返回(不抛异常)', () => {
   const provider = new DshPanelProvider(fakeManager() as never);
   provider.refreshContextBar(); // 无 view：内部判空直接返回
+});
+
+// issue #33：交付物（图片/PDF/未知二进制）必须用 vscode.open 打开。
+// 锁定的是 provider 里真实装配的依赖实现，而不是测试自造的替身——
+// 否则「打开方式」这条契约（showTextDocument vs vscode.open）测不到。
+test('bridgeDeps 的 openTextDocument 走 vscode.open（支持二进制交付物）', async (t) => {
+  const executed: unknown[][] = [];
+  const shownText: string[] = [];
+  t.mock.method(vscodeStub.commands, 'executeCommand', async (...args: unknown[]) => {
+    executed.push(args);
+    return undefined;
+  });
+  t.mock.method(vscodeStub.window, 'showTextDocument', async () => {
+    shownText.push('called');
+    return undefined;
+  });
+  const provider = new DshPanelProvider(fakeManager() as never);
+  const deps = Reflect.get(provider, 'bridgeDeps').call(provider) as {
+    openTextDocument: (p: string) => Promise<void>;
+  };
+  await deps.openTextDocument('C:\\tmp\\kf11_full.png');
+  assert.deepEqual(executed[0], ['vscode.open', { fsPath: 'C:\\tmp\\kf11_full.png' }, { preview: false }]);
+  assert.equal(shownText.length, 0, '不得再用 window.showTextDocument');
 });
