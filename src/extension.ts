@@ -43,6 +43,9 @@ let resolveUserDisplayUrlImpl: (() => Promise<string | null>) | null = null;
 let authProxy: DshProxy | null = null;
 let authProxyStarted = false;
 
+/** 扩展上下文（模块级保存：复制日志时需要扩展版本号重打环境信息头） */
+let extensionContext: vscode.ExtensionContext | null = null;
+
 /** 日志缓冲（供「复制日志」命令 dsh.copyLogs 使用；上限行数防内存膨胀） */
 const logBuffer: string[] = [];
 /** 日志缓冲最大行数（超出后丢弃最早的行） */
@@ -68,6 +71,9 @@ const BRIDGE_SILENCE_KEY = 'dsh.bridgeWarningSilenced';
 function toManagerOptions(config: DshConfig): ManagerOptions {
   return {
     profile: config.profile,
+    // 启动来源首选与桌面端命令路径（v0.4.3：Windows 上区分 npm / DSH Desktop 两种装法）
+    launchPreference: config.launchPreference,
+    desktopCommandPath: config.desktopCommandPath,
     host: config.host,
     port: config.port,
     extraArgs: config.extraArgs,
@@ -152,6 +158,38 @@ function describeDshExecutable(config: DshConfig): { path: string | null; versio
   return { path: shim ?? (process.platform === 'win32' ? null : 'dsh'), version: null };
 }
 
+/**
+ * 输出环境信息头：版本/平台/可执行文件/关键配置 + **实际启动来源**。
+ *
+ * 为什么做成可重复调用的函数：激活时服务尚未启动，拿不到「实际入口」；
+ * 而 `DSH: 复制日志` 导出的头部才是问题报告的第一手依据，必须在启动之后再补一份
+ * （issue #30/#31 的排查正是靠「到底用了哪个 dsh」这一行）。
+ */
+function logEnvironmentInfo(config: DshConfig): void {
+  appendLog('=== DSH 扩展环境信息 ===');
+  appendLog(`扩展版本: ${extensionContext?.extension.packageJSON.version ?? '未知'}`);
+  appendLog(`VS Code 版本: ${vscode.version}`);
+  appendLog(`平台: ${process.platform} (${process.arch})`);
+  const electronVersion = (process.versions as { electron?: string }).electron;
+  appendLog(`宿主 Node: ${process.version}${electronVersion ? ` / Electron ${electronVersion}` : ''}`);
+  const dshInfo = describeDshExecutable(config);
+  appendLog(`dsh 可执行文件: ${dshInfo.path ?? '未定位'}`);
+  appendLog(`dsh 版本: ${dshInfo.version ?? '未知'}`);
+  // 实际启动来源与入口：由 process runner 的 lastStart 提供（未启动时明确标注）
+  const lastStart = manager?.lastStart ?? null;
+  appendLog(`dsh 启动来源: ${lastStart?.source ?? '未启动'}`);
+  appendLog(`dsh 实际入口: ${lastStart?.command ?? '未定位'}${lastStart ? ` ${JSON.stringify(lastStart.args.slice(0, 2))}` : ''}`);
+  appendLog(
+    `配置: profile=${config.profile} launchPreference=${config.launchPreference} ` +
+    `desktopCommandPath=${config.desktopCommandPath || '(空，自动探测)'} ` +
+    `host=${config.host} port=${config.port} autoStart=${config.autoStart} stopOnExit=${config.stopOnExit} ` +
+    `bridgeEnabled=${config.bridgeEnabled} extraArgs=${JSON.stringify(config.extraArgs)} ` +
+    `executablePath=${config.executablePath || '(空)'}`,
+  );
+  appendLog(`工作区: ${vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath).join(', ') || '(无)'}`);
+  appendLog('=============================');
+}
+
 /** 插件激活：VS Code 启动完成后调用 */
 export function activate(context: vscode.ExtensionContext): void {
   // 语言规则：vscode.env.language 以 zh- 开头 → 中文，其余一律英文
@@ -161,23 +199,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const { config, errors } = readConfig();
   for (const err of errors) appendLog(`[config] ${err}`);
 
-  // —— 环境信息头：版本/平台/可执行文件/关键配置，问题报告排查的第一手依据 ——
-  appendLog('=== DSH 扩展环境信息 ===');
-  appendLog(`扩展版本: ${context.extension.packageJSON.version}`);
-  appendLog(`VS Code 版本: ${vscode.version}`);
-  appendLog(`平台: ${process.platform} (${process.arch})`);
-  const electronVersion = (process.versions as { electron?: string }).electron;
-  appendLog(`宿主 Node: ${process.version}${electronVersion ? ` / Electron ${electronVersion}` : ''}`);
-  const dshInfo = describeDshExecutable(config);
-  appendLog(`dsh 可执行文件: ${dshInfo.path ?? '未定位'}`);
-  appendLog(`dsh 版本: ${dshInfo.version ?? '未知'}`);
-  appendLog(
-    `配置: host=${config.host} port=${config.port} autoStart=${config.autoStart} stopOnExit=${config.stopOnExit} ` +
-    `bridgeEnabled=${config.bridgeEnabled} extraArgs=${JSON.stringify(config.extraArgs)} ` +
-    `executablePath=${config.executablePath || '(空)'}`,
-  );
-  appendLog(`工作区: ${vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath).join(', ') || '(无)'}`);
-  appendLog('=============================');
+  extensionContext = context;
+  logEnvironmentInfo(config);
 
   // —— 桥接状态（单一状态，两个面板共享，避免多个面板重复触发定时器）——
   // install：桥接安装结果；桥接禁用时为 null（不安装、不评估、不弹警告）。
@@ -718,6 +741,12 @@ async function copyUrl(): Promise<void> {
 
 /** 复制完整 DSH 日志（含环境信息头）到剪贴板：问题报告的提交内容 */
 async function copyLogs(): Promise<void> {
+  // 导出前补打一份环境信息头：激活时服务还没启动，只有此刻才有「实际启动来源/入口」
+  try {
+    logEnvironmentInfo(readConfig().config);
+  } catch {
+    /* 读取设置失败不影响导出既有日志 */
+  }
   await vscode.env.clipboard.writeText(logBuffer.join('\n'));
   void vscode.window.showInformationMessage(t('msg.logsCopied'));
 }

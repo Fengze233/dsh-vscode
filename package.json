@@ -193,6 +193,21 @@
           "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._][A-Za-z0-9._-]*$",
           "markdownDescription": "%dsh.config.profile%"
         },
+        "dsh.launchPreference": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "npm",
+            "desktop"
+          ],
+          "default": "auto",
+          "markdownDescription": "%dsh.config.launchPreference%"
+        },
+        "dsh.desktopCommandPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%dsh.config.desktopCommandPath%"
+        },
         "dsh.host": {
           "type": "string",
           "default": "127.0.0.1",

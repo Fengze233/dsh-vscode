@@ -37,6 +37,10 @@ export interface ManagerOptions {
   pollMs: number;
   /** dsh 可执行文件绝对路径（非空时优先于平台默认命令名使用） */
   executablePath?: string;
+  /** 首选启动来源（dsh.launchPreference：auto/npm/desktop） */
+  launchPreference?: string;
+  /** 桌面端命令绝对路径（dsh.desktopCommandPath；空串 = 自动探测） */
+  desktopCommandPath?: string;
   /** 是否允许 dsh web 打开浏览器（true=不传 --no-open；默认追加 --no-open） */
   openInBrowser?: boolean;
   /** 启动总超时（毫秒，默认 45000，可用 dsh.startTimeoutMs 调整；issue #23） */
@@ -116,6 +120,11 @@ export class ServiceManager {
   }
 
   /** 当前状态快照（副本，防外部篡改） */
+  /** 最近一次启动的实际命令/参数/来源（环境信息头与启动日志共用；未启动时为 null） */
+  get lastStart(): { command: string; args: string[]; source?: string } | null {
+    return this.deps.processRunner.lastStart ?? null;
+  }
+
   getSnapshot(): ServiceSnapshot {
     return { ...this.snapshot };
   }
@@ -260,6 +269,8 @@ export class ServiceManager {
           extraArgs: this.opts.extraArgs,
           cwd: cwdForSpawn,
           executablePath: this.opts.executablePath,
+          launchPreference: this.opts.launchPreference,
+          desktopCommandPath: this.opts.desktopCommandPath,
           // noOpenDisabled 后视为"用户要求弹浏览器"（即不追加 --no-open），兼容旧版 dsh
           openInBrowser: this.noOpenDisabled ? true : this.opts.openInBrowser,
           // 额外环境变量（issue #18）：未配置时保持 undefined（runner 不传 env，完全继承父进程）

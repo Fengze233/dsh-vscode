@@ -60,6 +60,13 @@ test('v0.3.0 设置项：remote.enabled 默认 false、image.fallback 默认 tru
   assert.equal(props['dsh.profile'].default, 'web');
   assert.equal(props['dsh.profile'].markdownDescription, '%dsh.config.profile%');
   assert.equal(props['dsh.profile'].pattern, PROFILE_NAME_PATTERN.source);
+  assert.equal(props['dsh.launchPreference'].type, 'string');
+  assert.equal(props['dsh.launchPreference'].default, 'auto');
+  assert.deepEqual(props['dsh.launchPreference'].enum, ['auto', 'npm', 'desktop']);
+  assert.equal(props['dsh.launchPreference'].markdownDescription, '%dsh.config.launchPreference%');
+  assert.equal(props['dsh.desktopCommandPath'].type, 'string');
+  assert.equal(props['dsh.desktopCommandPath'].default, '');
+  assert.equal(props['dsh.desktopCommandPath'].markdownDescription, '%dsh.config.desktopCommandPath%');
 });
 
 test('桥接版本与插件版本统一（一同随包发布），且卸载钩子自动清理桥接', () => {
