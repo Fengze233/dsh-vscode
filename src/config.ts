@@ -2,6 +2,8 @@
 // 纯函数（normalizeConfig / isLoopbackHost）不依赖 vscode，可直接单测；
 // readConfig 是 vscode 设置的薄封装，供 extension.ts 使用。
 import * as vscode from 'vscode';
+// profile 名称规则放在无 vscode 依赖的模块里（卸载钩子也要用同一份，见 src/uninstall.ts）
+import { PROFILE_NAME_PATTERN } from './bridge/profile-name';
 
 /** 用户可配置的原始值（可能缺失/非法） */
 export interface RawDshConfig {
@@ -116,8 +118,8 @@ export const MIN_START_TIMEOUT_MS = 5000;
 /** 启动超时允许的上限（毫秒）：超过 10 分钟视为配置错误 */
 export const MAX_START_TIMEOUT_MS = 600000;
 
-/** profile 名称允许字母、数字、点、下划线与连字符，不能是路径或命令行选项。 */
-export const PROFILE_NAME_PATTERN = /^(?!\.{1,2}$)[A-Za-z0-9._][A-Za-z0-9._-]*$/;
+// 对外仍从 config 导出该正则（package.test.ts 与 package.json 的 pattern 守卫依赖它）
+export { PROFILE_NAME_PATTERN };
 
 /** 首选启动来源取值（与 src/service/launcher.ts 的 LaunchPreference 一致） */
 export const LAUNCH_PREFERENCES = ['auto', 'npm', 'desktop'] as const;

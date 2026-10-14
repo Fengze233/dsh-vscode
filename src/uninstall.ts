@@ -3,9 +3,58 @@
 // 只能使用 Node 内建 API；任何失败都不影响 VS Code 卸载流程（尽力而为、吞异常并打印诊断）。
 // 职责：复用 installer 的 uninstallBridge，从 DSH 用户目录（$DSH_HOME/profiles/<profile>）移除
 // 桥接包目录并按 begin/end 标记还原 cordis.patch.yml，实现「卸载插件即卸载桥接」。
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { createNodeFs, uninstallBridge } from './bridge/installer';
+import { createNodeFs, uninstallBridge, type InstallerFs } from './bridge/installer';
+import { PROFILE_NAME_PATTERN } from './bridge/profile-name';
+
+/** 清理参数（默认取生产值；测试注入内存 fs 与假目录，避免触碰真实磁盘） */
+export interface UninstallOptions {
+  dshHome: string;
+  bridgeSourceDir: string;
+  fs: InstallerFs;
+  npmGlobalNodeModules?: string;
+  /** $DSH_HOME 的真实路径解析（默认 node:fs.realpathSync；仅用于校验 profile 未越界） */
+  realpath?: (p: string) => string;
+}
+
+/**
+ * 清理所有带桥接标记的 profile（导出以便单测；副作用全部走注入的 fs）。
+ *
+ * 安全前提（PR #35 把清理面从 profiles/web 扩大到 profiles/* 之后必须成立）：
+ * 只有「名字合法 + 不是符号链接 + 解析后仍在 profiles 目录内」的条目才允许被改写，
+ * 否则一个指向 $DSH_HOME 之外的符号链接会让卸载钩子改写外部文件。
+ */
+export function runUninstallHook(opts: UninstallOptions): void {
+  const { dshHome, bridgeSourceDir, fs, npmGlobalNodeModules } = opts;
+  const realpath = opts.realpath ?? ((p: string) => p);
+  const profilesDir = join(dshHome, 'profiles');
+  if (!fs.exists(profilesDir)) return;
+  for (const profile of fs.readdir(profilesDir)) {
+    // ① 名字必须是合法 profile 名（挡掉 '../evil'、绝对路径、符号链接名里的怪字符）
+    if (!PROFILE_NAME_PATTERN.test(profile)) {
+      console.error(`[dsh-uninstall] 跳过非法 profile 名: ${JSON.stringify(profile)}`);
+      continue;
+    }
+    const profileDir = join(profilesDir, profile);
+    // ② 条目不得是符号链接（existsSync 会跟随链接，导致写到 $DSH_HOME 之外）
+    if (fs.isSymlink !== undefined && fs.isSymlink(profileDir)) {
+      console.error(`[dsh-uninstall] 跳过符号链接 profile: ${profileDir}`);
+      continue;
+    }
+    // ③ 解析后的真实路径必须仍在 profiles 目录内（双保险：挡住符号链接目录与路径穿越）
+    const resolved = resolve(realpath(profileDir));
+    if (resolved !== resolve(realpath(profilesDir)) && !resolved.startsWith(resolve(realpath(profilesDir)) + '/')) {
+      console.error(`[dsh-uninstall] 跳过越界 profile 路径: ${profileDir} -> ${resolved}`);
+      continue;
+    }
+    try {
+      uninstallBridge({ dshHome, profile, bridgeSourceDir, fs, npmGlobalNodeModules });
+    } catch (err) {
+      console.error(`[dsh-uninstall] ${profile}: ${String(err)}`);
+    }
+  }
+}
 
 function main(): void {
   // DSH 用户目录：$DSH_HOME 优先，缺省 ~/.dsh（与扩展激活时 installOpts 的解析保持一致）
@@ -20,19 +69,20 @@ function main(): void {
       ? join(process.env.APPDATA, 'npm', 'node_modules')
       : undefined;
   try {
-    // 卸载钩子无法读取 VS Code 设置，因此清理所有带本扩展桥接标记的 profile，
-    // 包括此前会话使用过的自定义 profile。
-    const fs = createNodeFs();
-    const profilesDir = join(dshHome, 'profiles');
-    if (fs.exists(profilesDir)) {
-      for (const profile of fs.readdir(profilesDir)) {
+    // 卸载钩子读不到 VS Code 设置，因此清理所有带桥接标记的 profile（含自定义 profile）
+    runUninstallHook({
+      dshHome,
+      bridgeSourceDir,
+      fs: createNodeFs(),
+      npmGlobalNodeModules,
+      realpath: (p) => {
         try {
-          uninstallBridge({ dshHome, profile, bridgeSourceDir, fs, npmGlobalNodeModules });
-        } catch (err) {
-          console.error(`[dsh-uninstall] ${profile}: ${String(err)}`);
+          return createNodeRealpath(p);
+        } catch {
+          return p; // 路径不存在等情形：退回原路径参与比较（不会因此放宽到目录之外）
         }
-      }
-    }
+      },
+    });
     console.log('[dsh-uninstall] 已清理 DSH profile 中的桥接包（若存在）');
   } catch (err) {
     // 卸载钩子失败不应阻塞 VS Code 卸载流程：打印诊断后静默退出
@@ -40,4 +90,12 @@ function main(): void {
   }
 }
 
-main();
+/** 真实路径解析（单独包一层便于上面的 try/catch 保持简洁） */
+function createNodeRealpath(p: string): string {
+  // 延迟 require：卸载脚本运行在纯 Node 下，node:fs 一定可用
+  return (require('node:fs') as typeof import('node:fs')).realpathSync(p);
+}
+
+// 入口：只有「作为脚本直接执行」(VS Code 卸载时 node ./out/uninstall.js) 才跑清理；
+// 被单测 import 时不产生任何副作用（否则单测会去动真实的 ~/.dsh）。
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === resolve(__filename)) main();

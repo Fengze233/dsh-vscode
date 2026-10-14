@@ -32,6 +32,9 @@ export interface InstallerFs {
   copyDir(src: string, dest: string): void;
   rmDir(p: string): void;
   readdir(p: string): string[];
+  /** 是否为符号链接（卸载钩子用：跟随链接会写到 $DSH_HOME 之外，必须显式跳过）。
+   *  可选：既有内存 fs 实现与旧调用方无需改动。 */
+  isSymlink?(p: string): boolean;
 }
 
 /** 安装结果状态：ok 成功；pending-restart 预留（服务重启后生效）；degraded 降级 */
@@ -373,6 +376,14 @@ export function createNodeFs(): InstallerFs {
     copyDir: (src, dest) => nodeFs.cpSync(src, dest, { recursive: true }),
     rmDir: (p) => nodeFs.rmSync(p, { recursive: true, force: true }),
     readdir: (p) => nodeFs.readdirSync(p),
+    // lstat 不跟随链接：只有它才能识别出「profiles/linked -> 外部目录」这类条目
+    isSymlink: (p) => {
+      try {
+        return nodeFs.lstatSync(p).isSymbolicLink();
+      } catch {
+        return false; // 不存在/无权限：按非链接处理，后续 exists 检查会兜住
+      }
+    },
   };
 }
 
