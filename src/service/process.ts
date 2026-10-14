@@ -295,6 +295,7 @@ export function createProcessRunner(
       let usedCandidates: string[] | undefined;
       if (platform === 'win32') {
         // Windows：.cmd 是批处理 shim，Node v24 直接 spawn 会同步抛 EINVAL，
+        // （cmd 模式的参数前缀由 launcher.cmdScriptArgs 生成：脚本路径需双层引号，否则空格处被截断）
         // 因此由 launcher 裁决执行方式：能推导出真实 bin.js 就用 node 直跑，
         // 推不出来（DSH Desktop 的 dsh.cmd）就用 cmd.exe 执行脚本本身。
         const resolution: LaunchResolution | null = resolveLaunch({

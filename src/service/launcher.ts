@@ -69,6 +69,19 @@ export function desktopDefaultCommand(localAppData: string | undefined): string 
 }
 
 /**
+ * 构造 `cmd.exe` 执行脚本的参数前缀。
+ *
+ * 为什么路径要写成 `""…""`（双层引号）：`cmd /d /s /c` 的引号规则是——
+ * 若 `/c` 之后的第一个字符是引号，`/s` 会剥掉**最外层**那一对，剩下的内容才当命令解析。
+ * 因此含空格的脚本路径必须写成 `cmd /d /s /c ""C:\Program Files\x\dsh.cmd" 参数…"`；
+ * 只写一层引号（或完全不写）时，cmd 会在空格处截断，报「'C:\Program Files\DeepSeek' 不是内部或外部命令」。
+ * 参数本身由 Node 按 Windows 命令行规则转义，无需再加引号。
+ */
+export function cmdScriptArgs(scriptPath: string): string[] {
+  return ['/d', '/s', '/c', `""${scriptPath}""`];
+}
+
+/**
  * 判断 target 是否位于 parent 之内（跨平台：Windows 的 `\` 与 POSIX 的 `/` 同等对待）。
  *
  * 为什么不用 startsWith(parent + '/')：Windows 路径用反斜杠拼接，拼 '/' 后恒不成立，
@@ -118,7 +131,7 @@ export function resolveLaunch(input: LaunchInput): LaunchResolution | null {
           }
         : {
             source: 'explicit', mode: 'cmd', executablePath: explicit,
-            argsPrefix: ['/d', '/s', '/c', explicit],
+            argsPrefix: cmdScriptArgs(explicit),
             fellBack: false, reason: 'explicit script (no bin.js derivation)', candidateLog: log,
           };
     }
@@ -151,7 +164,7 @@ export function resolveLaunch(input: LaunchInput): LaunchResolution | null {
   });
   const makeDesktop = (fellBack: boolean): LaunchResolution => ({
     source: 'desktop', mode: 'cmd', executablePath: desktopCmd as string,
-    argsPrefix: ['/d', '/s', '/c', desktopCmd as string],
+    argsPrefix: cmdScriptArgs(desktopCmd as string),
     fellBack, reason: fellBack ? 'desktop (preferred npm unavailable)' : 'desktop', candidateLog: log,
   });
 

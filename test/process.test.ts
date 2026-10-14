@@ -94,7 +94,7 @@ test('Windows：bin.js 不存在时回退执行桌面端 dsh.cmd（cmd.exe /d /s
   runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
   assert.equal(calls[0].cmd, 'cmd.exe');
   assert.deepEqual(calls[0].args, [
-    '/d', '/s', '/c', desktopCmd,
+    '/d', '/s', '/c', `""${desktopCmd}""`,
     '--profile', 'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
   assert.equal(runner.lastStart?.source, 'desktop');
@@ -197,7 +197,7 @@ test('startDsh 传 executablePath 指向 dsh.cmd 时直接执行该脚本，不�
   runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: desktopCmd });
   assert.equal(calls[0].cmd, 'cmd.exe');
   assert.deepEqual(calls[0].args, [
-    '/d', '/s', '/c', desktopCmd,
+    '/d', '/s', '/c', `""${desktopCmd}""`,
     '--profile', 'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
 });

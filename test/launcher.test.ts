@@ -1,7 +1,7 @@
 // test/launcher.test.ts — 执行入口裁决的单元测试（全部依赖注入，可在 Linux 上覆盖 Windows 分支）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { binJsFromShim, containsPath, resolveLaunch, type LaunchInput } from '../src/service/launcher';
+import { binJsFromShim, cmdScriptArgs, containsPath, resolveLaunch, type LaunchInput } from '../src/service/launcher';
 
 /** 构造一份「文件系统里存在这些路径」的 exists 实现 */
 function existsOf(...paths: string[]): (p: string) => boolean {
@@ -41,7 +41,8 @@ test('显式路径：.cmd 走 cmd 执行，不再推导 bin.js（issue #30 的�
   assert.equal(r.source, 'explicit');
   assert.equal(r.mode, 'cmd');
   assert.equal(r.executablePath, DESKTOP_CMD);
-  assert.deepEqual(r.argsPrefix, ['/d', '/s', '/c', DESKTOP_CMD]);
+  // 双层引号：cmd /d /s /c 的 /s 会剥掉最外层引号，含空格的路径才不会在空格处被截断
+  assert.deepEqual(r.argsPrefix, ['/d', '/s', '/c', `""${DESKTOP_CMD}""`]);
 });
 
 test('显式路径存在性校验失败时不作为候选，继续走首选', () => {
@@ -88,6 +89,7 @@ test('desktopCommandPath：配置路径存在时优先于默认探测；不存�
   }));
   assert.ok(r2);
   assert.equal(r2.executablePath, DESKTOP_CMD);
+  assert.deepEqual(r2.argsPrefix, ['/d', '/s', '/c', `""${DESKTOP_CMD}""`]);
   assert.ok(r2.candidateLog.some((line) => line.includes('configured')));
 });
 
@@ -120,4 +122,14 @@ test('containsPath：跨平台判断子路径（Windows 反斜杠与 POSIX 斜�
   // POSIX
   assert.equal(containsPath('/home/u/.dsh/profiles', '/home/u/.dsh/profiles/web'), true);
   assert.equal(containsPath('/home/u/.dsh/profiles', '/outside'), false);
+});
+
+test('cmdScriptArgs：含空格/括号/中文的脚本路径一律双层引号包裹（否则 cmd 在空格处截断）', () => {
+  // 真实报错形态：'C:\Users\ni125\AppData\Local\Programs\DeepSeek' 不是内部或外部命令
+  const p1 = 'C:\\Users\\ni125\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd';
+  assert.deepEqual(cmdScriptArgs(p1), ['/d', '/s', '/c', `""${p1}""`]);
+  // 含括号（Program Files (x86)）与中文用户名同样只需引号，不需要转义
+  for (const p of ['C:\\Program Files (x86)\\dsh\\dsh.cmd', 'C:\\Users\\张三\\.dsh\\bin\\dsh.cmd', 'D:\\a b\\c\\dsh.cmd']) {
+    assert.deepEqual(cmdScriptArgs(p), ['/d', '/s', '/c', `""${p}""`]);
+  }
 });
