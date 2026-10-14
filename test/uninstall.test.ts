@@ -2,7 +2,7 @@
 // 用内存 fs + 注入 realpath，完全离线：验证「符号链接 / 非法名 / 越界路径」三类条目不会被改写。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runUninstallHook } from '../src/uninstall';
+import { runUninstallHook, shouldRunUninstall } from '../src/uninstall';
 import type { InstallerFs } from '../src/bridge/installer';
 
 /** 内存 fs：files 为路径→内容，dirs 为目录集合，symlinks 记录「哪条路径是符号链接」 */
@@ -87,4 +87,39 @@ test('卸载钩子照常清理合法 profile 的桥接条目与目录', () => {
   const after = fs.readFile(patch);
   assert.ok(!after.includes(MARK), '桥接标记段应被删除');
   assert.ok(after.includes('# 用户自己的内容'), '用户内容必须保留');
+});
+
+// C1（审查发现）：`node --test` 会把测试文件自身作为 argv[1]、__filename 也是它，
+// 于是「只看 argv[1] === __filename」的守卫在单测里判为真 → npm test 会真的执行卸载钩子
+// （实测会去写用户的 ~/.dsh/profiles/web/cordis.patch.yml）。下面把这三种情形钉死。
+test('shouldRunUninstall：测试运行器/测试 bundle 一律不执行，仅生产入口执行', () => {
+  const entry = '/ext/out/uninstall.js';
+  // ① node:test 运行期（NODE_TEST_CONTEXT 由测试运行器设置）
+  assert.equal(shouldRunUninstall(entry, entry, { NODE_TEST_CONTEXT: '1' }), false);
+  // ② 直接执行测试 bundle（argv[1] 与 __filename 都是测试文件）
+  assert.equal(shouldRunUninstall('/ext/out/test/uninstall.test.js', '/ext/out/test/uninstall.test.js', {}), false);
+  // ③ 生产入口：VS Code 卸载时 node ./out/uninstall.js
+  assert.equal(shouldRunUninstall(entry, entry, {}), true);
+  // ④ 入口不确定 / 被当作模块 require：不清理（宁可不清理，也不能误删用户 profile）
+  assert.equal(shouldRunUninstall(undefined, entry, {}), false);
+  assert.equal(shouldRunUninstall('/other/script.js', entry, {}), false);
+});
+
+// 仅 Windows 运行：本用例要验证的是 win32 路径语义（node:path 在 Linux 上不会把 `C:\\…`
+// 当作绝对路径），跑在 Linux 上测不到目标行为，只会得到平台差异导致的假失败。
+test('Windows 形态路径：合法 profile 照常清理，越界链接仍被挡住', { skip: process.platform !== 'win32' }, () => {
+  const home = 'C:\\Users\\u\\.dsh';
+  const patch = `${home}\\profiles\\web\\cordis.patch.yml`;
+  const fs = makeMemFs({ [patch]: `# 用户内容\n${MARK}\n# dsh-vscode-bridge: end\n` });
+  fs.mkdir(`${home}\\profiles`);
+  runUninstallHook({
+    dshHome: home,
+    bridgeSourceDir: 'C:\\ext\\bridge-client',
+    fs,
+    // 注入 Windows 语义的 realpath，避免依赖运行平台
+    realpath: (x) => x,
+  });
+  const after = fs.readFile(patch);
+  assert.ok(!after.includes(MARK), 'Windows 路径下的合法 profile 必须照常清理（否则是 0.4.2 行为回归）');
+  assert.ok(after.includes('# 用户内容'), '用户内容保留');
 });

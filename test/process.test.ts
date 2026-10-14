@@ -464,3 +464,35 @@ test('startDsh 未传 env 或传空对象：不给 spawn 提供 env 键（保持
   runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], env: {} });
   assert.equal('env' in calls[1], false, '空对象等同未配置');
 });
+
+test('stopChild：cmd 模式的 Windows 子进程按进程树结束（taskkill /T），避免孤儿 dsh 占端口', async () => {
+  const desktopCmd = 'C:\\Users\\u\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd';
+  const child = new FakeChild();
+  const killed: number[] = [];
+  const runner = createProcessRunner(
+    (() => child) as SpawnFn, 'win32', 5, (p) => p === desktopCmd,
+    { execPath: 'C:\\node\\node.exe', path: 'C:\\Windows', localAppData: 'C:\\Users\\u\\AppData\\Local' },
+    (pid) => killed.push(pid),
+  );
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
+  await runner.stopChild(child);
+  assert.deepEqual(killed, [1234], 'cmd 外壳必须走 taskkill /T 结束整棵树');
+  assert.deepEqual(child.killed, ['SIGTERM', 'SIGKILL'], '常规 kill 仍作为兜底执行');
+});
+
+test('stopChild：node 模式（npm 装法）不调用 taskkill，保持既有停止行为', async () => {
+  const shim = 'C:\\npm-global\\dsh.cmd';
+  const binJs = 'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js';
+  const child = new FakeChild();
+  const killed: number[] = [];
+  const runner = createProcessRunner(
+    (() => child) as SpawnFn, 'win32', 5,
+    (p) => p === shim || p === binJs || p === 'C:\\npm-global\\node.exe',
+    { execPath: 'C:\\node\\node.exe', path: 'C:\\npm-global' },
+    (pid) => killed.push(pid),
+  );
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
+  await runner.stopChild(child);
+  assert.deepEqual(killed, [], 'node 直跑模式没有 cmd 外壳，不需要 taskkill');
+  assert.deepEqual(child.killed, ['SIGTERM', 'SIGKILL']);
+});

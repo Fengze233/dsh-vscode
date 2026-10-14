@@ -68,6 +68,23 @@ export function desktopDefaultCommand(localAppData: string | undefined): string 
   return win32Path.join(localAppData, 'Programs', 'DeepSeek Harness', 'resources', 'runtime', 'cli', 'bin', 'dsh.cmd');
 }
 
+/**
+ * 判断 target 是否位于 parent 之内（跨平台：Windows 的 `\` 与 POSIX 的 `/` 同等对待）。
+ *
+ * 为什么不用 startsWith(parent + '/')：Windows 路径用反斜杠拼接，拼 '/' 后恒不成立，
+ * 结果是「所有 profile 都被判为越界而跳过」——卸载钩子在 Windows 上会整体失效（回归）。
+ */
+export function containsPath(parent: string, target: string): boolean {
+  const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '');
+  const p = norm(parent);
+  const t = norm(target);
+  // 盘符绝对路径（如 C:/…）按不区分大小写比较：Windows 文件系统本身不区分大小写
+  const caseInsensitive = /^[A-Za-z]:\//.test(p);
+  const [pp, tt] = caseInsensitive ? [p.toLowerCase(), t.toLowerCase()] : [p, t];
+  if (tt === pp) return true;
+  return tt.startsWith(`${pp}/`);
+}
+
 /** 校验 preference：非法值回退 auto（与 config.ts 的规范化保持同一语义） */
 function normalizePreference(raw: string | undefined): LaunchPreference {
   return raw === 'npm' || raw === 'desktop' ? raw : 'auto';

@@ -458,7 +458,14 @@ window.__ModuleLoader__.load({
             // 带上会话 cwd：DSH 会话 cwd 与 VS Code 工作区根不一致时，
             // 相对路径必须按会话 cwd 解析，否则会打开错文件或报不存在（issue #32）。
             // 取不到 cwd 时不带该字段，由扩展侧退回工作区根兜底（旧行为）。
-            const sessionCwd = resolveSessionCwd(dshCtx, lastSeenSessionId);
+            // 取 cwd 只为「相对路径按会话目录解析」：DSH 页面结构变化时不能让整个点击变哑，
+            // 因此取值包一层 try/catch，失败就按旧行为（不带 cwd）转发。
+            let sessionCwd;
+            try {
+              sessionCwd = resolveSessionCwd(dshCtx, lastSeenSessionId);
+            } catch (err) {
+              console.log("[dsh-vscode-bridge] resolveSessionCwd failed; open without cwd", err);
+            }
             parent.postMessage(buildOpenFileMessage(path, sessionCwd), "*");
           }
         }

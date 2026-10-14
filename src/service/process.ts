@@ -18,6 +18,9 @@ export interface ChildProcessLike {
 /** spawn 函数签名（便于注入假实现） */
 export type SpawnFn = (command: string, args: string[], options: SpawnOptions) => ChildProcessLike;
 
+/** 结束进程树（仅 Windows 用；默认实现调 taskkill，单测注入假实现） */
+export type KillTreeFn = (pid: number) => void;
+
 /** 启动参数 */
 export interface StartOptions {
   /** DSH profile 名称（默认 web） */
@@ -216,7 +219,15 @@ export interface ProcessRunner {
   /** 最近一次启动的子进程（测试钩子；生产代码可忽略） */
   lastChild: ChildProcessLike | null;
   /** 最近一次启动的实际命令与参数（供 manager 写「启动命令」日志，便于问题排查） */
-  lastStart?: { command: string; args: string[]; source?: LaunchSource } | null;
+  lastStart?: {
+    command: string;
+    args: string[];
+    source?: LaunchSource;
+    /** 裁决理由（英文短句，便于日志对照；POSIX 分支为 undefined） */
+    launchReason?: string;
+    /** 依次尝试过的候选与失败原因（启动失败/回退时输出，便于远程排查） */
+    candidateLog?: string[];
+  } | null;
 }
 
 /**
@@ -227,15 +238,31 @@ export interface ProcessRunner {
  * @param existsImpl 存在性校验（默认 node:fs.existsSync；单测注入假实现以便控制 cwd / bin.js 查找结果）
  * @param env       运行环境注入（execPath / path；默认 process.execPath / process.env.PATH，工厂内取，保持既有调用不破）
  */
+/** 默认的进程树结束实现：Windows 上 taskkill /T /F（同步执行，失败由调用方吞掉） */
+function defaultKillTree(pid: number): void {
+  // 延迟 require：非 Windows 平台不会走到这里
+  const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
+  spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+}
+
 export function createProcessRunner(
   spawnImpl: SpawnFn = spawn as unknown as SpawnFn,
   platform: string = process.platform,
   graceMs = 3000,
   existsImpl: (p: string) => boolean = existsSync,
   env: RunnerEnv = { execPath: process.execPath, path: process.env.PATH ?? '' },
+  killTree: KillTreeFn = defaultKillTree,
 ): ProcessRunner {
   let lastChild: ChildProcessLike | null = null;
-  let lastStart: { command: string; args: string[]; source?: LaunchSource } | null = null;
+  let lastStart: {
+    command: string;
+    args: string[];
+    source?: LaunchSource;
+    launchReason?: string;
+    candidateLog?: string[];
+  } | null = null;
+  /** 最近一次启动是否走 cmd 外壳（决定停止时是否需要按进程树结束） */
+  let usedCmdScript = false;
 
   return {
     startDsh({ profile = 'web', host, port, extraArgs, cwd, executablePath, openInBrowser, env: extraEnv, launchPreference, desktopCommandPath }) {
@@ -264,6 +291,8 @@ export function createProcessRunner(
       let spawnArgs: string[];
       // 本次启动实际采用的来源（Windows 分支由 launcher 裁决；POSIX 分支恒为 undefined）
       let usedSource: LaunchSource | undefined;
+      let usedReason: string | undefined;
+      let usedCandidates: string[] | undefined;
       if (platform === 'win32') {
         // Windows：.cmd 是批处理 shim，Node v24 直接 spawn 会同步抛 EINVAL，
         // 因此由 launcher 裁决执行方式：能推导出真实 bin.js 就用 node 直跑，
@@ -292,6 +321,11 @@ export function createProcessRunner(
           : 'cmd.exe';
         spawnArgs = [...resolution.argsPrefix, ...webArgs];
         usedSource = resolution.source;
+        usedReason = resolution.reason;
+        usedCandidates = resolution.candidateLog;
+        // 记录执行方式：cmd 模式下真正跑 dsh 的是 cmd.exe 的子进程，
+        // 停止时必须按进程树结束，否则会留下孤儿进程占着端口（见 stopChild）。
+        usedCmdScript = resolution.mode === 'cmd';
         child = spawnImpl(command, spawnArgs, spawnOptions);
       } else {
         // 非 Windows 分支完全不变：仍 spawn 'dsh'（或显式 executablePath）
@@ -301,12 +335,25 @@ export function createProcessRunner(
       }
 
       lastChild = child;
-      lastStart = { command, args: spawnArgs, source: usedSource };
+      lastStart = {
+        command, args: spawnArgs, source: usedSource,
+        launchReason: usedReason, candidateLog: usedCandidates,
+      };
       return child;
     },
 
     async stopChild(child) {
       if (child.pid === undefined) return;
+      // Windows + cmd 模式：cmd.exe 只是外壳，真正跑 dsh 的是它的子进程。
+      // 只 kill 外壳会留下孤儿 dsh（端口不释放、下次启动探到「端口被占用」），
+      // 因此用 taskkill /T 结束整棵树，再做一次常规 kill 兜底。
+      if (platform === 'win32' && usedCmdScript) {
+        try {
+          killTree(child.pid);
+        } catch {
+          /* taskkill 不可用（被裁剪的系统/权限不足）：继续走下方常规 kill */
+        }
+      }
       child.kill('SIGTERM');
       await new Promise((resolve) => setTimeout(resolve, graceMs));
       child.kill('SIGKILL');

@@ -1,7 +1,7 @@
 // test/launcher.test.ts — 执行入口裁决的单元测试（全部依赖注入，可在 Linux 上覆盖 Windows 分支）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { binJsFromShim, resolveLaunch, type LaunchInput } from '../src/service/launcher';
+import { binJsFromShim, containsPath, resolveLaunch, type LaunchInput } from '../src/service/launcher';
 
 /** 构造一份「文件系统里存在这些路径」的 exists 实现 */
 function existsOf(...paths: string[]): (p: string) => boolean {
@@ -71,4 +71,53 @@ test('npm 不可行：bin.js 不存在时必须判定 npm 不可用（issue #30 
   assert.equal(r.fellBack, true);
   assert.ok(r.reason.includes('npm'));
   assert.ok(r.candidateLog.some((line) => line.includes('bin.js')));
+});
+
+test('desktopCommandPath：配置路径存在时优先于默认探测；不存在则退回默认目录且不报错', () => {
+  const configured = 'D:\\tools\\dsh-desktop\\dsh.cmd';
+  const r1 = resolveLaunch(baseInput({
+    preference: 'desktop', desktopCommandPath: configured, exists: existsOf(configured),
+  }));
+  assert.ok(r1);
+  assert.equal(r1.source, 'desktop');
+  assert.equal(r1.executablePath, configured);
+  assert.equal(r1.fellBack, false);
+  // 配置的路径不存在 → 退回 %LOCALAPPDATA% 下的默认位置，并留下说明
+  const r2 = resolveLaunch(baseInput({
+    preference: 'desktop', desktopCommandPath: 'D:\\gone\\dsh.cmd', exists: existsOf(DESKTOP_CMD),
+  }));
+  assert.ok(r2);
+  assert.equal(r2.executablePath, DESKTOP_CMD);
+  assert.ok(r2.candidateLog.some((line) => line.includes('configured')));
+});
+
+test('preference=desktop：桌面端可用时优先，npm 也同时存在时不回退；桌面端缺失则回退 npm', () => {
+  const both = existsOf(NPM_SHIM, NPM_BINJS, DESKTOP_CMD);
+  const first = resolveLaunch(baseInput({ preference: 'desktop', exists: both }));
+  assert.ok(first);
+  assert.equal(first.source, 'desktop');
+  assert.equal(first.fellBack, false);
+  const fallback = resolveLaunch(baseInput({ preference: 'desktop', exists: existsOf(NPM_SHIM, NPM_BINJS) }));
+  assert.ok(fallback);
+  assert.equal(fallback.source, 'npm');
+  assert.equal(fallback.fellBack, true);
+});
+
+test('三种来源都不可用 → 返回 null（调用方据此报「未找到 dsh」）', () => {
+  assert.equal(resolveLaunch(baseInput({ preference: 'auto' })), null);
+  assert.equal(resolveLaunch(baseInput({ preference: 'desktop' })), null);
+  assert.equal(resolveLaunch(baseInput({ explicitPath: 'D:\\gone\\dsh.cmd' })), null);
+});
+
+test('containsPath：跨平台判断子路径（Windows 反斜杠与 POSIX 斜杠同等对待）', () => {
+  // Windows：卸载钩子的越界判定曾写死 '/'，导致反斜杠路径恒判为越界（所有 profile 被跳过）
+  assert.equal(containsPath('C:\\Users\\u\\.dsh\\profiles', 'C:\\Users\\u\\.dsh\\profiles\\web'), true);
+  assert.equal(containsPath('C:\\Users\\u\\.dsh\\profiles', 'C:\\Users\\u\\.dsh\\profiles'), true);
+  assert.equal(containsPath('C:\\Users\\u\\.dsh\\profiles', 'C:\\outside'), false);
+  assert.equal(containsPath('C:\\Users\\u\\.dsh\\profiles\\', 'C:\\Users\\u\\.dsh\\profiles\\web'), true);
+  // 前缀相同但并非子路径（profiles2 不能被当成 profiles 的子目录）
+  assert.equal(containsPath('/home/u/.dsh/profiles', '/home/u/.dsh/profiles2/x'), false);
+  // POSIX
+  assert.equal(containsPath('/home/u/.dsh/profiles', '/home/u/.dsh/profiles/web'), true);
+  assert.equal(containsPath('/home/u/.dsh/profiles', '/outside'), false);
 });

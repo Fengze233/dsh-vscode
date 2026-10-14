@@ -121,7 +121,7 @@ export class ServiceManager {
 
   /** 当前状态快照（副本，防外部篡改） */
   /** 最近一次启动的实际命令/参数/来源（环境信息头与启动日志共用；未启动时为 null） */
-  get lastStart(): { command: string; args: string[]; source?: string } | null {
+  get lastStart(): { command: string; args: string[]; source?: string; launchReason?: string } | null {
     return this.deps.processRunner.lastStart ?? null;
   }
 
@@ -310,6 +310,14 @@ export class ServiceManager {
     // 记录实际执行的启动命令（含解析出的 node 路径与全部参数），供问题排查对照环境差异
     const lastStart = this.deps.processRunner.lastStart;
     if (lastStart) {
+      // 明确写出「实际用了哪种装法、是否回退、候选为何失败」：
+      // npm 装法与 DSH Desktop 装法的排查全靠这一行（spec 5.2）。
+      const src = lastStart.source ?? 'default';
+      const detail = lastStart.launchReason ? `，原因=${lastStart.launchReason}` : '';
+      this.deps.log(`[process] 启动来源: ${src}${detail}`);
+      if (lastStart.candidateLog !== undefined && lastStart.candidateLog.length > 0) {
+        this.deps.log(`[process] 候选尝试: ${lastStart.candidateLog.join(' | ')}`);
+      }
       this.deps.log(`[process] 启动命令: ${lastStart.command} ${lastStart.args.join(' ')}`);
     }
 

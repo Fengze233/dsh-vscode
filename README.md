@@ -174,6 +174,8 @@ The bridge only works inside the panel. If it is inactive (e.g. you open the DSH
 | Setting | Default | Description |
 |---|---|---|
 | `dsh.profile` | `web` | DSH profile used for startup and bridge installation (custom profiles must provide the web UI) |
+| `dsh.launchPreference` | `auto` | Which `dsh` install to prefer: `auto` (npm first, then DSH Desktop), `npm`, or `desktop`. If the preferred one is missing the other is used automatically; the log and the environment header record the actual source |
+| `dsh.desktopCommandPath` | (empty) | Absolute path of the DSH Desktop command (usually `%LOCALAPPDATA%\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd`); empty means auto-detect |
 | `dsh.port` | `3080` | Desired port (used for both detection and startup) |
 | `dsh.host` | `127.0.0.1` | Service address (loopback only) |
 | `dsh.autoStart` | `true` | Auto-start the service when it is not running |
@@ -206,7 +208,7 @@ Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 302 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
+npm run test          # 310 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
 npm run compile       # builds out/extension.js
 npm run watch         # watch build
 npm run typecheck     # type check

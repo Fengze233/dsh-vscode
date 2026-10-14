@@ -172,6 +172,8 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 | 设置项 | 默认值 | 说明 |
 |---|---|---|
 | `dsh.profile` | `web` | 启动 DSH 及安装桥接所用的 profile（自定义 profile 需提供网页界面） |
+| `dsh.launchPreference` | `auto` | 优先使用哪种 `dsh` 安装：`auto`（npm 优先，没有再桌面端）/ `npm` / `desktop`；首选不存在时自动用另一种，日志与环境信息头写明实际来源 |
+| `dsh.desktopCommandPath` | （空） | 桌面端命令绝对路径（通常 `%LOCALAPPDATA%\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd`）；留空按默认位置自动探测 |
 | `dsh.port` | `3080` | 期望端口（探测与启动共用） |
 | `dsh.host` | `127.0.0.1` | 服务地址（仅允许回环地址） |
 | `dsh.autoStart` | `true` | 服务未运行时自动启动 |
@@ -231,7 +233,7 @@ profile 名称可包含 ASCII 字母、数字、点、下划线与连字符，�
 
 ```bash
 npm install
-npm run test          # 302 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话）
+npm run test          # 310 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话）
 npm run compile       # 构建 out/extension.js
 npm run watch         # 监听构建
 npm run typecheck     # 类型检查

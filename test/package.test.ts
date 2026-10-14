@@ -98,8 +98,13 @@ test('桥接版本与插件版本统一（一同随包发布），且卸载钩�
     const otherPatch = join(dshHome, 'profiles', 'other', 'cordis.patch.yml');
     mkdirSync(join(dshHome, 'profiles', 'other'), { recursive: true });
     writeFileSync(otherPatch, '# user content\n[]\n');
+    // 子进程环境必须清掉测试运行器标记：node --test 会把 NODE_TEST_CONTEXT 传下去，
+    // 而卸载钩子据它拒绝执行（该守卫是为了防止单测误清理用户真实的 ~/.dsh）。
+    // 真实卸载场景（VS Code 执行 node out/uninstall.js）没有这个变量。
+    const childEnv: NodeJS.ProcessEnv = { ...process.env, DSH_HOME: dshHome, APPDATA: dshHome };
+    delete childEnv.NODE_TEST_CONTEXT;
     const result = spawnSync(process.execPath, [join(__dirname, '..', 'uninstall.js')], {
-      env: { ...process.env, DSH_HOME: dshHome, APPDATA: dshHome }, encoding: 'utf8',
+      env: childEnv, encoding: 'utf8',
     });
     assert.equal(result.status, 0, result.stderr);
     for (const profile of ['web', 'custom-profile']) {
