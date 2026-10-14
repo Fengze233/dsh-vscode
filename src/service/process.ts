@@ -227,6 +227,8 @@ export interface ProcessRunner {
     launchReason?: string;
     /** 依次尝试过的候选与失败原因（启动失败/回退时输出，便于远程排查） */
     candidateLog?: string[];
+    /** 命中的 DSH Desktop 安装根（仅 desktop 来源；供版本探测） */
+    desktopRoot?: string;
   } | null;
 }
 
@@ -260,6 +262,7 @@ export function createProcessRunner(
     source?: LaunchSource;
     launchReason?: string;
     candidateLog?: string[];
+    desktopRoot?: string;
   } | null = null;
   /** 最近一次启动是否走 cmd 外壳（决定停止时是否需要按进程树结束） */
   let usedCmdScript = false;
@@ -293,6 +296,7 @@ export function createProcessRunner(
       let usedSource: LaunchSource | undefined;
       let usedReason: string | undefined;
       let usedCandidates: string[] | undefined;
+      let usedDesktopRoot: string | undefined;
       if (platform === 'win32') {
         // Windows：.cmd 是批处理 shim，Node v24 直接 spawn 会同步抛 EINVAL，
         // （cmd 模式的参数前缀由 launcher.cmdScriptArgs 生成：脚本路径需双层引号，否则空格处被截断）
@@ -324,6 +328,7 @@ export function createProcessRunner(
         usedSource = resolution.source;
         usedReason = resolution.reason;
         usedCandidates = resolution.candidateLog;
+        usedDesktopRoot = resolution.desktopRoot;
         // 记录执行方式：cmd 模式下真正跑 dsh 的是 cmd.exe 的子进程，
         // 停止时必须按进程树结束，否则会留下孤儿进程占着端口（见 stopChild）。
         usedCmdScript = resolution.mode === 'cmd';
@@ -343,7 +348,7 @@ export function createProcessRunner(
       lastChild = child;
       lastStart = {
         command, args: spawnArgs, source: usedSource,
-        launchReason: usedReason, candidateLog: usedCandidates,
+        launchReason: usedReason, candidateLog: usedCandidates, desktopRoot: usedDesktopRoot,
       };
       return child;
     },

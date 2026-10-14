@@ -7,6 +7,7 @@ import { initI18n, t } from './i18n';
 import { readConfig, buildChildEnv, type DshConfig } from './config';
 import { probeService } from './service/detect';
 import { createProcessRunner, findInPath, findInPathPosix, resolveDshPackageJsonPath } from './service/process';
+import { desktopRootFromShim } from './service/launcher';
 import { ServiceManager, type ManagerOptions } from './service/manager';
 import { DshPanelProvider } from './panel/provider';
 import { StatusBarController } from './statusbar';
@@ -151,6 +152,22 @@ function describeDshExecutable(config: DshConfig): { path: string | null; versio
         if (typeof version === 'string' && version !== '') return { path: shim, version };
       } catch {
         /* 读取失败按版本未知处理 */
+      }
+    }
+    // DSH Desktop 的命令是自研包装脚本（没有 npm 布局），但它的运行时包清单在 cli 目录下：
+    // 不读这一处，环境信息头永远显示「dsh 版本: 未知」，问题报告少一关键信息。
+    const desktopRoot = desktopRootFromShim(shim);
+    if (desktopRoot !== null) {
+      for (const rel of [
+        join('resources', 'runtime', 'cli', 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
+        join('resources', 'runtime', 'cli', 'package.json'),
+      ]) {
+        try {
+          const version = JSON.parse(readFileSync(join(desktopRoot, rel), 'utf8')).version;
+          if (typeof version === 'string' && version !== '') return { path: shim, version };
+        } catch {
+          /* 该候选不存在：试下一个 */
+        }
       }
     }
   }

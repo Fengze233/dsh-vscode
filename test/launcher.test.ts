@@ -1,7 +1,10 @@
 // test/launcher.test.ts — 执行入口裁决的单元测试（全部依赖注入，可在 Linux 上覆盖 Windows 分支）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { binJsFromShim, cmdScriptArgs, containsPath, desktopBinJsCandidate, resolveLaunch, type LaunchInput } from '../src/service/launcher';
+import {
+  binJsFromShim, cmdScriptArgs, containsPath, desktopBinJsCandidate,
+  desktopRootFromShim, isDesktopInstallPath, resolveLaunch, type LaunchInput,
+} from '../src/service/launcher';
 
 /** 构造一份「文件系统里存在这些路径」的 exists 实现 */
 function existsOf(...paths: string[]): (p: string) => boolean {
@@ -157,4 +160,27 @@ test('桌面端/显式脚本：同目录存在 bin.js 时优先 node 直跑，�
   assert.equal(viaCmd.mode, 'cmd');
   assert.equal(viaCmd.verbatimCommandLine, true);
   assert.ok(viaCmd.candidateLog.some((line) => line.includes('bin.js not found')));
+});
+
+test('desktopRootFromShim / isDesktopInstallPath：识别 DSH Desktop 安装根与路径归属', () => {
+  const root = 'C:\\Users\\u\\AppData\\Local\\Programs\\DeepSeek Harness';
+  assert.equal(desktopRootFromShim(DESKTOP_CMD), root);
+  assert.equal(desktopRootFromShim('C:\\Users\\u\\AppData\\Roaming\\npm\\dsh.cmd'), null);
+  assert.equal(isDesktopInstallPath(DESKTOP_CMD), true);
+  assert.equal(isDesktopInstallPath('C:\\Users\\u\\AppData\\Roaming\\npm\\dsh.cmd'), false);
+});
+
+// 真机日志反馈：PATH 里只有 Desktop 命令时，npm 分支仍去推导 npm 布局的 bin.js，
+// 每次启动都刷一长串「bin.js missing」且多算一个候选。这里把该路径彻底排除。
+test('npm 探测不把 DSH Desktop 的命令当成 npm 全局 shim', () => {
+  const desktopBin = 'C:\\Users\\u\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin';
+  const r = resolveLaunch(baseInput({
+    env: { path: `C:\\Windows;${desktopBin}`, localAppData: 'C:\\Users\\u\\AppData\\Local' },
+    exists: existsOf(DESKTOP_CMD),
+  }));
+  assert.ok(r);
+  assert.equal(r.source, 'desktop');
+  assert.equal(r.desktopRoot, 'C:\\Users\\u\\AppData\\Local\\Programs\\DeepSeek Harness');
+  assert.ok(r.candidateLog.some((line) => line.includes('DSH Desktop install, not an npm global shim')));
+  assert.ok(!r.candidateLog.some((line) => line.includes('bin.js missing')), '不得再报 npm bin.js 缺失');
 });

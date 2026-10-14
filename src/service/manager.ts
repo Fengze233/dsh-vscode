@@ -121,7 +121,7 @@ export class ServiceManager {
 
   /** 当前状态快照（副本，防外部篡改） */
   /** 最近一次启动的实际命令/参数/来源（环境信息头与启动日志共用；未启动时为 null） */
-  get lastStart(): { command: string; args: string[]; source?: string; launchReason?: string } | null {
+  get lastStart(): { command: string; args: string[]; source?: string; launchReason?: string; desktopRoot?: string } | null {
     return this.deps.processRunner.lastStart ?? null;
   }
 

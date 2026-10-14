@@ -30,6 +30,8 @@ export interface LaunchResolution {
   /** cmd 模式且脚本路径已被引号包裹时置真：调用方须用 windowsVerbatimArguments spawn，
    *  否则 Node 会再转义一层引号，cmd 收到字面引号并报「文件名、目录名或卷标语法不正确」。 */
   verbatimCommandLine?: boolean;
+  /** 命中的 DSH Desktop 安装根（仅 desktop 来源有值），供版本探测使用 */
+  desktopRoot?: string;
 }
 
 /** 裁决输入（全部注入，便于单测与跨平台覆盖 Windows 分支） */
@@ -111,6 +113,22 @@ export function containsPath(parent: string, target: string): boolean {
   return tt.startsWith(`${pp}/`);
 }
 
+/**
+ * 从 Desktop 的 `dsh.cmd` 路径反推 Desktop 安装根（`…\DeepSeek Harness`）。
+ * 用途：① 让「npm 装法探测」不把 Desktop 的命令误当成 npm 全局 shim（否则每次启动都报
+ * 「bin.js missing」并多算一次候选）；② 供版本探测定位 `resources\runtime\cli` 下的包清单。
+ * 返回 null 表示不像 Desktop 的标准布局（此时不做任何特殊处理）。
+ */
+export function desktopRootFromShim(dshCmdPath: string): string | null {
+  const m = /^(.*[\\/]DeepSeek Harness)[\\/]resources[\\/]runtime[\\/]/i.exec(dshCmdPath);
+  return m === null ? null : m[1];
+}
+
+/** 该路径是否位于 DSH Desktop 安装目录内（用于把 npm 探测限定在真正的 npm 全局目录） */
+export function isDesktopInstallPath(candidate: string): boolean {
+  return desktopRootFromShim(candidate) !== null;
+}
+
 /** 校验 preference：非法值回退 auto（与 config.ts 的规范化保持同一语义） */
 function normalizePreference(raw: string | undefined): LaunchPreference {
   return raw === 'npm' || raw === 'desktop' ? raw : 'auto';
@@ -159,7 +177,13 @@ export function resolveLaunch(input: LaunchInput): LaunchResolution | null {
   }
 
   // 2) 两个来源各自的可用性判定（都做完整判定，便于回退与日志）
-  const npmShim = isWin ? findInPathWin('dsh.cmd', env.path, exists) : null;
+  const npmShimRaw = isWin ? findInPathWin('dsh.cmd', env.path, exists) : null;
+  // PATH 里若只有 DSH Desktop 的命令，它并不是 npm 全局 shim：直接判 npm 不可用，
+  // 不再去推导 npm 布局的 bin.js（真机日志里那一长串「bin.js missing」即由此而来）。
+  const npmShim = npmShimRaw !== null && isDesktopInstallPath(npmShimRaw) ? null : npmShimRaw;
+  if (npmShimRaw !== null && npmShim === null) {
+    log.push(`npm: skipped ${npmShimRaw} (DSH Desktop install, not an npm global shim)`);
+  }
   const npmBinJs = npmShim === null ? null : binJsFromShim(npmShim);
   // 关键：推导出的 bin.js 必须真实存在才算 npm 可用（issue #30 的根因就在这里）
   const npmOk = npmShim !== null && npmBinJs !== null && exists(npmBinJs);
@@ -192,12 +216,13 @@ export function resolveLaunch(input: LaunchInput): LaunchResolution | null {
         source: 'desktop', mode: 'node', executablePath: desktopBinJs as string,
         argsPrefix: [desktopBinJs as string],
         fellBack, reason: fellBack ? 'desktop via node bin.js (preferred npm unavailable)' : 'desktop via node bin.js',
-        candidateLog: log,
+        candidateLog: log, desktopRoot: desktopRootFromShim(desktopCmd as string) ?? undefined,
       }
     : {
         source: 'desktop', mode: 'cmd', executablePath: desktopCmd as string,
         argsPrefix: cmdScriptArgs(desktopCmd as string), verbatimCommandLine: true,
         fellBack, reason: fellBack ? 'desktop (preferred npm unavailable)' : 'desktop', candidateLog: log,
+        desktopRoot: desktopRootFromShim(desktopCmd as string) ?? undefined,
       };
 
   // 3) 首选来源：auto 视为先 npm（与用户确认的规则一致）
