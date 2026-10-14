@@ -159,6 +159,25 @@ function describeDshExecutable(config: DshConfig): { path: string | null; versio
 }
 
 /**
+ * 判断配置变更后是否必须作废旧握手（PR #35 的时序隐患修复）。
+ *
+ * 背景：这段逻辑在 `reconfigure` 之前执行，拿到的快照反映的是**旧目标**，
+ * 所以不能直接用它为「新目标是否已有服务」背书。
+ *
+ * 规则（与既有行为取并集）：
+ * - host/port 变了 → 连的是另一个服务，旧握手不能替新目标背书 → 必须重握手；
+ * - 不是「就绪的外部服务」→ 插件自启的服务会按新 profile 重启 → 必须重握手；
+ * - 其余情况（端点未变、旧目标本就是外部就绪服务）→ 复用握手结果，只重装该 profile 的桥接。
+ */
+export function shouldResetHandshake(
+  changed: { profile: boolean; endpoint: boolean },
+  snapshot: { state: string; owned: boolean } | null,
+): boolean {
+  if (changed.endpoint) return true;
+  return !(snapshot?.state === 'ready' && !snapshot.owned);
+}
+
+/**
  * 输出环境信息头：版本/平台/可执行文件/关键配置 + **实际启动来源**。
  *
  * 为什么做成可重复调用的函数：激活时服务尚未启动，拿不到「实际入口」；
@@ -681,17 +700,20 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('dsh.bridge.uninstall', () => void uninstallBridgeCmd()),
     vscode.commands.registerCommand('dsh.cleanupImageCache', () => void cleanupImageCacheCmd()),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('dsh.profile')) {
+      // 目标变化判定见 shouldResetHandshake 的注释（纯函数，单独单测）
+      const changed = {
+        profile: e.affectsConfiguration('dsh.profile'),
+        endpoint: e.affectsConfiguration('dsh.host') || e.affectsConfiguration('dsh.port'),
+      };
+      if (changed.profile || changed.endpoint) {
         const next = readConfig().config;
         if (installOpts.profile !== next.profile) {
           installOpts.profile = next.profile;
-          // 仅就绪的外部服务继续复用现有握手；其它情况等待新服务重新握手。
-          const snapshot = manager?.getSnapshot();
-          if (!(snapshot?.state === 'ready' && !snapshot.owned)) {
-            clearHandshakeTimer();
-            handshakeOk = undefined;
-          }
           install = next.bridgeEnabled ? safeInstallBridge() : null;
+        }
+        if (shouldResetHandshake(changed, manager?.getSnapshot() ?? null)) {
+          clearHandshakeTimer();
+          handshakeOk = undefined;
         }
       }
       if (e.affectsConfiguration('dsh')) onConfigChanged();

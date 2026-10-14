@@ -5,7 +5,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ConfigurationChangeEvent, WebviewViewProvider } from 'vscode';
-import { activate, deactivate } from '../src/extension';
+import { activate, deactivate, shouldResetHandshake } from '../src/extension';
 import { ServiceManager, type ManagerOptions, type ServiceSnapshot } from '../src/service/manager';
 import { BRIDGE_BEGIN_MARK } from '../src/bridge/installer';
 import * as vscodeStub from './vscode-stub';
@@ -105,4 +105,26 @@ test('profile 变更先安装桥接再重新配置服务，仅保留就绪外部
     rmSync(bridgeSourceDir, { recursive: true, force: true });
     rmSync(dshHome, { recursive: true, force: true });
   }
+});
+
+// PR #35 隐患：清握手只看「就绪 且 非自启」，而快照在 reconfigure 之前取、反映旧目标。
+// 端口 + profile 同时改、且新端口上已有外部服务时，旧的 handshakeOk=true 被保留，
+// 新页面若不握手也会因「已回执」早退、永不武装超时 → 桥接永久误报健康。
+// 判据抽成纯函数后逐条锁定：
+test('shouldResetHandshake：端点变化必重握手；仅 profile 变时只保留「就绪外部服务」的握手', () => {
+  const ready = { state: 'ready', owned: false };
+  const readyOwned = { state: 'ready', owned: true };
+  const idle = { state: 'idle', owned: false };
+  // ① 端点（host/port）变了：无论快照是不是就绪外部服务，都必须重握手
+  assert.equal(shouldResetHandshake({ profile: false, endpoint: true }, ready), true);
+  assert.equal(shouldResetHandshake({ profile: true, endpoint: true }, ready), true);
+  assert.equal(shouldResetHandshake({ profile: true, endpoint: true }, readyOwned), true);
+  assert.equal(shouldResetHandshake({ profile: true, endpoint: true }, null), true);
+  // ② 只换 profile：就绪的外部服务可复用握手（同一端口上的服务没变）
+  assert.equal(shouldResetHandshake({ profile: true, endpoint: false }, ready), false);
+  // ③ 只换 profile：自启服务会按新 profile 重启 → 必须等新页面握手
+  assert.equal(shouldResetHandshake({ profile: true, endpoint: false }, readyOwned), true);
+  // ④ 服务未就绪/无快照：等新握手
+  assert.equal(shouldResetHandshake({ profile: true, endpoint: false }, idle), true);
+  assert.equal(shouldResetHandshake({ profile: true, endpoint: false }, null), true);
 });
