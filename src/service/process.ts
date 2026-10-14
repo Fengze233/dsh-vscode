@@ -327,7 +327,12 @@ export function createProcessRunner(
         // 记录执行方式：cmd 模式下真正跑 dsh 的是 cmd.exe 的子进程，
         // 停止时必须按进程树结束，否则会留下孤儿进程占着端口（见 stopChild）。
         usedCmdScript = resolution.mode === 'cmd';
-        child = spawnImpl(command, spawnArgs, spawnOptions);
+        // verbatim：脚本路径已在 argsPrefix 里用引号包裹，必须让 Node 原样传命令行，
+        // 否则 Node 会再转义一层引号，cmd 收到字面引号 → 「文件名、目录名或卷标语法不正确」。
+        const spawnOptionsForLaunch = resolution.verbatimCommandLine === true
+          ? { ...spawnOptions, windowsVerbatimArguments: true }
+          : spawnOptions;
+        child = spawnImpl(command, spawnArgs, spawnOptionsForLaunch);
       } else {
         // 非 Windows 分支完全不变：仍 spawn 'dsh'（或显式 executablePath）
         command = executablePath && executablePath.length > 0 ? executablePath : 'dsh';

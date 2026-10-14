@@ -78,10 +78,10 @@ test('Windows：注入 PATH 命中 dsh.cmd 后以 node 直跑 bin.js 启动，de
   }
 });
 
-test('Windows：bin.js 不存在时回退执行桌面端 dsh.cmd（cmd.exe /d /s /c）', () => {
-  const calls: { cmd: string; args: string[] }[] = [];
-  const spawnImpl: SpawnFn = (cmd, args) => {
-    calls.push({ cmd, args });
+test('Windows：bin.js 不存在时回退执行桌面端 dsh.cmd（cmd.exe + 逐字命令行）', () => {
+  const calls: { cmd: string; args: string[]; opts: SpawnOptions }[] = [];
+  const spawnImpl: SpawnFn = (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
     return new FakeChild();
   };
   const desktopLap = 'C:\\Users\\u\\AppData\\Local';
@@ -98,6 +98,8 @@ test('Windows：bin.js 不存在时回退执行桌面端 dsh.cmd（cmd.exe /d /s
     '--profile', 'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
   assert.equal(runner.lastStart?.source, 'desktop');
+  // 关键：必须逐字传命令行，否则 Node 二次转义引号（真机 0.4.3-test2 实测报语法错误）
+  assert.equal(calls[0].opts.windowsVerbatimArguments, true);
 });
 
 test('Windows：npm 与桌面端都不可用时抛 ENOENT（保持既有「未找到 dsh」语义）', () => {
@@ -495,4 +497,23 @@ test('stopChild：node 模式（npm 装法）不调用 taskkill，保持既有�
   await runner.stopChild(child);
   assert.deepEqual(killed, [], 'node 直跑模式没有 cmd 外壳，不需要 taskkill');
   assert.deepEqual(child.killed, ['SIGTERM', 'SIGKILL']);
+});
+
+test('Windows：桌面端目录存在 bin.js 时改用 node 直跑（不经过 cmd，无引号风险）', () => {
+  const calls: { cmd: string; args: string[]; opts: SpawnOptions }[] = [];
+  const spawnImpl: SpawnFn = (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    return new FakeChild();
+  };
+  const desktopCmd = 'C:\\Users\\u\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd';
+  const desktopBinJs = 'C:\\Users\\u\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js';
+  const runner = createProcessRunner(
+    spawnImpl, 'win32', 3000,
+    (p) => p === desktopCmd || p === desktopBinJs || p === 'C:\\Program Files\\nodejs\\node.exe',
+    { execPath: 'C:\\Code.exe', path: 'C:\\Program Files\\nodejs', localAppData: 'C:\\Users\\u\\AppData\\Local', electronVersion: '43.0.0' },
+  );
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
+  assert.equal(calls[0].cmd, 'C:\\Program Files\\nodejs\\node.exe');
+  assert.deepEqual(calls[0].args.slice(0, 1), [desktopBinJs]);
+  assert.equal(calls[0].opts.windowsVerbatimArguments, undefined, 'node 直跑不需要逐字命令行');
 });

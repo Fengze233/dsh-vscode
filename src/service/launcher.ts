@@ -27,6 +27,9 @@ export interface LaunchResolution {
   reason: string;
   /** 依次尝试过的候选与失败原因（启动失败或降级时输出，便于远程排查） */
   candidateLog: string[];
+  /** cmd 模式且脚本路径已被引号包裹时置真：调用方须用 windowsVerbatimArguments spawn，
+   *  否则 Node 会再转义一层引号，cmd 收到字面引号并报「文件名、目录名或卷标语法不正确」。 */
+  verbatimCommandLine?: boolean;
 }
 
 /** 裁决输入（全部注入，便于单测与跨平台覆盖 Windows 分支） */
@@ -82,6 +85,16 @@ export function cmdScriptArgs(scriptPath: string): string[] {
 }
 
 /**
+ * Desktop 装法里与 `dsh.cmd` 同目录的真实入口 bin.js 候选路径。
+ *
+ * 若它存在，就能像 npm 装法一样「node 直跑 bin.js」——完全不需要 cmd 引号这一层，
+ * 也就不会有「路径含空格被截断 / 引号被二次转义」这类平台差异问题。
+ */
+export function desktopBinJsCandidate(desktopCmdPath: string): string {
+  return win32Path.join(win32Path.dirname(desktopCmdPath), 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
+}
+
+/**
  * 判断 target 是否位于 parent 之内（跨平台：Windows 的 `\` 与 POSIX 的 `/` 同等对待）。
  *
  * 为什么不用 startsWith(parent + '/')：Windows 路径用反斜杠拼接，拼 '/' 后恒不成立，
@@ -129,11 +142,18 @@ export function resolveLaunch(input: LaunchInput): LaunchResolution | null {
             source: 'explicit', mode: 'node', executablePath: explicit, argsPrefix: [explicit],
             fellBack: false, reason: 'explicit bin.js', candidateLog: log,
           }
-        : {
-            source: 'explicit', mode: 'cmd', executablePath: explicit,
-            argsPrefix: cmdScriptArgs(explicit),
-            fellBack: false, reason: 'explicit script (no bin.js derivation)', candidateLog: log,
-          };
+        : (exists(desktopBinJsCandidate(explicit))
+            ? {
+                // 与 npm 装法同构：同目录存在 bin.js 时直接 node 直跑，绕开 cmd 引号层
+                source: 'explicit', mode: 'node', executablePath: desktopBinJsCandidate(explicit),
+                argsPrefix: [desktopBinJsCandidate(explicit)],
+                fellBack: false, reason: 'explicit script dir ships bin.js (node direct)', candidateLog: log,
+              }
+            : {
+                source: 'explicit', mode: 'cmd', executablePath: explicit,
+                argsPrefix: cmdScriptArgs(explicit), verbatimCommandLine: true,
+                fellBack: false, reason: 'explicit script (cmd, verbatim command line)', candidateLog: log,
+              });
     }
     log.push(`explicit: ${explicit} not found`);
   }
@@ -162,11 +182,23 @@ export function resolveLaunch(input: LaunchInput): LaunchResolution | null {
     source: 'npm', mode: 'node', executablePath: npmBinJs as string, argsPrefix: [npmBinJs as string],
     fellBack, reason: fellBack ? 'npm (preferred desktop unavailable)' : 'npm', candidateLog: log,
   });
-  const makeDesktop = (fellBack: boolean): LaunchResolution => ({
-    source: 'desktop', mode: 'cmd', executablePath: desktopCmd as string,
-    argsPrefix: cmdScriptArgs(desktopCmd as string),
-    fellBack, reason: fellBack ? 'desktop (preferred npm unavailable)' : 'desktop', candidateLog: log,
-  });
+  // 桌面端优先「node 直跑 bin.js」（同目录布局允许时）；否则才用 cmd + verbatim 命令行
+  const desktopBinJs = desktopCmd === null ? null : desktopBinJsCandidate(desktopCmd);
+  const desktopDirect = desktopBinJs !== null && exists(desktopBinJs);
+  if (desktopBinJs !== null && !desktopDirect) log.push(`desktop: bin.js not found at ${desktopBinJs}, will use cmd wrapper`);
+
+  const makeDesktop = (fellBack: boolean): LaunchResolution => desktopDirect
+    ? {
+        source: 'desktop', mode: 'node', executablePath: desktopBinJs as string,
+        argsPrefix: [desktopBinJs as string],
+        fellBack, reason: fellBack ? 'desktop via node bin.js (preferred npm unavailable)' : 'desktop via node bin.js',
+        candidateLog: log,
+      }
+    : {
+        source: 'desktop', mode: 'cmd', executablePath: desktopCmd as string,
+        argsPrefix: cmdScriptArgs(desktopCmd as string), verbatimCommandLine: true,
+        fellBack, reason: fellBack ? 'desktop (preferred npm unavailable)' : 'desktop', candidateLog: log,
+      };
 
   // 3) 首选来源：auto 视为先 npm（与用户确认的规则一致）
   if (preference !== 'desktop' && npmOk) return makeNpm(false);
