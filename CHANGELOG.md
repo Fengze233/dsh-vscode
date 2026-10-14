@@ -1,6 +1,26 @@
-## [Unreleased]
+## [Unreleased]（开发期 `0.4.3-testN`）
 
 ### 新增
+
+- **启动来源可选** `dsh.launchPreference`（`auto` / `npm` / `desktop`，默认 `auto`）与 `dsh.desktopCommandPath`：
+  首选的那种 `dsh` 安装不存在时自动改用另一种，并在日志与「复制日志」的环境信息头里写明实际来源与实际入口。
+- **DSH Desktop 启动支持**（issue #30、#31）：Windows 上 npm 全局安装与 Desktop 安装都能启动。
+  npm 装法仍以 `node <bin.js>` 直跑；Desktop 的 `dsh.cmd`（同目录没有 `node_modules` 布局）改为
+  `cmd.exe /d /s /c` 直接执行脚本本身，不再推导出不存在的 bin.js；`dsh.executablePath` 指向
+  `.cmd`/包装脚本时同样直接执行该脚本。
+
+### 修复
+
+- **面板里点图片/PDF 打不开**（issue #33）：交付物改用 `vscode.open` 打开，由 VS Code 自选编辑器
+  （图片预览 / 内建 PDF / 二进制占位页），不再用只能开文本编辑器的 `showTextDocument`。
+- **相对路径按错误基准解析**（issue #32）：桥接转发文件时携带**会话 cwd**（取法同 DSH 官方前端）；
+  取不到 cwd 时不阻塞点击，退回工作区根并在日志说明。
+- **切换 host/port 后桥接误报健康**（PR #35 隐患）：端点变化一律作废旧握手；仅换 profile 时，
+  只有「就绪的外部服务」继续复用握手，自启服务按新 profile 重启后等新页面握手。
+- **卸载钩子的写入面**（PR #35 隐患）：遍历 `profiles/` 时要求条目同时满足「名字合法、非符号链接、
+  realpath 仍在 profiles 内」，避免符号链接把 `$DSH_HOME` 之外的 `cordis.patch.yml` 改写掉。
+
+### 测试
 
 - **可配置 DSH profile**：新增 `dsh.profile`，默认 `web`，启动参数和桥接安装目录使用所选 profile。
 - **多 profile 桥接清理**：其它 profile 仍注册桥接时保留共享副本，最后一个使用者卸载后再清理。
