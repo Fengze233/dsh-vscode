@@ -20,9 +20,31 @@ export function buildOpenExternalMessage(url) {
   return { kind: 'openExternal', url };
 }
 
-// 构造"打开文件"消息（cwd 为会话工作目录，可选；无 cwd 时省略该字段）
-export function buildOpenFileMessage(path, cwd) {
-  return cwd === undefined ? { kind: 'openFile', path } : { kind: 'openFile', path, cwd };
+// 构造"打开文件"消息（cwd 为会话工作目录，可选；无 cwd 时改为携带诊断字段）
+export function buildOpenFileMessage(path, cwd, missReason) {
+  if (cwd !== undefined) return { kind: 'openFile', path, cwd };
+  return missReason === undefined ? { kind: 'openFile', path } : { kind: 'openFile', path, missReason };
+}
+
+/**
+ * 诊断「为什么没拿到会话 cwd」：把几种情形区分开，让扩展侧的提示能直接指出原因，
+ * 用户一次反馈即可定位（否则只能看到笼统的「无法解析路径」）。
+ * 只用于诊断文案，不参与任何路径解析；任何异常都归为 'probe-failed'。
+ */
+export function cwdMissReason(ctx, sessionId) {
+  try {
+    if (!ctx) return 'no-ctx';
+    const list = ctx.sessions && ctx.sessions.list;
+    if (!list || typeof list.getSnapshot !== 'function') return 'no-sessions-api';
+    if (typeof sessionId !== 'string' || sessionId === '') return 'no-session-id';
+    const byId = list.getSnapshot().byId;
+    const row = byId ? byId[sessionId] : undefined;
+    if (!row) return 'session-not-in-list';
+    if (typeof row.cwd !== 'string' || row.cwd === '') return 'session-has-no-cwd';
+    return 'unexpected';
+  } catch (err) {
+    return 'probe-failed';
+  }
 }
 
 /**

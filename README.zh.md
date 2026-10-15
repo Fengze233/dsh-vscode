@@ -233,7 +233,7 @@ profile 名称可包含 ASCII 字母、数字、点、下划线与连字符，�
 
 ```bash
 npm install
-npm run test          # 315 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话）
+npm run test          # 318 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话）
 npm run compile       # 构建 out/extension.js
 npm run watch         # 监听构建
 npm run typecheck     # 类型检查

@@ -226,8 +226,11 @@ export async function handleBridgeMessage(msg: PanelMessage, deps: BridgeMessage
         deps.showWarning(`无法打开文件：${r.path}（${errSummary(err)}）`);
       }
     } else {
-      // 路径无法解析（危险协议或缺少基准目录）：仅弹提示，不打断面板与桥接流程
-      deps.showWarning(`无法解析路径：${msg.path}`);
+      // 路径无法解析（危险协议或缺少基准目录）：把「缺哪个基准」与出路一起说清楚。
+      // 相对路径（如 a.png）必须有基准：会话 cwd 或 VS Code 工作区根；两者都没有时只能提示改用绝对路径。
+      const reason = msg.missReason !== undefined ? `，会话目录不可用（${msg.missReason}）` : '';
+      const base = deps.workspaceRoot === undefined ? '未打开文件夹' : `工作区根 ${deps.workspaceRoot}`;
+      deps.showWarning(`无法解析路径：${msg.path}（${base}${reason}）——请改用绝对路径，或在 VS Code 中打开该文件所在文件夹`);
     }
     return;
   }

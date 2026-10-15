@@ -14,7 +14,7 @@ export type PanelMessage =
   | { type: 'copyUrl' }
   | { type: 'showLogs' }
   | { type: 'bridgeOpenExternal'; url: string }
-  | { type: 'bridgeOpenFile'; path: string; cwd?: string }
+  | { type: 'bridgeOpenFile'; path: string; cwd?: string; missReason?: string }
   | { type: 'bridgeCopyText'; text: string; requestId: string }
   | { type: 'bridgeReadText'; requestId: string }
   | { type: 'bridgeReadTextAck'; requestId: string; ok: boolean; text?: string }
@@ -179,7 +179,11 @@ if (iframeEl) {
     if (d && d.kind === 'openExternal' && typeof d.url === 'string') { vscode.postMessage({ type: 'bridgeOpenExternal', url: d.url }); return; }
     // 打开文件：转发给扩展 → showTextDocument（携带可选 cwd）
     if (d && d.kind === 'openFile' && typeof d.path === 'string') {
-      vscode.postMessage({ type: 'bridgeOpenFile', path: d.path, cwd: typeof d.cwd === 'string' ? d.cwd : undefined });
+      vscode.postMessage({
+        type: 'bridgeOpenFile', path: d.path,
+        cwd: typeof d.cwd === 'string' ? d.cwd : undefined,
+        missReason: typeof d.missReason === 'string' ? d.missReason : undefined,
+      });
       return;
     }
     // 复制文本：转发给扩展 → vscode.env.clipboard.writeText（跨源 iframe 原生剪贴板 API 被 VS Code 拦截）
