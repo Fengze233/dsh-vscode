@@ -23,6 +23,8 @@ export interface ServiceSnapshot {
 
 /** 管理器配置 */
 export interface ManagerOptions {
+  /** DSH profile 名称（默认 web） */
+  profile?: string;
   host: string;
   port: number;
   extraArgs: string[];
@@ -35,6 +37,10 @@ export interface ManagerOptions {
   pollMs: number;
   /** dsh 可执行文件绝对路径（非空时优先于平台默认命令名使用） */
   executablePath?: string;
+  /** 首选启动来源（dsh.launchPreference：auto/npm/desktop） */
+  launchPreference?: string;
+  /** 桌面端命令绝对路径（dsh.desktopCommandPath；空串 = 自动探测） */
+  desktopCommandPath?: string;
   /** 是否允许 dsh web 打开浏览器（true=不传 --no-open；默认追加 --no-open） */
   openInBrowser?: boolean;
   /** 启动总超时（毫秒，默认 45000，可用 dsh.startTimeoutMs 调整；issue #23） */
@@ -114,6 +120,11 @@ export class ServiceManager {
   }
 
   /** 当前状态快照（副本，防外部篡改） */
+  /** 最近一次启动的实际命令/参数/来源（环境信息头与启动日志共用；未启动时为 null） */
+  get lastStart(): { command: string; args: string[]; source?: string; launchReason?: string; desktopRoot?: string } | null {
+    return this.deps.processRunner.lastStart ?? null;
+  }
+
   getSnapshot(): ServiceSnapshot {
     return { ...this.snapshot };
   }
@@ -252,11 +263,14 @@ export class ServiceManager {
     for (;;) {
       try {
         child = this.deps.processRunner.startDsh({
+          profile: this.opts.profile,
           host: this.opts.host,
           port: this.opts.port,
           extraArgs: this.opts.extraArgs,
           cwd: cwdForSpawn,
           executablePath: this.opts.executablePath,
+          launchPreference: this.opts.launchPreference,
+          desktopCommandPath: this.opts.desktopCommandPath,
           // noOpenDisabled 后视为"用户要求弹浏览器"（即不追加 --no-open），兼容旧版 dsh
           openInBrowser: this.noOpenDisabled ? true : this.opts.openInBrowser,
           // 额外环境变量（issue #18）：未配置时保持 undefined（runner 不传 env，完全继承父进程）
@@ -296,6 +310,14 @@ export class ServiceManager {
     // 记录实际执行的启动命令（含解析出的 node 路径与全部参数），供问题排查对照环境差异
     const lastStart = this.deps.processRunner.lastStart;
     if (lastStart) {
+      // 明确写出「实际用了哪种装法、是否回退、候选为何失败」：
+      // npm 装法与 DSH Desktop 装法的排查全靠这一行（spec 5.2）。
+      const src = lastStart.source ?? 'default';
+      const detail = lastStart.launchReason ? `，原因=${lastStart.launchReason}` : '';
+      this.deps.log(`[process] 启动来源: ${src}${detail}`);
+      if (lastStart.candidateLog !== undefined && lastStart.candidateLog.length > 0) {
+        this.deps.log(`[process] 候选尝试: ${lastStart.candidateLog.join(' | ')}`);
+      }
       this.deps.log(`[process] 启动命令: ${lastStart.command} ${lastStart.args.join(' ')}`);
     }
 
@@ -462,9 +484,10 @@ export class ServiceManager {
     }
   }
 
-  /** 应用新配置；仅 host/port 变化且自启服务在跑时自动重启（其余项原地生效） */
+  /** 应用新配置；profile/host/port 变化且自启服务在跑时自动重启 */
   reconfigure(opts: ManagerOptions): Promise<ServiceSnapshot> {
-    const targetChanged = this.opts.host !== opts.host || this.opts.port !== opts.port;
+    const targetChanged = this.opts.host !== opts.host || this.opts.port !== opts.port ||
+      (this.opts.profile ?? 'web') !== (opts.profile ?? 'web');
     this.opts = opts;
     // 同步启动超时（issue #23）：设置项改后立即生效，否则要重载窗口才生效
     if (opts.startTimeoutMs !== undefined) {

@@ -92,6 +92,26 @@ test('handleBridgeMessage openFile 路径无法解析时提示用户', async () 
   assert.equal(warnings.length, 1);
   assert.ok(warnings[0].includes('https://x.com/a'), `提示应含原始路径，实际：${warnings[0]}`);
 });
+
+// 真机反馈（0.4.3-test4）：点纯文件名 a.png 时只看到「无法解析路径：a.png」，无法判断缺什么。
+// 现在提示必须写明「缺哪个基准 + 桥接侧的诊断原因 + 出路」。
+test('handleBridgeMessage openFile 无法解析时提示缺哪个基准（含桥接诊断原因）', async () => {
+  const warnings: string[] = [];
+  await handleBridgeMessage(
+    { type: 'bridgeOpenFile', path: 'a.png', missReason: 'no-ctx' },
+    {
+      openExternal: async () => true,
+      openTextDocument: async () => {},
+      showWarning: (m) => { warnings.push(m); },
+      // workspaceRoot 未提供：模拟 VS Code 没打开文件夹（真机日志里就是「工作区: (无)」）
+    },
+  );
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0].includes('a.png'), `应含原始路径：${warnings[0]}`);
+  assert.ok(warnings[0].includes('未打开文件夹'), `应说明工作区根缺失：${warnings[0]}`);
+  assert.ok(warnings[0].includes('no-ctx'), `应带桥接侧诊断原因：${warnings[0]}`);
+  assert.ok(warnings[0].includes('绝对路径'), `应给出路：${warnings[0]}`);
+});
 // —— v0.3.0 图片缓存落盘/删除（路径安全） ——
 test('saveImageToCwd：合法写入并登记，返回绝对路径', async () => {
   const written: string[] = [];

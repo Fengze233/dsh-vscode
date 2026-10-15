@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     // —— 握手状态 ——
     let bridgeToken = ""; // 父页面下发的握手 token；未握手前为空，不激活任何拦截
     // 桥接包版本（与插件版本统一，随包发布；安装器按「版本不一致或 client.js 内容不一致」强制重装）
-    const BRIDGE_VERSION = "0.4.2";
+    const BRIDGE_VERSION = "0.4.3";
 
     // —— 剪贴板写桥接：VS Code webview 对跨源 iframe 的 navigator.clipboard.writeText 有权限拦截 ——
     // 背景：即使 iframe 声明 allow="clipboard-write"，VS Code（Electron）仍会拒绝写入
@@ -455,9 +455,26 @@ window.__ModuleLoader__.load({
           if (path !== null && path !== "") {
             e.preventDefault();
             e.stopPropagation();
-            // openFile 消息仍发送 path；不带 cwd 字段（工作区同步已移除，会话 cwd 不再维护），
-            // 扩展侧以工作区根目录作为相对路径解析兜底。
-            parent.postMessage(buildOpenFileMessage(path), "*");
+            // 带上会话 cwd：DSH 会话 cwd 与 VS Code 工作区根不一致时，
+            // 相对路径必须按会话 cwd 解析，否则会打开错文件或报不存在（issue #32）。
+            // 取不到 cwd 时不带该字段，由扩展侧退回工作区根兜底（旧行为）。
+            // 取 cwd 只为「相对路径按会话目录解析」：DSH 页面结构变化时不能让整个点击变哑，
+            // 因此取值包一层 try/catch，失败就按旧行为（不带 cwd）转发。
+            let sessionCwd;
+            let cwdMiss;
+            try {
+              sessionCwd = resolveSessionCwd(dshCtx, lastSeenSessionId);
+              // 取不到时记录「卡在哪一步」：扩展侧的提示会把它一并显示出来，
+              // 用户无需开 DevTools 就能反馈（no-ctx = cordis 未注入上下文）。
+              if (sessionCwd === undefined) cwdMiss = cwdMissReason(dshCtx, lastSeenSessionId);
+            } catch (err) {
+              cwdMiss = 'resolver-threw';
+              console.log("[dsh-vscode-bridge] resolveSessionCwd failed; open without cwd", err);
+            }
+            if (sessionCwd === undefined) {
+              console.log("[dsh-vscode-bridge] openFile without session cwd:", cwdMiss);
+            }
+            parent.postMessage(buildOpenFileMessage(path, sessionCwd, cwdMiss), "*");
           }
         }
       }, true); // 捕获阶段：先于 DSH 自身处理器
@@ -774,6 +791,12 @@ window.__ModuleLoader__.load({
       });
     }
 
+    // —— 会话 cwd（issue #32）：由 cordis apply(ctx) 注入根上下文后取值 ——
+    // 为什么要 ctx：DSH 把「当前会话的工作目录」挂在 ctx.sessions.list 的快照里
+    // （官方前端 dsh-client-ui-chat 即如此取），桥接自身没有别的可靠来源。
+    // 取不到时保持 undefined：转发不带 cwd，宿主退回工作区根（旧行为，绝不丢点击）。
+    let dshCtx = null;
+
     // —— 入口：立即可绑定的拦截先挂载；图片捕获在握手后才绑定 ——
     bindLinkInterception();
     bindImageCapture(); // 附件图片捕获常驻挂载（未握手/关闭时经 imageFallbackEnabled 过滤，零干扰）
@@ -789,8 +812,11 @@ window.__ModuleLoader__.load({
     }, true);
     window.addEventListener("blur", hideMenu);
     window.addEventListener("scroll", hideMenu, true);
-    // cordis 插件约定：apply 挂载点（本桥接无需额外挂载，保留占位以符合插件契约）
-    exports.apply = () => {};
+    // cordis 插件约定：apply 挂载点。DSH 在挂载本插件时把客户端根上下文传进来，
+    // 这里保存下来供文件转发取会话 cwd（issue #32）；不注册任何副作用，避免影响宿主。
+    exports.apply = (ctx) => {
+      dshCtx = ctx ?? null;
+    };
     return module.exports;
   }
 });

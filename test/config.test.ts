@@ -17,6 +17,7 @@ test('合法配置原样通过', () => {
   });
   assert.deepEqual(errors, []);
   assert.deepEqual(config, {
+    profile: 'web',
     host: 'localhost', port: 4000, autoStart: false, stopOnExit: false, extraArgs: ['--trusted-host', 'x:1'],
     bridgeEnabled: true, workspaceRootIndex: 0, silenceWarning: false, executablePath: '',
     openInBrowser: false, remoteEnabled: false, imageFallback: true,
@@ -26,12 +27,50 @@ test('合法配置原样通过', () => {
     env: {}, useEnvProxy: false,
     // issue #8：面板缩放（默认 1 = 不缩放）
     panelZoomLevel: 1,
+    // v0.4.3：启动来源首选（auto = npm 优先，没有再桌面端）与桌面端命令路径（空 = 自动探测）
+    launchPreference: 'auto', desktopCommandPath: '',
   });
 });
 
-test('缺省值回退默认', () => {
+test('launchPreference：默认 auto，非法值回退 auto 并记错误', () => {
+  assert.equal(normalizeConfig({}).config.launchPreference, 'auto');
+  assert.equal(normalizeConfig({ launchPreference: 'desktop' }).config.launchPreference, 'desktop');
+  assert.equal(normalizeConfig({ launchPreference: 'npm' }).config.launchPreference, 'npm');
+  const bad = normalizeConfig({ launchPreference: 'nope' });
+  assert.equal(bad.config.launchPreference, 'auto');
+  assert.ok(bad.errors.some((e) => e.includes('dsh.launchPreference')));
+});
+
+test('desktopCommandPath：默认空串；非字符串静默回退；相对路径记错误并视为空', () => {
+  assert.equal(normalizeConfig({}).config.desktopCommandPath, '');
+  assert.equal(normalizeConfig({ desktopCommandPath: 'C:\\x\\dsh.cmd' }).config.desktopCommandPath, 'C:\\x\\dsh.cmd');
+  assert.equal(normalizeConfig({ desktopCommandPath: 'C:\\x\\dsh.cmd' }).errors.length, 0);
+  assert.equal(normalizeConfig({ desktopCommandPath: 42 as never }).config.desktopCommandPath, '');
+  assert.equal(normalizeConfig({ desktopCommandPath: 42 as never }).errors.length, 0);
+  const rel = normalizeConfig({ desktopCommandPath: 'tools\\dsh.cmd' });
+  assert.equal(rel.config.desktopCommandPath, '');
+  assert.ok(rel.errors.some((e) => e.includes('dsh.desktopCommandPath')));
+});
+
+test('缺省值回退默认，profile 默认 web，支持自定义 profile', () => {
   const { config } = normalizeConfig({});
   assert.deepEqual(config, DEFAULTS);
+  assert.equal(config.profile, 'web');
+  assert.equal(normalizeConfig({ profile: 'web' }).config.profile, 'web');
+  const custom = normalizeConfig({ profile: 'custom-profile' });
+  assert.equal(custom.config.profile, 'custom-profile');
+  assert.deepEqual(custom.errors, []);
+  const trimmed = normalizeConfig({ profile: ' custom-profile ' });
+  assert.equal(trimmed.config.profile, 'custom-profile');
+  assert.deepEqual(trimmed.errors, []);
+  for (const profile of ['a', 'profile_2', '.custom', 'test.profile-3']) {
+    assert.equal(normalizeConfig({ profile }).config.profile, profile);
+  }
+  for (const profile of ['', ' ', '.', '..', '../other', 'a/b', 'a\\b', 'a\0b', '--help', '-custom', 'custom profile', 'C:profile', 42]) {
+    const invalid = normalizeConfig({ profile: profile as string });
+    assert.equal(invalid.config.profile, 'web');
+    assert.equal(invalid.errors.length, 1);
+  }
 });
 
 test('非回环地址回退默认并记录错误', () => {

@@ -2,9 +2,16 @@
 // 纯函数（normalizeConfig / isLoopbackHost）不依赖 vscode，可直接单测；
 // readConfig 是 vscode 设置的薄封装，供 extension.ts 使用。
 import * as vscode from 'vscode';
+// profile 名称规则放在无 vscode 依赖的模块里（卸载钩子也要用同一份，见 src/uninstall.ts）
+import { PROFILE_NAME_PATTERN } from './bridge/profile-name';
 
 /** 用户可配置的原始值（可能缺失/非法） */
 export interface RawDshConfig {
+  profile?: string;
+  /** 首选启动来源（dsh.launchPreference：auto/npm/desktop；非法值回退 auto） */
+  launchPreference?: string;
+  /** 桌面端命令绝对路径（dsh.desktopCommandPath；空串 = 自动探测默认位置） */
+  desktopCommandPath?: string;
   host?: string;
   port?: number;
   autoStart?: boolean;
@@ -36,6 +43,11 @@ export interface RawDshConfig {
 
 /** 规范化后的配置（均有合法默认值） */
 export interface DshConfig {
+  profile: string;
+  /** 首选启动来源（v0.4.3：auto = npm 优先，没有再桌面端） */
+  launchPreference: LaunchPreference;
+  /** 桌面端命令绝对路径（空串 = 按平台默认位置自动探测） */
+  desktopCommandPath: string;
   host: string;
   port: number;
   autoStart: boolean;
@@ -67,6 +79,9 @@ export interface DshConfig {
 
 /** 默认配置 */
 export const DEFAULTS: DshConfig = {
+  profile: 'web',
+  launchPreference: 'auto',
+  desktopCommandPath: '',
   host: '127.0.0.1',
   port: 3080,
   autoStart: true,
@@ -103,6 +118,13 @@ export const MIN_START_TIMEOUT_MS = 5000;
 /** 启动超时允许的上限（毫秒）：超过 10 分钟视为配置错误 */
 export const MAX_START_TIMEOUT_MS = 600000;
 
+// 对外仍从 config 导出该正则（package.test.ts 与 package.json 的 pattern 守卫依赖它）
+export { PROFILE_NAME_PATTERN };
+
+/** 首选启动来源取值（与 src/service/launcher.ts 的 LaunchPreference 一致） */
+export const LAUNCH_PREFERENCES = ['auto', 'npm', 'desktop'] as const;
+export type LaunchPreference = (typeof LAUNCH_PREFERENCES)[number];
+
 /** 安全边界：仅允许回环地址 */
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
@@ -117,6 +139,46 @@ export function isLoopbackHost(host: string): boolean {
  */
 export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors: string[] } {
   const errors: string[] = [];
+
+  // profile 必须是 DSH_HOME/profiles 下的目录名，不能是路径。
+  let profile = typeof raw.profile === 'string' ? raw.profile.trim() : raw.profile ?? DEFAULTS.profile;
+  if (typeof profile !== 'string' || !PROFILE_NAME_PATTERN.test(profile)) {
+    errors.push(`dsh.profile must be a valid profile name (letters, numbers, dots, underscores, hyphens; no leading hyphen), got ${JSON.stringify(raw.profile)}`);
+    profile = DEFAULTS.profile;
+  }
+
+  // launchPreference（dsh.launchPreference）：只接受三个枚举值，非法值记错误并回退 auto
+  let launchPreference: LaunchPreference;
+  if (raw.launchPreference === undefined) {
+    launchPreference = DEFAULTS.launchPreference;
+  } else if (!LAUNCH_PREFERENCES.includes(raw.launchPreference as LaunchPreference)) {
+    errors.push(
+      `dsh.launchPreference must be one of ${LAUNCH_PREFERENCES.join(' / ')}, got ${JSON.stringify(raw.launchPreference)}`,
+    );
+    launchPreference = DEFAULTS.launchPreference;
+  } else {
+    launchPreference = raw.launchPreference as LaunchPreference;
+  }
+
+  // desktopCommandPath（dsh.desktopCommandPath）：空串合法（= 自动探测）；非字符串静默回退默认；
+  // 提供了字符串但不是绝对路径 → 记错误并视为空（避免把相对路径交给 spawn）。
+  // 判定同时接受 Windows 盘符（C:\…/C:/…）与 POSIX（/…）形态：该设置只对 Windows 生效，
+  // 但配置文件可能在多平台间同步，不能因为平台不同就把合法值判成非法。
+  const DESKTOP_COMMAND_ABSOLUTE = /^(?:[A-Za-z]:[\\/]|\/)/;
+  let desktopCommandPath: string;
+  if (typeof raw.desktopCommandPath !== 'string') {
+    desktopCommandPath = DEFAULTS.desktopCommandPath;
+  } else {
+    const trimmed = raw.desktopCommandPath.trim();
+    if (trimmed === '') {
+      desktopCommandPath = '';
+    } else if (!DESKTOP_COMMAND_ABSOLUTE.test(trimmed)) {
+      errors.push(`dsh.desktopCommandPath must be an absolute path, got ${JSON.stringify(raw.desktopCommandPath)}`);
+      desktopCommandPath = '';
+    } else {
+      desktopCommandPath = trimmed;
+    }
+  }
 
   // 缺失与非法需区分：字段未配置时静默回退默认（不算错误），
   // 只有提供了非法值才记录错误并回退默认。
@@ -231,6 +293,7 @@ export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors:
 
   return {
     config: {
+      profile, launchPreference, desktopCommandPath,
       host, port, autoStart, stopOnExit, extraArgs, bridgeEnabled, workspaceRootIndex,
       silenceWarning, executablePath, openInBrowser, remoteEnabled, imageFallback,
       startTimeoutMs, env, useEnvProxy, panelZoomLevel,
@@ -265,6 +328,9 @@ export function buildChildEnv(
 export function readConfig(): { config: DshConfig; errors: string[] } {
   const ws = vscode.workspace.getConfiguration('dsh');
   return normalizeConfig({
+    profile: ws.get<string>('profile'),
+    launchPreference: ws.get<string>('launchPreference'),
+    desktopCommandPath: ws.get<string>('desktopCommandPath'),
     host: ws.get<string>('host'),
     port: ws.get<number>('port'),
     autoStart: ws.get<boolean>('autoStart'),

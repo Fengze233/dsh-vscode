@@ -20,9 +20,47 @@ export function buildOpenExternalMessage(url) {
   return { kind: 'openExternal', url };
 }
 
-// 构造"打开文件"消息（cwd 为会话工作目录，可选；无 cwd 时省略该字段）
-export function buildOpenFileMessage(path, cwd) {
-  return cwd === undefined ? { kind: 'openFile', path } : { kind: 'openFile', path, cwd };
+// 构造"打开文件"消息（cwd 为会话工作目录，可选；无 cwd 时改为携带诊断字段）
+export function buildOpenFileMessage(path, cwd, missReason) {
+  if (cwd !== undefined) return { kind: 'openFile', path, cwd };
+  return missReason === undefined ? { kind: 'openFile', path } : { kind: 'openFile', path, missReason };
+}
+
+/**
+ * 诊断「为什么没拿到会话 cwd」：把几种情形区分开，让扩展侧的提示能直接指出原因，
+ * 用户一次反馈即可定位（否则只能看到笼统的「无法解析路径」）。
+ * 只用于诊断文案，不参与任何路径解析；任何异常都归为 'probe-failed'。
+ */
+export function cwdMissReason(ctx, sessionId) {
+  try {
+    if (!ctx) return 'no-ctx';
+    const list = ctx.sessions && ctx.sessions.list;
+    if (!list || typeof list.getSnapshot !== 'function') return 'no-sessions-api';
+    if (typeof sessionId !== 'string' || sessionId === '') return 'no-session-id';
+    const byId = list.getSnapshot().byId;
+    const row = byId ? byId[sessionId] : undefined;
+    if (!row) return 'session-not-in-list';
+    if (typeof row.cwd !== 'string' || row.cwd === '') return 'session-has-no-cwd';
+    return 'unexpected';
+  } catch (err) {
+    return 'probe-failed';
+  }
+}
+
+/**
+ * 从 DSH 客户端根上下文里安全取「当前会话的工作目录」（issue #32）。
+ *
+ * 取法依据 DSH 官方前端自身实现（dsh-client-ui-chat：`ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd`）。
+ * 防御式实现：DSH 页面内部结构可能随版本变化，任何一层缺失都返回 undefined，
+ * 由调用方退回「不带 cwd」的旧行为——绝不能让取不到 cwd 变成点击无反应。
+ */
+export function resolveSessionCwd(ctx, sessionId) {
+  if (!ctx || typeof sessionId !== 'string' || sessionId === '') return undefined;
+  const byId = ctx.sessions && ctx.sessions.list && typeof ctx.sessions.list.getSnapshot === 'function'
+    ? ctx.sessions.list.getSnapshot().byId
+    : undefined;
+  const cwd = byId && byId[sessionId] ? byId[sessionId].cwd : undefined;
+  return typeof cwd === 'string' && cwd !== '' ? cwd : undefined;
 }
 
 /**

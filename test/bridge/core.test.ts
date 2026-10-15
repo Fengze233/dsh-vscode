@@ -5,6 +5,8 @@ import {
   isAllowedExternalUrl,
   buildOpenExternalMessage,
   buildOpenFileMessage,
+  cwdMissReason,
+  resolveSessionCwd,
   buildSyncWorkspaceAck,
   buildCopyTextMessage,
   buildCopyTextAck,
@@ -102,6 +104,20 @@ test('buildOpenFileMessage 携带可选 cwd', () => {
   assert.deepEqual(buildOpenFileMessage('/abs/a.ts', undefined), { kind: 'openFile', path: '/abs/a.ts' });
 });
 
+// issue #32：相对路径要按「会话 cwd」解析，而不是一律按 VS Code 工作区根。
+// 取法必须防御式：DSH 页面结构变化时返回 undefined，由调用方退回旧行为（不能抛错、不能丢点击）。
+test('resolveSessionCwd 从 ctx 安全取会话 cwd，任何一层缺失都返回 undefined', () => {
+  const ctx = (byId: unknown) => ({ sessions: { list: { getSnapshot: () => ({ byId }) } } });
+  assert.equal(resolveSessionCwd(ctx({ s1: { cwd: '/proj' } }), 's1'), '/proj');
+  assert.equal(resolveSessionCwd(ctx({ s1: { cwd: '' } }), 's1'), undefined);
+  assert.equal(resolveSessionCwd(ctx({ s1: {} }), 's1'), undefined);
+  assert.equal(resolveSessionCwd(ctx({}), 's1'), undefined);
+  assert.equal(resolveSessionCwd(ctx({ s1: { cwd: '/proj' } }), ''), undefined);
+  assert.equal(resolveSessionCwd(undefined, 's1'), undefined);
+  assert.equal(resolveSessionCwd({ sessions: {} } as never, 's1'), undefined);
+  assert.equal(resolveSessionCwd({} as never, 's1'), undefined);
+});
+
 test('buildSyncWorkspaceAck 构造回执', () => {
   assert.deepEqual(buildSyncWorkspaceAck(true), { kind: 'bridgeAck', ok: true });
   assert.deepEqual(buildSyncWorkspaceAck(false, '/proj'), { kind: 'bridgeAck', ok: false, path: '/proj' });
@@ -186,4 +202,21 @@ test('buildReadTextMessage / buildReadTextAck 构造剪贴板读取消息', () =
   // 读取失败：不带 text 字段
   assert.deepEqual(buildReadTextAck('req-2', false), { kind: 'readTextAck', requestId: 'req-2', ok: false });
   assert.deepEqual(buildReadTextAck('req-3', true, ''), { kind: 'readTextAck', requestId: 'req-3', ok: false });
+});
+
+test('buildOpenFileMessage：无 cwd 时携带诊断原因，有 cwd 时不带', () => {
+  assert.deepEqual(buildOpenFileMessage('a.png', '/proj'), { kind: 'openFile', path: 'a.png', cwd: '/proj' });
+  assert.deepEqual(buildOpenFileMessage('a.png', undefined, 'no-ctx'), { kind: 'openFile', path: 'a.png', missReason: 'no-ctx' });
+  assert.deepEqual(buildOpenFileMessage('a.png', undefined), { kind: 'openFile', path: 'a.png' });
+});
+
+// 真机反馈：只看到「无法解析路径」时无法判断是 cordis 没注入 ctx、还是没抓住 sessionId、还是会话本身没 cwd。
+test('cwdMissReason 区分未取到会话 cwd 的各种情形', () => {
+  const ctxOf = (byId: unknown) => ({ sessions: { list: { getSnapshot: () => ({ byId }) } } });
+  assert.equal(cwdMissReason(undefined, 's1'), 'no-ctx');
+  assert.equal(cwdMissReason({}, 's1'), 'no-sessions-api');
+  assert.equal(cwdMissReason(ctxOf({ s1: { cwd: '/p' } }), ''), 'no-session-id');
+  assert.equal(cwdMissReason(ctxOf({}), 's1'), 'session-not-in-list');
+  assert.equal(cwdMissReason(ctxOf({ s1: { cwd: '' } }), 's1'), 'session-has-no-cwd');
+  assert.equal(cwdMissReason({ sessions: { list: { getSnapshot: () => { throw new Error('boom'); } } } }, 's1'), 'probe-failed');
 });

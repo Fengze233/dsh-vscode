@@ -175,9 +175,12 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   private bridgeDeps(): Parameters<typeof handleBridgeMessage>[1] {
     return {
       openExternal: (u) => vscode.env.openExternal(vscode.Uri.parse(u)),
-      // showTextDocument 返回 TextEditor，而依赖约定返回 Thenable<void>：用 async 包装丢弃返回值
+      // 用 vscode.open 而不是 window.showTextDocument：后者只能开文本编辑器，
+      // 点图片/PDF 会抛「File seems to be binary and cannot be opened as text」（issue #33）。
+      // vscode.open 由 VS Code 自选编辑器：文本→文本编辑器、图片→图片预览、PDF→内建 PDF 预览、
+      // 未知二进制→占位页（提示而非报错）。依赖契约仍为 Thenable<void>，故不返回其执行结果。
       openTextDocument: async (p) => {
-        await vscode.window.showTextDocument(vscode.Uri.file(p), { preview: false });
+        await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(p), { preview: false });
       },
       // 用户提示统一走 vscode.window.showWarningMessage（host 层不 import vscode，保持纯逻辑可单测）
       showWarning: (m) => void vscode.window.showWarningMessage(m),

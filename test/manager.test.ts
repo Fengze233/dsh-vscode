@@ -52,6 +52,7 @@ interface Harness {
   probeQueue: ProbeResult[];   // 探测结果队列，取完后循环最后一个
   child: FakeChild | null;
   spawnCount: number;
+  spawnProfiles: (string | undefined)[];
   spawnOpenInBrowser: boolean[]; // 每次 startDsh 传入的 openInBrowser（用于断言 --no-open 兜底）
   probeCount: number;           // 探测调用次数，用于断言定时器已清理
   states: string[];             // 记录状态变化序列
@@ -63,6 +64,7 @@ function makeHarness(opts?: Partial<Parameters<ServiceManager['reconfigure']>[0]
     probeQueue: [],
     child: null,
     spawnCount: 0,
+    spawnProfiles: [],
     spawnOpenInBrowser: [],
     probeCount: 0,
     states: [],
@@ -74,6 +76,7 @@ function makeHarness(opts?: Partial<Parameters<ServiceManager['reconfigure']>[0]
   const processRunner: ProcessRunner = {
     startDsh: (o) => {
       h.spawnCount += 1;
+      h.spawnProfiles.push(o.profile);
       h.spawnOpenInBrowser.push(o?.openInBrowser ?? false);
       h.child = new FakeChild();
       return h.child;
@@ -381,18 +384,32 @@ test('ensureRunning 并发幂等：只 spawn 一次', async () => {
   h.manager.dispose();
 });
 
-test('reconfigure 换端口：自启服务先停再按新端口启动', async () => {
+test('reconfigure 换端口或 profile：自启服务按新目标重启', async () => {
+  for (const target of [{ port: 4000 }, { profile: 'custom-profile' }]) {
+    const h = makeHarness();
+    h.probeQueue = ['down', 'dsh'];
+    await h.manager.ensureRunning();
+    assert.deepEqual(h.spawnProfiles, [undefined]);
+    const oldChild = h.child!;
+    h.probeQueue = ['down', 'dsh'];
+    const s = await h.manager.reconfigure({
+      host: '127.0.0.1', port: 3080, extraArgs: [], autoStart: true, timeoutMs: 100, pollMs: 5,
+      ...target,
+    });
+    assert.equal(s.state, 'ready');
+    assert.ok(oldChild.killed.length > 0);
+    assert.equal(h.manager.getTarget().port, target.port ?? 3080);
+    assert.equal(h.spawnCount, 2);
+    assert.equal(h.spawnProfiles[1], target.profile);
+    h.manager.dispose();
+  }
   const h = makeHarness();
   h.probeQueue = ['down', 'dsh'];
   await h.manager.ensureRunning();
-  const oldChild = h.child!; // 捕获旧子进程引用（reconfigure 重启后 h.child 会指向新子进程）
-  h.probeQueue = ['down', 'dsh'];
-  const s = await h.manager.reconfigure({
-    host: '127.0.0.1', port: 4000, extraArgs: [], autoStart: true, timeoutMs: 100, pollMs: 5,
+  await h.manager.reconfigure({
+    profile: 'web', host: '127.0.0.1', port: 3080, extraArgs: [], autoStart: true, timeoutMs: 100, pollMs: 5,
   });
-  assert.equal(s.state, 'ready');
-  assert.ok(oldChild.killed.length > 0); // 旧服务确实被停止（SIGTERM+SIGKILL）
-  assert.equal(h.manager.getTarget().port, 4000);
+  assert.equal(h.spawnCount, 1, '回退到默认 web 不应重启服务');
   h.manager.dispose();
 });
 

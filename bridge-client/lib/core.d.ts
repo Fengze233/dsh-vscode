@@ -7,8 +7,21 @@ export function isAllowedExternalUrl(url: string): boolean;
 /** 构造"打开外链"消息 */
 export function buildOpenExternalMessage(url: string): { kind: 'openExternal'; url: string };
 
-/** 构造"打开文件"消息（cwd 为会话工作目录，可选） */
-export function buildOpenFileMessage(path: string, cwd: string | undefined): { kind: 'openFile'; path: string; cwd?: string };
+/** 构造"打开文件"消息（cwd 为会话工作目录，可选；无 cwd 时可携带 missReason 诊断） */
+export function buildOpenFileMessage(
+  path: string,
+  cwd: string | undefined,
+  missReason?: string,
+): { kind: 'openFile'; path: string; cwd?: string; missReason?: string };
+
+/** 诊断未取到会话 cwd 的原因（no-ctx / no-sessions-api / no-session-id / session-not-in-list / session-has-no-cwd / probe-failed） */
+export function cwdMissReason(ctx: unknown, sessionId: unknown): string;
+
+/**
+ * 从 DSH 客户端根上下文取当前会话的工作目录（issue #32）；
+ * 任何一层缺失或值非法都返回 undefined（调用方退回不带 cwd 的旧行为）。
+ */
+export function resolveSessionCwd(ctx: unknown, sessionId: unknown): string | undefined;
 
 /**
  * DSH 页面里「文件入口」按钮的稳定选择器（issue #22）：

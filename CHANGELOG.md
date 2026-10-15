@@ -1,3 +1,57 @@
+## [Unreleased]
+
+### 测试
+
+测试用例共 318 个；本次验证 315 个通过，2 个真实 DSH 集成测试按环境门控跳过、1 个 Windows 专属用例在非 Windows 平台跳过。
+当前测试数量由 README 与本节共同校验，已发布版本的历史测试数字保持不变。
+
+## [0.4.3] - 2026-10-16
+
+### 新增
+
+- **启动来源可选** `dsh.launchPreference`（`auto` / `npm` / `desktop`，默认 `auto`）与 `dsh.desktopCommandPath`：
+  首选的那种 `dsh` 安装不存在时自动改用另一种，并在日志与「复制日志」的环境信息头里写明实际来源与实际入口。
+- **DSH Desktop 启动支持**（issue #30、#31）：Windows 上 npm 全局安装与 Desktop 安装都能启动。
+  npm 装法仍以 `node <bin.js>` 直跑；Desktop 的 `dsh.cmd`（同目录没有 `node_modules` 布局）改为
+  `cmd.exe /d /s /c` 直接执行脚本本身，不再推导出不存在的 bin.js；`dsh.executablePath` 指向
+  `.cmd`/包装脚本时同样直接执行该脚本。
+
+### 修复
+
+- **相对路径点击提示不可诊断（真机反馈，`0.4.3-test4` 实测）**：点纯文件名（如 `a.png`）只提示
+  「无法解析路径：a.png」，看不出缺的是会话 cwd 还是工作区根。现在桥接会带上诊断原因
+  （`no-ctx` / `no-sessions-api` / `no-session-id` / `session-not-in-list` / `session-has-no-cwd`），
+  提示写明缺哪个基准并给绝对路径的出路。
+- **日志噪音与版本号（真机反馈，`0.4.3-test3` 实测）**：PATH 里只有 DSH Desktop 的命令时，
+  npm 分支不再去推导 npm 布局的 bin.js（原先每次启动都刷「bin.js missing」并多算一个候选）；
+  环境信息头新增从 Desktop 运行时包清单读出的 `dsh 版本`（原先恒为「未知」）。
+- **DSH Desktop 启动失败（真机反馈，`0.4.3-test2` 实测）**：含空格路径下 cmd 收到的是被 Node
+  二次转义的字面引号，报「文件名、目录名或卷标语法不正确」。改为：桌面端目录若存在 `bin.js`，
+  直接 `node bin.js`（与 npm 装法同构，完全不需要 cmd 引号）；否则才用 cmd，并以
+  `windowsVerbatimArguments` 原样传命令行。
+- **DSH Desktop 启动失败（真机反馈，`0.4.3-test1` 实测）**：`cmd.exe /d /s /c` 执行含空格的脚本路径时
+  必须写成 `""…dsh.cmd""`（`/s` 会剥掉最外层引号），否则 cmd 在空格处截断并报
+  「'C:\Users\…\Programs\DeepSeek' 不是内部或外部命令」，服务反复换端口重试后失败。
+- **面板里点图片/PDF 打不开**（issue #33）：交付物改用 `vscode.open` 打开，由 VS Code 自选编辑器
+  （图片预览 / 内建 PDF / 二进制占位页），不再用只能开文本编辑器的 `showTextDocument`。
+- **相对路径按错误基准解析**（issue #32）：桥接转发文件时携带**会话 cwd**（取法同 DSH 官方前端）；
+  取不到 cwd 时不阻塞点击，退回工作区根并在日志说明。
+- **切换 host/port 后桥接误报健康**（PR #35 隐患）：端点变化一律作废旧握手；仅换 profile 时，
+  只有「就绪的外部服务」继续复用握手，自启服务按新 profile 重启后等新页面握手。
+- **卸载钩子的写入面**（PR #35 隐患）：遍历 `profiles/` 时要求条目同时满足「名字合法、非符号链接、
+  realpath 仍在 profiles 内」，避免符号链接把 `$DSH_HOME` 之外的 `cordis.patch.yml` 改写掉。
+
+### 桥接与 profile（合并 PR #35，贡献者 @jubeater）
+
+- **可配置 DSH profile**：新增 `dsh.profile`，默认 `web`，启动参数和桥接安装目录使用所选 profile。
+- **多 profile 桥接清理**：其它 profile 仍注册桥接时保留共享副本，最后一个使用者卸载后再清理。
+- **profile 切换握手**：仅保留就绪外部服务的握手结果，自启服务或服务未运行时等待新握手。
+
+### 测试
+
+测试用例共 318 个；本次验证 315 个通过，2 个真实 DSH 集成测试按环境门控跳过、1 个 Windows 专属用例
+在非 Windows 平台跳过。当前测试数量由 README 与本节共同校验，已发布版本的历史测试数字保持不变。
+
 ## [0.4.2] - 2026-09-28
 
 > 版本号说明：原计划的 `0.4.1.1` 是四段式版本号，VS Code 扩展清单不接受

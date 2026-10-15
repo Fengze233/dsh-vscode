@@ -36,37 +36,82 @@ class FakeChild implements ChildProcessLike {
 }
 
 test('Linux/macOS：命令为 dsh，detached 为 true，参数顺序正确', () => {
-  const calls: { cmd: string; args: string[]; opts: { detached?: boolean } }[] = [];
-  const spawnImpl: SpawnFn = (cmd, args, opts) => {
-    calls.push({ cmd, args, opts });
-    return new FakeChild();
-  };
-  const runner = createProcessRunner(spawnImpl, 'linux');
-  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: ['--trusted-host', 'x:1'] });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].cmd, 'dsh');
-  assert.deepEqual(calls[0].args, ['web', '--host', '127.0.0.1', '--port', '3080', '--trusted-host', 'x:1', '--no-open']);
-  assert.equal(calls[0].opts.detached, true);
+  for (const profile of [undefined, 'web', 'custom-profile']) {
+    const calls: { cmd: string; args: string[]; opts: { detached?: boolean } }[] = [];
+    const spawnImpl: SpawnFn = (cmd, args, opts) => {
+      calls.push({ cmd, args, opts });
+      return new FakeChild();
+    };
+    const runner = createProcessRunner(spawnImpl, 'linux');
+    runner.startDsh({ profile, host: '127.0.0.1', port: 3081, extraArgs: ['--trusted-host', 'x:1'] });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].cmd, 'dsh');
+    assert.deepEqual(calls[0].args, ['--profile', profile ?? 'web', '--host', '127.0.0.1', '--port', '3081', '--trusted-host', 'x:1', '--no-open']);
+    assert.equal(calls[0].opts.detached, true);
+  }
 });
 
 test('Windows：注入 PATH 命中 dsh.cmd 后以 node 直跑 bin.js 启动，detached 为 false', () => {
-  const calls: { cmd: string; args: string[]; opts: { detached?: boolean } }[] = [];
+  for (const profile of [undefined, 'web', 'custom-profile']) {
+    const calls: { cmd: string; args: string[]; opts: { detached?: boolean } }[] = [];
+    const spawnImpl: SpawnFn = (cmd, args, opts) => {
+      calls.push({ cmd, args, opts });
+      return new FakeChild();
+    };
+    // exists 只认这三个真实存在的路径：shim、其推导出的 bin.js、shim 目录旁的 node.exe。
+    // （全 true 的假实现会让「bin.js 存在性校验」形同虚设，无法覆盖 issue #30 的场景）
+    const shim = 'C:\\npm-global\\dsh.cmd';
+    const binJs = 'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js';
+    const runner = createProcessRunner(
+      spawnImpl, 'win32', 3000,
+      (p) => p === shim || p === binJs || p === 'C:\\npm-global\\node.exe',
+      { execPath: 'C:\\node\\node.exe', path: 'C:\\npm-global' },
+    );
+    runner.startDsh({ profile, host: '127.0.0.1', port: 0, extraArgs: [] });
+    // node 解析顺序：shim 目录旁的 node.exe 优先（shim 与 bin.js 均存在 → npm 来源可用）
+    assert.equal(calls[0].cmd, 'C:\\npm-global\\node.exe');
+    assert.deepEqual(calls[0].args, [
+      'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
+      '--profile', profile ?? 'web', '--host', '127.0.0.1', '--port', '0', '--no-open',
+    ]);
+    assert.equal(calls[0].opts.detached, false);
+  }
+});
+
+test('Windows：bin.js 不存在时回退执行桌面端 dsh.cmd（cmd.exe + 逐字命令行）', () => {
+  const calls: { cmd: string; args: string[]; opts: SpawnOptions }[] = [];
   const spawnImpl: SpawnFn = (cmd, args, opts) => {
     calls.push({ cmd, args, opts });
     return new FakeChild();
   };
-  const runner = createProcessRunner(spawnImpl, 'win32', 3000, () => true, {
+  const desktopLap = 'C:\\Users\\u\\AppData\\Local';
+  const desktopCmd = 'C:\\Users\\u\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd';
+  const runner = createProcessRunner(spawnImpl, 'win32', 3000, (p) => p === desktopCmd, {
     execPath: 'C:\\node\\node.exe',
     path: 'C:\\npm-global',
+    localAppData: desktopLap,
   });
-  runner.startDsh({ host: '127.0.0.1', port: 0, extraArgs: [] });
-  // node 解析顺序：shim 目录旁的 node.exe 优先（exists 注入全 true，命中 npm-global 目录旁）
-  assert.equal(calls[0].cmd, 'C:\\npm-global\\node.exe');
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
+  assert.equal(calls[0].cmd, 'cmd.exe');
   assert.deepEqual(calls[0].args, [
-    'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
-    'web', '--host', '127.0.0.1', '--port', '0', '--no-open',
+    '/d', '/s', '/c', `""${desktopCmd}""`,
+    '--profile', 'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
-  assert.equal(calls[0].opts.detached, false);
+  assert.equal(runner.lastStart?.source, 'desktop');
+  // 关键：必须逐字传命令行，否则 Node 二次转义引号（真机 0.4.3-test2 实测报语法错误）
+  assert.equal(calls[0].opts.windowsVerbatimArguments, true);
+});
+
+test('Windows：npm 与桌面端都不可用时抛 ENOENT（保持既有「未找到 dsh」语义）', () => {
+  const runner = createProcessRunner((() => new FakeChild()) as SpawnFn, 'win32', 3000, () => false, {
+    execPath: 'C:\\node\\node.exe',
+    path: 'C:\\npm-global',
+    localAppData: 'C:\\Users\\u\\AppData\\Local',
+  });
+  assert.throws(() => runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] }), (err: Error & { code?: string }) => {
+    assert.equal(err.code, 'ENOENT');
+    return true;
+  });
 });
 
 test('stopChild 先发 SIGTERM，graceMs 后补 SIGKILL', async () => {
@@ -83,17 +128,20 @@ test('lastChild 记录最近一次启动的子进程（测试钩子）', () => {
 });
 
 test('lastStart 记录最近一次启动的实际命令与参数（供 manager 写启动命令日志）', () => {
-  const runner = createProcessRunner(() => new FakeChild(), 'win32', 3000, () => true, {
-    execPath: 'C:\\node\\node.exe',
-    path: 'C:\\npm-global',
-  });
+  const shim = 'C:\\npm-global\\dsh.cmd';
+  const binJs = 'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js';
+  const runner = createProcessRunner(
+    () => new FakeChild(), 'win32', 3000,
+    (p) => p === shim || p === binJs || p === 'C:\\npm-global\\node.exe',
+    { execPath: 'C:\\node\\node.exe', path: 'C:\\npm-global' },
+  );
   runner.startDsh({ host: '127.0.0.1', port: 0, extraArgs: [] });
   assert.ok(runner.lastStart);
   // command 为解析出的 node 可执行文件（shim 目录旁优先），args 首位为 bin.js 路径
   assert.equal(runner.lastStart.command, 'C:\\npm-global\\node.exe');
-  assert.deepEqual(runner.lastStart.args.slice(0, 2), [
+  assert.deepEqual(runner.lastStart.args.slice(0, 3), [
     'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
-    'web',
+    '--profile', 'web',
   ]);
 });
 
@@ -120,11 +168,15 @@ test('startDsh 未传 cwd 时 spawn 选项不含 cwd 键', () => {
 test('startDsh：win32 + UNC cwd 被 sanitize 过滤为不传 cwd 键（不抛 EINVAL）', () => {
   // 模拟 Windows 上 VS Code 工作区为 UNC 网络路径的场景
   const calls: unknown[] = [];
+  // exists 只认 shim/bin.js/node.exe：让 launcher 判定 npm 来源可用，
+  // 同时 sanitizeCwd 走到 UNC 判定（UNC 分支在 exists 之前就返回 undefined）
+  const shim = 'C:\\npm-global\\dsh.cmd';
+  const binJs = 'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js';
   const runner = createProcessRunner(
     ((cmd, args, opts) => { calls.push(opts); return new FakeChild(); }) as SpawnFn,
     'win32',
     3000,
-    () => true, // exists 注入 true：使 findInPath 命中 dsh.cmd，并让 sanitizeCwd 走到 UNC 判定
+    (p) => p === shim || p === binJs || p === 'C:\\npm-global\\node.exe',
     { execPath: 'C:\\node\\node.exe', path: 'C:\\npm-global' },
   );
   runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], cwd: '\\\\wsl.localhost\\Ubuntu\\home' });
@@ -132,22 +184,23 @@ test('startDsh：win32 + UNC cwd 被 sanitize 过滤为不传 cwd 键（不抛 E
   assert.equal('cwd' in opts, false); // UNC 被剥除，spawn 走默认 cwd
 });
 
-test('startDsh 传 executablePath 指向 dsh.cmd 时以 node 直跑其 bin.js（win32）', () => {
+test('startDsh 传 executablePath 指向 dsh.cmd 时直接执行该脚本，不再推导 bin.js（win32，issue #30）', () => {
   const calls: { cmd: string; args: string[]; opts: SpawnOptions }[] = [];
   const spawnImpl: SpawnFn = (cmd, args, opts) => {
     calls.push({ cmd, args, opts });
     return new FakeChild();
   };
-  const runner = createProcessRunner(spawnImpl, 'win32', 3000, () => true, {
+  const desktopCmd = 'C:\\Users\\u\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd';
+  // 只认用户配置的那一个脚本：其目录下没有 node_modules 布局（正是 DSH Desktop 的真实情况）
+  const runner = createProcessRunner(spawnImpl, 'win32', 3000, (p) => p === desktopCmd, {
     execPath: 'C:\\node\\node.exe',
     path: 'C:\\Windows\\System32',
   });
-  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: 'C:\\tools\\dsh.cmd' });
-  // node 解析顺序：shim 目录旁 node.exe 优先（exists 注入全 true → C:\tools\node.exe 命中）
-  assert.equal(calls[0].cmd, 'C:\\tools\\node.exe');
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: desktopCmd });
+  assert.equal(calls[0].cmd, 'cmd.exe');
   assert.deepEqual(calls[0].args, [
-    'C:\\tools\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
-    'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
+    '/d', '/s', '/c', `""${desktopCmd}""`,
+    '--profile', 'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
 });
 
@@ -166,7 +219,7 @@ test('startDsh 传 executablePath 指向 .js 时直接将其作为 argsPrefix（
   assert.equal(calls[0].cmd, 'C:\\repo\\dsh\\lib\\node.exe');
   assert.deepEqual(calls[0].args, [
     'C:\\repo\\dsh\\lib\\bin.js',
-    'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
+    '--profile', 'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
 });
 
@@ -177,15 +230,20 @@ test('startDsh 未传 executablePath 时 win32 从 PATH 推导 bin.js（PATH 注
     return new FakeChild();
   };
   const npmDir = 'C:\\Users\\x\\AppData\\Roaming\\npm';
-  const runner = createProcessRunner(spawnImpl, 'win32', 3000, (p) => p === `${npmDir}\\dsh.cmd`, {
-    execPath: 'C:\\node\\node.exe',
-    path: `C:\\Windows\\System32;${npmDir}`,
-  });
+  // 只认 shim 与它推导出的 bin.js：两者都在 → npm 来源可用（存在性校验生效）
+  const runner = createProcessRunner(
+    spawnImpl, 'win32', 3000,
+    (p) => p === `${npmDir}\\dsh.cmd` || p === `${npmDir}\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js`,
+    {
+      execPath: 'C:\\node\\node.exe',
+      path: `C:\\Windows\\System32;${npmDir}`,
+    },
+  );
   runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
   assert.equal(calls[0].cmd, 'C:\\node\\node.exe');
   assert.deepEqual(calls[0].args, [
     `${npmDir}\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js`,
-    'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
+    '--profile', 'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
 });
 
@@ -207,30 +265,34 @@ test('startDsh win32 + Electron 环境：绝不使用 execPath（Code.exe），�
     return new FakeChild();
   };
   // 模拟 VS Code 扩展宿主：Electron 运行时，execPath 指向 Code.exe（不可当 node 用），
-  // PATH 里 node.exe 位于 C:\Program Files\nodejs（exists 仅对该路径返回 true）
+  // PATH 里 node.exe 位于 C:\Program Files\nodejs；显式路径指向 bin.js（node 模式）
   const nodeExe = 'C:\\Program Files\\nodejs\\node.exe';
-  const runner = createProcessRunner(spawnImpl, 'win32', 3000, (p) => p === nodeExe, {
+  const binJs = 'C:\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js';
+  const runner = createProcessRunner(spawnImpl, 'win32', 3000, (p) => p === nodeExe || p === binJs, {
     execPath: 'C:\\Users\\x\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe',
     path: `C:\\Windows\\System32;C:\\Program Files\\nodejs`,
     electronVersion: '39.2.0',
   });
-  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: 'C:\\npm\\dsh.cmd' });
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: binJs });
   // 关键：cmd 必须是系统 node.exe，而不是 Electron 的 Code.exe
   assert.equal(calls[0].cmd, nodeExe);
   assert.deepEqual(calls[0].args, [
     'C:\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
-    'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
+    '--profile', 'web', '--host', '127.0.0.1', '--port', '3080', '--no-open',
   ]);
 });
 
 test('startDsh win32 + Electron 环境且 PATH 无 node.exe → 抛 code NODE_NOT_FOUND', () => {
-  const runner = createProcessRunner(() => new FakeChild(), 'win32', 3000, () => false, {
+  // 显式路径指向 .js（node 模式）且该 js 存在，但 PATH 里没有 node.exe：
+  // Electron 环境绝不能拿 Code.exe 顶替，必须抛 NODE_NOT_FOUND
+  const explicitJs = 'C:\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js';
+  const runner = createProcessRunner(() => new FakeChild(), 'win32', 3000, (p) => p === explicitJs, {
     execPath: 'C:\\Users\\x\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe',
     path: 'C:\\Windows\\System32',
     electronVersion: '39.2.0',
   });
   assert.throws(
-    () => runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: 'C:\\npm\\dsh.cmd' }),
+    () => runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: explicitJs }),
     (err: Error & { code?: string }) => err.code === 'NODE_NOT_FOUND',
   );
 });
@@ -242,12 +304,14 @@ test('startDsh win32 + execPath 为 Code.exe（electronVersion 未注入）：�
     return new FakeChild();
   };
   const nodeExe = 'C:\\Program Files\\nodejs\\node.exe';
-  const runner = createProcessRunner(spawnImpl, 'win32', 3000, (p) => p === nodeExe, {
+  const explicitJs = 'C:\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js';
+  // 显式路径指向 bin.js（node 模式）→ 必须解析系统 node；只认该 js 与 PATH 里的 node.exe
+  const runner = createProcessRunner(spawnImpl, 'win32', 3000, (p) => p === nodeExe || p === explicitJs, {
     execPath: 'C:\\Users\\x\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe',
     path: 'C:\\Program Files\\nodejs',
     // 关键：不注入 electronVersion——模拟 versions.electron 检测意外失效，靠文件名兜底
   });
-  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: 'C:\\npm\\dsh.cmd' });
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], executablePath: explicitJs });
   assert.equal(calls[0].cmd, nodeExe);
 });
 
@@ -401,4 +465,55 @@ test('startDsh 未传 env 或传空对象：不给 spawn 提供 env 键（保持
   assert.equal('env' in calls[0], false, '未配置时不应出现 env 键');
   runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [], env: {} });
   assert.equal('env' in calls[1], false, '空对象等同未配置');
+});
+
+test('stopChild：cmd 模式的 Windows 子进程按进程树结束（taskkill /T），避免孤儿 dsh 占端口', async () => {
+  const desktopCmd = 'C:\\Users\\u\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd';
+  const child = new FakeChild();
+  const killed: number[] = [];
+  const runner = createProcessRunner(
+    (() => child) as SpawnFn, 'win32', 5, (p) => p === desktopCmd,
+    { execPath: 'C:\\node\\node.exe', path: 'C:\\Windows', localAppData: 'C:\\Users\\u\\AppData\\Local' },
+    (pid) => killed.push(pid),
+  );
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
+  await runner.stopChild(child);
+  assert.deepEqual(killed, [1234], 'cmd 外壳必须走 taskkill /T 结束整棵树');
+  assert.deepEqual(child.killed, ['SIGTERM', 'SIGKILL'], '常规 kill 仍作为兜底执行');
+});
+
+test('stopChild：node 模式（npm 装法）不调用 taskkill，保持既有停止行为', async () => {
+  const shim = 'C:\\npm-global\\dsh.cmd';
+  const binJs = 'C:\\npm-global\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js';
+  const child = new FakeChild();
+  const killed: number[] = [];
+  const runner = createProcessRunner(
+    (() => child) as SpawnFn, 'win32', 5,
+    (p) => p === shim || p === binJs || p === 'C:\\npm-global\\node.exe',
+    { execPath: 'C:\\node\\node.exe', path: 'C:\\npm-global' },
+    (pid) => killed.push(pid),
+  );
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
+  await runner.stopChild(child);
+  assert.deepEqual(killed, [], 'node 直跑模式没有 cmd 外壳，不需要 taskkill');
+  assert.deepEqual(child.killed, ['SIGTERM', 'SIGKILL']);
+});
+
+test('Windows：桌面端目录存在 bin.js 时改用 node 直跑（不经过 cmd，无引号风险）', () => {
+  const calls: { cmd: string; args: string[]; opts: SpawnOptions }[] = [];
+  const spawnImpl: SpawnFn = (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    return new FakeChild();
+  };
+  const desktopCmd = 'C:\\Users\\u\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd';
+  const desktopBinJs = 'C:\\Users\\u\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js';
+  const runner = createProcessRunner(
+    spawnImpl, 'win32', 3000,
+    (p) => p === desktopCmd || p === desktopBinJs || p === 'C:\\Program Files\\nodejs\\node.exe',
+    { execPath: 'C:\\Code.exe', path: 'C:\\Program Files\\nodejs', localAppData: 'C:\\Users\\u\\AppData\\Local', electronVersion: '43.0.0' },
+  );
+  runner.startDsh({ host: '127.0.0.1', port: 3080, extraArgs: [] });
+  assert.equal(calls[0].cmd, 'C:\\Program Files\\nodejs\\node.exe');
+  assert.deepEqual(calls[0].args.slice(0, 1), [desktopBinJs]);
+  assert.equal(calls[0].opts.windowsVerbatimArguments, undefined, 'node 直跑不需要逐字命令行');
 });

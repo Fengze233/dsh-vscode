@@ -7,6 +7,7 @@ import { initI18n, t } from './i18n';
 import { readConfig, buildChildEnv, type DshConfig } from './config';
 import { probeService } from './service/detect';
 import { createProcessRunner, findInPath, findInPathPosix, resolveDshPackageJsonPath } from './service/process';
+import { desktopRootFromShim } from './service/launcher';
 import { ServiceManager, type ManagerOptions } from './service/manager';
 import { DshPanelProvider } from './panel/provider';
 import { StatusBarController } from './statusbar';
@@ -43,6 +44,9 @@ let resolveUserDisplayUrlImpl: (() => Promise<string | null>) | null = null;
 let authProxy: DshProxy | null = null;
 let authProxyStarted = false;
 
+/** 扩展上下文（模块级保存：复制日志时需要扩展版本号重打环境信息头） */
+let extensionContext: vscode.ExtensionContext | null = null;
+
 /** 日志缓冲（供「复制日志」命令 dsh.copyLogs 使用；上限行数防内存膨胀） */
 const logBuffer: string[] = [];
 /** 日志缓冲最大行数（超出后丢弃最早的行） */
@@ -67,6 +71,10 @@ const BRIDGE_SILENCE_KEY = 'dsh.bridgeWarningSilenced';
 /** DshConfig → ManagerOptions（探测 3s、轮询 0.5s，与规格一致） */
 function toManagerOptions(config: DshConfig): ManagerOptions {
   return {
+    profile: config.profile,
+    // 启动来源首选与桌面端命令路径（v0.4.3：Windows 上区分 npm / DSH Desktop 两种装法）
+    launchPreference: config.launchPreference,
+    desktopCommandPath: config.desktopCommandPath,
     host: config.host,
     port: config.port,
     extraArgs: config.extraArgs,
@@ -146,9 +154,76 @@ function describeDshExecutable(config: DshConfig): { path: string | null; versio
         /* 读取失败按版本未知处理 */
       }
     }
+    // DSH Desktop 的命令是自研包装脚本（没有 npm 布局），但它的运行时包清单在 cli 目录下：
+    // 不读这一处，环境信息头永远显示「dsh 版本: 未知」，问题报告少一关键信息。
+    const desktopRoot = desktopRootFromShim(shim);
+    if (desktopRoot !== null) {
+      for (const rel of [
+        join('resources', 'runtime', 'cli', 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
+        join('resources', 'runtime', 'cli', 'package.json'),
+      ]) {
+        try {
+          const version = JSON.parse(readFileSync(join(desktopRoot, rel), 'utf8')).version;
+          if (typeof version === 'string' && version !== '') return { path: shim, version };
+        } catch {
+          /* 该候选不存在：试下一个 */
+        }
+      }
+    }
   }
   // 未定位到包（或读取失败）：保留可执行文件路径/命令名，版本标记未知
   return { path: shim ?? (process.platform === 'win32' ? null : 'dsh'), version: null };
+}
+
+/**
+ * 判断配置变更后是否必须作废旧握手（PR #35 的时序隐患修复）。
+ *
+ * 背景：这段逻辑在 `reconfigure` 之前执行，拿到的快照反映的是**旧目标**，
+ * 所以不能直接用它为「新目标是否已有服务」背书。
+ *
+ * 规则（与既有行为取并集）：
+ * - host/port 变了 → 连的是另一个服务，旧握手不能替新目标背书 → 必须重握手；
+ * - 不是「就绪的外部服务」→ 插件自启的服务会按新 profile 重启 → 必须重握手；
+ * - 其余情况（端点未变、旧目标本就是外部就绪服务）→ 复用握手结果，只重装该 profile 的桥接。
+ */
+export function shouldResetHandshake(
+  changed: { profile: boolean; endpoint: boolean },
+  snapshot: { state: string; owned: boolean } | null,
+): boolean {
+  if (changed.endpoint) return true;
+  return !(snapshot?.state === 'ready' && !snapshot.owned);
+}
+
+/**
+ * 输出环境信息头：版本/平台/可执行文件/关键配置 + **实际启动来源**。
+ *
+ * 为什么做成可重复调用的函数：激活时服务尚未启动，拿不到「实际入口」；
+ * 而 `DSH: 复制日志` 导出的头部才是问题报告的第一手依据，必须在启动之后再补一份
+ * （issue #30/#31 的排查正是靠「到底用了哪个 dsh」这一行）。
+ */
+function logEnvironmentInfo(config: DshConfig): void {
+  appendLog('=== DSH 扩展环境信息 ===');
+  appendLog(`扩展版本: ${extensionContext?.extension.packageJSON.version ?? '未知'}`);
+  appendLog(`VS Code 版本: ${vscode.version}`);
+  appendLog(`平台: ${process.platform} (${process.arch})`);
+  const electronVersion = (process.versions as { electron?: string }).electron;
+  appendLog(`宿主 Node: ${process.version}${electronVersion ? ` / Electron ${electronVersion}` : ''}`);
+  const dshInfo = describeDshExecutable(config);
+  appendLog(`dsh 可执行文件: ${dshInfo.path ?? '未定位'}`);
+  appendLog(`dsh 版本: ${dshInfo.version ?? '未知'}`);
+  // 实际启动来源与入口：由 process runner 的 lastStart 提供（未启动时明确标注）
+  const lastStart = manager?.lastStart ?? null;
+  appendLog(`dsh 启动来源: ${lastStart?.source ?? '未启动'}`);
+  appendLog(`dsh 实际入口: ${lastStart?.command ?? '未定位'}${lastStart ? ` ${JSON.stringify(lastStart.args.slice(0, 2))}` : ''}`);
+  appendLog(
+    `配置: profile=${config.profile} launchPreference=${config.launchPreference} ` +
+    `desktopCommandPath=${config.desktopCommandPath || '(空，自动探测)'} ` +
+    `host=${config.host} port=${config.port} autoStart=${config.autoStart} stopOnExit=${config.stopOnExit} ` +
+    `bridgeEnabled=${config.bridgeEnabled} extraArgs=${JSON.stringify(config.extraArgs)} ` +
+    `executablePath=${config.executablePath || '(空)'}`,
+  );
+  appendLog(`工作区: ${vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath).join(', ') || '(无)'}`);
+  appendLog('=============================');
 }
 
 /** 插件激活：VS Code 启动完成后调用 */
@@ -160,23 +235,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const { config, errors } = readConfig();
   for (const err of errors) appendLog(`[config] ${err}`);
 
-  // —— 环境信息头：版本/平台/可执行文件/关键配置，问题报告排查的第一手依据 ——
-  appendLog('=== DSH 扩展环境信息 ===');
-  appendLog(`扩展版本: ${context.extension.packageJSON.version}`);
-  appendLog(`VS Code 版本: ${vscode.version}`);
-  appendLog(`平台: ${process.platform} (${process.arch})`);
-  const electronVersion = (process.versions as { electron?: string }).electron;
-  appendLog(`宿主 Node: ${process.version}${electronVersion ? ` / Electron ${electronVersion}` : ''}`);
-  const dshInfo = describeDshExecutable(config);
-  appendLog(`dsh 可执行文件: ${dshInfo.path ?? '未定位'}`);
-  appendLog(`dsh 版本: ${dshInfo.version ?? '未知'}`);
-  appendLog(
-    `配置: host=${config.host} port=${config.port} autoStart=${config.autoStart} stopOnExit=${config.stopOnExit} ` +
-    `bridgeEnabled=${config.bridgeEnabled} extraArgs=${JSON.stringify(config.extraArgs)} ` +
-    `executablePath=${config.executablePath || '(空)'}`,
-  );
-  appendLog(`工作区: ${vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath).join(', ') || '(无)'}`);
-  appendLog('=============================');
+  extensionContext = context;
+  logEnvironmentInfo(config);
 
   // —— 桥接状态（单一状态，两个面板共享，避免多个面板重复触发定时器）——
   // install：桥接安装结果；桥接禁用时为 null（不安装、不评估、不弹警告）。
@@ -190,6 +250,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   /** 桥接安装参数（dshHome / bridgeSourceDir 全插件共用，避免三处重复拼接；Windows 装配第三安装目标） */
   const installOpts = {
+    profile: config.profile,
     dshHome: process.env.DSH_HOME ?? join(homedir(), '.dsh'),
     bridgeSourceDir: join(__dirname, 'bridge-client'),
     fs: createNodeFs(),
@@ -656,6 +717,22 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('dsh.bridge.uninstall', () => void uninstallBridgeCmd()),
     vscode.commands.registerCommand('dsh.cleanupImageCache', () => void cleanupImageCacheCmd()),
     vscode.workspace.onDidChangeConfiguration((e) => {
+      // 目标变化判定见 shouldResetHandshake 的注释（纯函数，单独单测）
+      const changed = {
+        profile: e.affectsConfiguration('dsh.profile'),
+        endpoint: e.affectsConfiguration('dsh.host') || e.affectsConfiguration('dsh.port'),
+      };
+      if (changed.profile || changed.endpoint) {
+        const next = readConfig().config;
+        if (installOpts.profile !== next.profile) {
+          installOpts.profile = next.profile;
+          install = next.bridgeEnabled ? safeInstallBridge() : null;
+        }
+        if (shouldResetHandshake(changed, manager?.getSnapshot() ?? null)) {
+          clearHandshakeTimer();
+          handshakeOk = undefined;
+        }
+      }
       if (e.affectsConfiguration('dsh')) onConfigChanged();
     }),
     { dispose: () => manager?.dispose() },
@@ -703,6 +780,12 @@ async function copyUrl(): Promise<void> {
 
 /** 复制完整 DSH 日志（含环境信息头）到剪贴板：问题报告的提交内容 */
 async function copyLogs(): Promise<void> {
+  // 导出前补打一份环境信息头：激活时服务还没启动，只有此刻才有「实际启动来源/入口」
+  try {
+    logEnvironmentInfo(readConfig().config);
+  } catch {
+    /* 读取设置失败不影响导出既有日志 */
+  }
   await vscode.env.clipboard.writeText(logBuffer.join('\n'));
   void vscode.window.showInformationMessage(t('msg.logsCopied'));
 }
@@ -751,7 +834,7 @@ async function cleanupImageCacheCmd(): Promise<void> {
   void vscode.window.showInformationMessage(t('msg.imageCacheCleaned', { count: removed }));
 }
 
-/** 配置变更：host/port 变化时自动重启自启服务，退出策略实时生效 */
+/** 配置变更：profile/host/port 变化时自动重启自启服务，退出策略实时生效 */
 function onConfigChanged(): void {
   const m = manager;
   if (!m) return;
