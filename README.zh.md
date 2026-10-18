@@ -36,6 +36,8 @@
 - 🔒 **安全边界**：只连接回环地址（127.0.0.1 / localhost / [::1]），不读取凭据。
 - 🔐 **适配 DSH 0.1.2 鉴权**：自动从服务日志解析一次性启动网址，兑换 DSH 的签名会话 cookie（30 天有效，服务重启不失效），并让面板经**本地代办代理**访问 DSH——由代理代示会话。虽然 DSH 的 `SameSite=Strict` cookie 在跨站 iframe 中永远无法使用，内嵌面板照常可用；会话失效时自动重新获取（自启服务）或提示重新粘贴一次（外部启动的服务）；
 - 🔝 **编辑器右上角图标**：编辑器标签栏右上角新增 DSH 鲸鱼按钮（与 Claude Code 同位置），点击一键打开右侧 DSH 面板；
+- 🗂️ **编辑区标签页**：`DSH: 在编辑区打开`（标题栏蓝色鲸鱼按钮）把 DSH 作为普通编辑器标签页打开——与侧边栏面板同一套界面、桥接与鉴权代办，可以和工作文件并排；
+- ⚡ **可选预热**：开启 `dsh.startOnWindowOpen` 后，窗口一打开就在后台启动 `dsh web`，之后打开面板或标签页无需再等 15–25 秒冷启动；
 - 🌐 **SSH Remote 支持（可选）**：远程连接时可在远端运行 dsh，并经 VS Code 隧道在面板中打开（`dsh.remote.enabled`，默认关闭）；
 - 🖼️ **对话框自由上传图片**：模型无视觉能力也能发送图片——图片缓存到工作区并以文件路径引用随消息发出，让模型调用图像工具查看（面板关闭时清理；可用 `dsh.image.fallback` 关闭）；
 - 🪟 **不再误弹浏览器**：启动 `dsh web` 默认追加 `--no-open`（需弹浏览器时用 `dsh.openInBrowser` 恢复）。
@@ -84,6 +86,7 @@ npm run package        # 产出 dsh-vscode.vsix，再按方式二安装
 |---|---|
 | `DSH: 打开面板` | 打开左侧面板 |
 | `DSH: 在辅助侧边栏打开` | 打开右侧面板 |
+| `DSH: 在编辑区打开` | 把 DSH 作为编辑器标签页打开（标题栏蓝色鲸鱼按钮） |
 | `DSH: 在浏览器中打开` | 在系统浏览器打开 DSH 页面 |
 | `DSH: 重启服务` | 重启插件管理的服务 |
 | `DSH: 停止服务` | 停止插件启动的服务 |
@@ -177,6 +180,7 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 | `dsh.port` | `3080` | 期望端口（探测与启动共用） |
 | `dsh.host` | `127.0.0.1` | 服务地址（仅允许回环地址） |
 | `dsh.autoStart` | `true` | 服务未运行时自动启动 |
+| `dsh.startOnWindowOpen` | `false` | 打开 VS Code 窗口时就在后台启动 `dsh web`，之后打开面板或编辑区标签页无需等待冷启动。默认关闭：开启后每个窗口常驻一个 `dsh web` 服务（窗口关闭时按 `dsh.stopOnExit` 停止） |
 | `dsh.stopOnExit` | `true` | 关闭最后一个窗口时停止插件自启的服务 |
 | `dsh.extraArgs` | `[]` | 启动 `dsh web` 时附加的参数 |
 | `dsh.executablePath` | `""` | dsh 可执行文件绝对路径（Windows 为 dsh.cmd）；留空则从 PATH 查找 |
@@ -233,7 +237,7 @@ profile 名称可包含 ASCII 字母、数字、点、下划线与连字符，�
 
 ```bash
 npm install
-npm run test          # 318 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话）
+npm run test          # 323 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话）
 npm run compile       # 构建 out/extension.js
 npm run watch         # 监听构建
 npm run typecheck     # 类型检查

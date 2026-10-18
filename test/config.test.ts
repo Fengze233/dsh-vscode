@@ -29,6 +29,8 @@ test('合法配置原样通过', () => {
     panelZoomLevel: 1,
     // v0.4.3：启动来源首选（auto = npm 优先，没有再桌面端）与桌面端命令路径（空 = 自动探测）
     launchPreference: 'auto', desktopCommandPath: '',
+    // v0.5.0：窗口预热（默认关闭，不改变既有行为）
+    startOnWindowOpen: false,
   });
 });
 
@@ -291,4 +293,17 @@ test('panelZoomLevel 非数字类型 → 回退默认并记录错误', () => {
   const r = normalizeConfig({ panelZoomLevel: '1.25' as unknown as number });
   assert.equal(r.config.panelZoomLevel, 1);
   assert.ok(r.errors.length > 0);
+});
+
+// ——— v0.5.0：窗口预热（dsh.startOnWindowOpen） ———
+test('startOnWindowOpen 默认 false；布尔值原样透传', () => {
+  assert.equal(normalizeConfig({}).config.startOnWindowOpen, false);
+  assert.equal(normalizeConfig({ startOnWindowOpen: true }).config.startOnWindowOpen, true);
+  assert.equal(normalizeConfig({ startOnWindowOpen: false }).config.startOnWindowOpen, false);
+});
+
+test('startOnWindowOpen 非布尔值 → 静默回退默认 false', () => {
+  const r = normalizeConfig({ startOnWindowOpen: 'true' as unknown as boolean });
+  assert.equal(r.config.startOnWindowOpen, false, '非布尔值回退默认 false');
+  assert.deepEqual(r.errors, [], '布尔设置沿用既有缺省处理：静默回退，不记错误');
 });

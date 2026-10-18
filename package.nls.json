@@ -5,6 +5,8 @@
   "dsh.cmd.openPanel.title": "DSH: Open Panel",
   "dsh.cmd.openSecondary.title": "DSH: Open in Secondary Side Bar",
   "dsh.cmd.openFromTitle.title": "DSH: Open Right Panel",
+  "dsh.cmd.openInEditor.title": "DSH: Open in Editor",
+  "dsh.config.startOnWindowOpen": "Start `dsh web` in the background as soon as a VS Code window opens, so opening the panel or the editor tab needs no cold start (Windows cold start is 15–25 s). Off by default: enables one `dsh web` service per window, stopped again according to `dsh.stopOnExit`.",
   "dsh.cmd.openExternal.title": "Open in Browser",
   "dsh.cmd.restart.title": "Restart Service",
   "dsh.cmd.stop.title": "Stop Service",

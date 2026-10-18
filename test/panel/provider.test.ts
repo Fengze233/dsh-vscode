@@ -87,3 +87,17 @@ test('bridgeDeps 的 openTextDocument 走 vscode.open（支持二进制交付物
   assert.deepEqual(executed[0], ['vscode.open', { fsPath: 'C:\\tmp\\kf11_full.png' }, { preview: false }]);
   assert.equal(shownText.length, 0, '不得再用 window.showTextDocument');
 });
+
+// v0.5.0：编辑区标签页（WebviewPanel）复用同一 provider——绑定裸 webview 即可渲染；
+// 关闭标签页后解绑，不得再向已销毁的宿主渲染 / 投递消息。
+test('resolveWebview 绑定编辑区面板宿主；detach 后停止渲染', () => {
+  const provider = new DshPanelProvider(fakeManager() as never);
+  const view = fakeView();
+  provider.resolveWebview(view.webview as never);
+  assert.ok(view.webview.html.length > 0, '绑定后应立即渲染页面（iframe 或占位页）');
+  provider.detach(view.webview as never);
+  const before = view.webview.html;
+  provider.refreshContextBar(); // 已解绑：内部判空直接返回
+  assert.equal(view.webview.html, before, '解绑后不得再渲染');
+  assert.equal(view.posted.length, 0, '解绑后不得再投递消息');
+});
