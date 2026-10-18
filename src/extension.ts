@@ -685,6 +685,46 @@ export function activate(context: vscode.ExtensionContext): void {
     panelUi(),
   );
   panels.push(panelPrimary, panelSecondary);
+
+  // 编辑区面板（编辑区标签页）：与两侧边栏面板共用同一 provider 逻辑，只是换一个 webview 宿主
+  // （WebviewPanel 而非 WebviewView）。provider 常驻复用：关闭标签页只解绑 webview，
+  // 再次打开时重建标签页即可（保留 bridgeToken 与 manager 状态订阅，不会重复订阅）。
+  let editorPanel: vscode.WebviewPanel | null = null;
+  let editorProvider: DshPanelProvider | null = null;
+  const openInEditor = (): void => {
+    if (editorPanel !== null) {
+      void editorPanel.reveal();
+      return;
+    }
+    const m = manager;
+    if (m === null) return;
+    const panel = vscode.window.createWebviewPanel('dsh.editor', 'DSH', vscode.ViewColumn.Active, {
+      enableScripts: true,
+      // 切走标签页时保留上下文：iframe 不销毁、DSH 页面会话不丢（与侧边栏面板一致）
+      retainContextWhenHidden: true,
+    });
+    if (editorProvider === null) {
+      editorProvider = new DshPanelProvider(
+        m,
+        undefined, // 编辑区标签页不重复触发「移到右侧栏」一次性引导
+        onBridgeAck,
+        workspaceRootGetter,
+        bridgeEnabledGetter,
+        remoteEnabledGetter,
+        resolveExternalUrl,
+        imageFallbackGetter,
+        panelUi(),
+      );
+      // 与两侧面板一并纳入刷新集合：配置变更 / 鉴权完成时由 refreshPanels() 统一重渲染
+      panels.push(editorProvider);
+    }
+    editorProvider.resolveWebview(panel.webview);
+    editorPanel = panel;
+    panel.onDidDispose(() => {
+      editorProvider?.detach(panel.webview);
+      editorPanel = null;
+    });
+  };
   new StatusBarController(manager);
 
   // 服务就绪后启动握手超时（若面板已打开）；并执行会话判定/兑换（自启自动、外部服务→登录引导页）
@@ -707,6 +747,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('dsh.openPanel', () => openPanel()),
     vscode.commands.registerCommand('dsh.openSecondary', () => openSecondary(context)),
     vscode.commands.registerCommand('dsh.openFromTitle', () => openSecondary(context)),
+    vscode.commands.registerCommand('dsh.openInEditor', () => openInEditor()),
     vscode.commands.registerCommand('dsh.openExternal', () => openExternal()),
     vscode.commands.registerCommand('dsh.restart', () => void manager?.restart()),
     vscode.commands.registerCommand('dsh.stop', () => void manager?.stop()),
@@ -746,6 +787,14 @@ export function activate(context: vscode.ExtensionContext): void {
   {
     const roots = vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath) ?? [];
     void cleanupStaleImageCaches((d) => nodeFs.readdir(d), async (p: string) => { await nodeFs.unlink(p); }, roots).catch(() => {});
+  }
+
+  // 窗口打开即预热（dsh.startOnWindowOpen，默认关闭，避免改变既有行为）：把 dsh web 的
+  // 冷启动（Windows 实测 15–25s）挪到窗口启动阶段，之后点任意入口只需等待 iframe 渲染。
+  // ensureRunning 幂等：与面板打开时的启动流程共享同一次 op，不会起第二个进程。
+  if (readConfig().config.startOnWindowOpen) {
+    appendLog('[process] 窗口打开即预启动服务（dsh.startOnWindowOpen=true）');
+    void manager.ensureRunning();
   }
 }
 

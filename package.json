@@ -32,7 +32,9 @@
     "onCommand:dsh.bridge.retry",
     "onCommand:dsh.bridge.uninstall",
     "onCommand:dsh.cleanupImageCache",
-    "onCommand:dsh.copyLogs"
+    "onCommand:dsh.copyLogs",
+    "onCommand:dsh.openInEditor",
+    "onStartupFinished"
   ],
   "contributes": {
     "viewsContainers": {
@@ -145,13 +147,23 @@
         "command": "dsh.openFromTitle",
         "title": "%dsh.cmd.openFromTitle.title%",
         "icon": "assets/whale-icon-bg.svg"
+      },
+      {
+        "command": "dsh.openInEditor",
+        "title": "%dsh.cmd.openInEditor.title%",
+        "icon": "assets/whale-icon-editor.svg"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "command": "dsh.openFromTitle",
+          "command": "dsh.openInEditor",
           "group": "navigation@0",
+          "when": "editorIsOpen"
+        },
+        {
+          "command": "dsh.openFromTitle",
+          "group": "navigation@1",
           "when": "editorIsOpen"
         }
       ],
@@ -349,6 +361,11 @@
             "150%（最大，适合演示）"
           ],
           "markdownDescription": "%dsh.config.panelZoom%"
+        },
+        "dsh.startOnWindowOpen": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%dsh.config.startOnWindowOpen%"
         }
       }
     }

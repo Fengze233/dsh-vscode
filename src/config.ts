@@ -39,6 +39,8 @@ export interface RawDshConfig {
   useEnvProxy?: boolean;
   /** 面板内网页缩放档位（dsh.panel.zoomLevel，issue #8） */
   panelZoomLevel?: number;
+  /** 是否在窗口打开时即预启动 dsh 服务（dsh.startOnWindowOpen，默认关闭） */
+  startOnWindowOpen?: boolean;
 }
 
 /** 规范化后的配置（均有合法默认值） */
@@ -75,6 +77,8 @@ export interface DshConfig {
   useEnvProxy: boolean;
   /** 面板内网页缩放档位（dsh.panel.zoomLevel） */
   panelZoomLevel: number;
+  /** 窗口打开即预启动 dsh 服务（dsh.startOnWindowOpen） */
+  startOnWindowOpen: boolean;
 }
 
 /** 默认配置 */
@@ -103,6 +107,9 @@ export const DEFAULTS: DshConfig = {
   useEnvProxy: false,
   // 面板缩放：默认 1（= 当前行为，零变化）
   panelZoomLevel: 1,
+  // 窗口打开即预热：默认关。它会为每个打开的窗口常驻一个 dsh web 进程，
+  // 属于行为变化，故做成显式开关（开启后点面板入口无需等待冷启动）。
+  startOnWindowOpen: false,
 };
 
 /** 面板缩放允许的范围（issue #8）：0.5–1.5 之间的任意数值都接受，用于"自定义缩放"。
@@ -291,12 +298,16 @@ export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors:
     panelZoomLevel = raw.panelZoomLevel;
   }
 
+  // startOnWindowOpen（dsh.startOnWindowOpen）：布尔设置沿用既有缺省处理（非法静默回退默认）
+  const startOnWindowOpen =
+    typeof raw.startOnWindowOpen === 'boolean' ? raw.startOnWindowOpen : DEFAULTS.startOnWindowOpen;
+
   return {
     config: {
       profile, launchPreference, desktopCommandPath,
       host, port, autoStart, stopOnExit, extraArgs, bridgeEnabled, workspaceRootIndex,
       silenceWarning, executablePath, openInBrowser, remoteEnabled, imageFallback,
-      startTimeoutMs, env, useEnvProxy, panelZoomLevel,
+      startTimeoutMs, env, useEnvProxy, panelZoomLevel, startOnWindowOpen,
     },
     errors,
   };
@@ -347,5 +358,6 @@ export function readConfig(): { config: DshConfig; errors: string[] } {
     env: ws.get<Record<string, string>>('env'),
     useEnvProxy: ws.get<boolean>('useEnvProxy'),
     panelZoomLevel: ws.get<number>('panel.zoomLevel'),
+    startOnWindowOpen: ws.get<boolean>('startOnWindowOpen'),
   });
 }

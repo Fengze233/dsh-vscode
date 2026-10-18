@@ -208,3 +208,33 @@ test('README 中英与 CHANGELOG 未发布测试数等于实际测试数，历�
   assert.equal(Number(dropped[2]), Number(green[1]), 'CHANGELOG 同一版本的测试数应一致');
   assert.ok(Number(dropped[1]) > Number(dropped[2]), '撤回后测试数应下降');
 });
+
+// ——— v0.5.0：编辑区标签页入口 + 窗口预热 ———
+test('编辑区入口：命令 + 彩色鲸鱼图标 + editor/title 菜单 + onStartupFinished 激活', () => {
+  const p = pkg();
+  const root = join(__dirname, '..', '..');
+  const cmd = p.contributes.commands.find((c: { command: string }) => c.command === 'dsh.openInEditor');
+  assert.ok(cmd, '存在 dsh.openInEditor 命令');
+  // 与右侧面板按钮（白底鲸鱼 whale-icon-bg.svg）区分：编辑区入口用彩色鲸鱼
+  assert.equal(cmd.icon, 'assets/whale-icon-editor.svg', '编辑区入口应使用彩色鲸鱼图标');
+  assert.ok(String(cmd.title).includes('dsh.cmd.openInEditor.title'), '命令标题走本地化');
+  const iconPath = join(root, 'assets', 'whale-icon-editor.svg');
+  assert.ok(existsSync(iconPath), '彩色鲸鱼图标文件应存在');
+  assert.ok(readFileSync(iconPath, 'utf8').includes('#4D6BFE'), '彩色图标应为 DSH 品牌蓝');
+  const menu: { command: string; group?: string }[] = p.contributes.menus['editor/title'] || [];
+  const item = menu.find((m) => m.command === 'dsh.openInEditor');
+  assert.ok(item, 'editor/title 菜单包含该命令');
+  assert.ok(String(item.group).startsWith('navigation'), '组为 navigation（标签栏右侧图标区）');
+  assert.ok(p.activationEvents.includes('onCommand:dsh.openInEditor'), '需声明命令激活事件');
+  // 窗口预热依赖窗口级激活事件；缺了它 startOnWindowOpen 永远不会生效
+  assert.ok(p.activationEvents.includes('onStartupFinished'), '需声明 onStartupFinished 激活事件');
+});
+
+test('dsh.startOnWindowOpen 设置项：默认 false（不改变既有行为）且走本地化文案', () => {
+  const p = pkg();
+  const prop = p.contributes.configuration.properties['dsh.startOnWindowOpen'];
+  assert.ok(prop, '存在 dsh.startOnWindowOpen 设置');
+  assert.equal(prop.type, 'boolean');
+  assert.equal(prop.default, false, '默认关闭：不为每个窗口常驻一个 dsh web 进程');
+  assert.equal(prop.markdownDescription, '%dsh.config.startOnWindowOpen%');
+});

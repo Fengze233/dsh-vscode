@@ -36,6 +36,8 @@ Works with **DSH 0.1.2 and newer**, including its one-time-token browser authent
 - 🔒 **Security boundary**: loopback addresses only (127.0.0.1 / localhost / [::1]); no credentials are read.
 - 🔐 **DSH 0.1.2 auth-aware**: the extension parses the one-time launch URL from the service log, exchanges it for DSH's signed browser cookie (valid 30 days, survives service restarts) and serves the panel through a local loopback relay that presents that session for the iframe — so the embedded UI keeps working even though DSH's `SameSite=Strict` cookie can never be used inside a cross-site iframe. A session that expires is re-acquired automatically (a self-started service) or after one paste (an externally started service);
 - 🔝 **Editor title-bar icon**: a DSH whale button sits in the top-right of the editor tab bar (like Claude Code) — one click opens the right-side DSH panel;
+- 🗂️ **Editor-area tab**: `DSH: Open in Editor` (blue whale button in the editor title bar) opens DSH as a regular editor tab — same UI, bridge and auth relay as the sidebar panel, sitting next to your open files;
+- ⚡ **Optional pre-warm**: with `dsh.startOnWindowOpen`, `dsh web` starts in the background as soon as a window opens, so the panel or the editor tab opens without the 15–25 s cold start;
 - 🌐 **SSH Remote (opt-in)**: when connected to a remote host, run dsh on the remote and open the panel through a VS Code tunnel (`dsh.remote.enabled`, off by default);
 - 🖼️ **Free image upload**: send images even when the active model has no vision — the image is cached in the workspace and dispatched as a file-path reference, letting the model inspect it with an image tool (files are cleaned up when the panel closes; opt-out via `dsh.image.fallback`);
 - 🪟 **No surprise browser window**: `dsh web` is started with `--no-open` by default (restore with `dsh.openInBrowser`).
@@ -84,6 +86,7 @@ npm run package        # produces dsh-vscode.vsix, then install as in Option 2
 |---|---|
 | `DSH: Open Panel` | Open the left panel |
 | `DSH: Open in Secondary Side Bar` | Open the right panel |
+| `DSH: Open in Editor` | Open DSH as an editor tab (blue whale button in the editor title bar) |
 | `DSH: Open in Browser` | Open the DSH page in the system browser |
 | `DSH: Restart Service` | Restart the extension-managed service |
 | `DSH: Stop Service` | Stop the extension-started service |
@@ -179,6 +182,7 @@ The bridge only works inside the panel. If it is inactive (e.g. you open the DSH
 | `dsh.port` | `3080` | Desired port (used for both detection and startup) |
 | `dsh.host` | `127.0.0.1` | Service address (loopback only) |
 | `dsh.autoStart` | `true` | Auto-start the service when it is not running |
+| `dsh.startOnWindowOpen` | `false` | Start `dsh web` in the background as soon as a VS Code window opens, so opening the panel or the editor tab needs no cold start. Off by default: it keeps one `dsh web` service per window (stopped on window close according to `dsh.stopOnExit`) |
 | `dsh.stopOnExit` | `true` | Stop the extension-started service when the last window closes |
 | `dsh.extraArgs` | `[]` | Extra arguments appended when starting `dsh web` |
 | `dsh.executablePath` | `""` | Absolute path to the `dsh` executable (`dsh.cmd` on Windows); empty = look up on PATH |
@@ -208,7 +212,7 @@ Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 318 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
+npm run test          # 323 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
 npm run compile       # builds out/extension.js
 npm run watch         # watch build
 npm run typecheck     # type check

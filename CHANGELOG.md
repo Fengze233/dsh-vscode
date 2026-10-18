@@ -1,8 +1,18 @@
 ## [Unreleased]
 
+### 新增
+
+- **编辑区标签页** `dsh.openInEditor`：编辑器标签栏右上角新增蓝色鲸鱼按钮，把 DSH 作为普通编辑器
+  标签页打开（与侧边栏面板共用同一套渲染、桥接与鉴权代办逻辑，`WebviewPanel` 宿主与 `WebviewView`
+  共用 `DshPanelProvider.resolveWebview`）。切换标签页保留上下文（`retainContextWhenHidden`），
+  关闭标签页只解绑 webview、provider 常驻复用。
+- **窗口预热** `dsh.startOnWindowOpen`（默认 `false`）：打开窗口即在后台 `ensureRunning()`，
+  点面板入口时无需等待 DSH 冷启动（Windows 实测 15–25 秒）。新增 `onStartupFinished` 激活事件；
+  `ensureRunning()` 幂等，与面板打开时的启动流程共享同一次 op，不会起第二个进程。
+
 ### 测试
 
-测试用例共 318 个；本次验证 315 个通过，2 个真实 DSH 集成测试按环境门控跳过、1 个 Windows 专属用例在非 Windows 平台跳过。
+测试用例共 323 个；本次验证 320 个通过，2 个真实 DSH 集成测试按环境门控跳过、1 个 Windows 专属用例在非 Windows 平台跳过。
 当前测试数量由 README 与本节共同校验，已发布版本的历史测试数字保持不变。
 
 ## [0.4.3] - 2026-10-16

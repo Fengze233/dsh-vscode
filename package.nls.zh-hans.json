@@ -2,6 +2,8 @@
   "dsh.container.title": "DSH",
   "dsh.view.panel.name": "DSH 面板",
   "dsh.view.panelSecondary.name": "DSH 面板（右）",
+  "dsh.cmd.openInEditor.title": "DSH: 在编辑区打开",
+  "dsh.config.startOnWindowOpen": "打开 VS Code 窗口时就在后台启动 `dsh web`，之后打开面板或编辑区标签页无需等待冷启动（Windows 冷启动 15–25 秒）。默认关闭：开启后每个窗口会常驻一个 `dsh web` 服务，窗口关闭时按 `dsh.stopOnExit` 停止。",
   "dsh.cmd.openPanel.title": "DSH: 打开面板",
   "dsh.cmd.openSecondary.title": "DSH: 在辅助侧边栏打开",
   "dsh.cmd.openFromTitle.title": "DSH：打开右侧面板",

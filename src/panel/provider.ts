@@ -34,7 +34,8 @@ export interface PanelProviderUiOpts {
 }
 
 export class DshPanelProvider implements vscode.WebviewViewProvider {
-  private view: vscode.WebviewView | null = null;
+  /** 当前绑定的 webview 宿主（侧边栏视图或编辑区面板；未打开时为 null） */
+  private webview: vscode.Webview | null = null;
   /** 曾处于 ready：用于区分"服务断开"与"手动停止"两种占位页 */
   private wasConnected = false;
   /** 面板是否已首次打开过（用于一次性回调） */
@@ -78,21 +79,38 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
-    this.view = view;
+    this.resolveWebview(view.webview);
+  }
+
+  /**
+   * 绑定一个 webview 宿主：侧边栏视图（WebviewView）与编辑区面板（WebviewPanel）共用同一套
+   * 渲染 / 桥接 / 状态订阅逻辑，二者的差异只在宿主生命周期（由扩展入口负责创建与解绑）。
+   */
+  resolveWebview(webview: vscode.Webview): void {
+    this.webview = webview;
     // enableScripts 允许占位页的内联按钮脚本（nonce 放行）运行。
     // 注意：retainContextWhenHidden 不在这里设置——它不是 WebviewOptions 字段，
-    // 由 Task 10 注册视图时通过第三参数传入（隐藏面板时保留 iframe 会话）。
-    view.webview.options = { enableScripts: true };
-    view.webview.onDidReceiveMessage((msg: PanelMessage) => this.onMessage(msg));
+    // 由注册视图 / createWebviewPanel 的选项传入（隐藏面板时保留 iframe 会话）。
+    webview.options = { enableScripts: true };
+    webview.onDidReceiveMessage((msg: PanelMessage) => this.onMessage(msg));
     if (!this.openedOnce) {
       this.openedOnce = true;
       this.onFirstOpen?.(); // 首次打开：触发一次性引导（如"移到右侧栏"提示）
     }
     this.render();
+    // 服务可能早已就绪（例如窗口预热后从编辑区打开标签页），此时不会再有状态变化事件：
+    // 必须主动按当前状态重算一次 iframe 基地址（DSH ≥0.1.2 只能经本地代办代理访问），
+    // 否则新宿主会直连 dsh 并撞上 401「dsh web authentication required」。
+    void this.handleStateChange();
     // 远程窗口且未启用远程支持：仅显示占位页，绝不在此窗口启动远端 dsh 服务。
     if (this.remoteWindowDisabled()) return;
     // 面板打开即确保服务运行：复用已有或自动启动。
     void this.manager.ensureRunning();
+  }
+
+  /** 解绑 webview（编辑区面板关闭时调用）：防止向已销毁的 webview 渲染 / 投递消息 */
+  detach(webview: vscode.Webview): void {
+    if (this.webview === webview) this.webview = null;
   }
 
   /**
@@ -194,7 +212,7 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       },
       // 回执：由顶层握手脚本转发回 iframe（saveImageAck / deleteImagesAck）
       reply: async (m) => {
-        await this.view?.webview.postMessage(m);
+        await this.webview?.postMessage(m);
       },
     };
   }
@@ -210,7 +228,7 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       // DSH 会继续走自己的 execCommand('copy') 回退路径。
     }
     try {
-      await this.view?.webview.postMessage({ type: 'bridgeCopyTextAck', requestId: msg.requestId, ok });
+      await this.webview?.postMessage({ type: 'bridgeCopyTextAck', requestId: msg.requestId, ok });
     } catch {
       // 面板可能已隐藏/销毁，回执发不出去也不影响扩展其它功能。
     }
@@ -228,7 +246,7 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       // 读剪贴板失败（如系统无剪贴板权限）：回执 ok=false，iframe 侧静默放弃
     }
     try {
-      await this.view?.webview.postMessage({
+      await this.webview?.postMessage({
         type: 'bridgeReadTextAck',
         requestId: msg.requestId,
         ok,
@@ -282,11 +300,11 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
 
   /** 按服务状态渲染对应页面 */
   private render(): void {
-    const v = this.view;
-    if (!v) return;
+    const w = this.webview;
+    if (!w) return;
     const nonce = Math.random().toString(36).slice(2);
     const { host, port } = this.manager.getTarget();
-    const ctx: PageCtx = { nonce, cspSource: v.webview.cspSource, frameHosts: [`http://${host}:${port}`] };
+    const ctx: PageCtx = { nonce, cspSource: w.cspSource, frameHosts: [`http://${host}:${port}`] };
     const s = this.manager.getSnapshot();
     let html: string;
     // 远程窗口且未启用：任何状态都只展示引导占位页，不触碰远端服务。
@@ -336,7 +354,7 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
           html = loadingPage(t, ctx);
       }
     }
-    v.webview.html = html;
+    w.html = html;
   }
 
   /**
@@ -347,7 +365,7 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
    * 注意：**不能**提前返回——未打开面板时只跳过渲染动作，由 render 自身判空。
    */
   refreshContextBar(): void {
-    if (!this.view) return;
+    if (!this.webview) return;
     this.render();
   }
 }
