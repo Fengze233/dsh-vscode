@@ -261,9 +261,10 @@ function shell(ctx: PageCtx, title: string, bodyClass: string, body: string, ext
 </html>`;
 }
 
-/** 加载中占位页 */
-export function loadingPage(t: T, ctx: PageCtx): string {
-  return shell(ctx, t('panel.loading'), '', `<div class="center"><div class="spinner"></div><p>${t('panel.loading')}</p></div>`);
+/** 加载中占位页（文案随服务状态变化，默认「正在启动」） */
+export function loadingPage(t: T, ctx: PageCtx, messageKey: MsgKey = 'panel.loading'): string {
+  const message = t(messageKey);
+  return shell(ctx, message, '', `<div class="center"><div class="spinner"></div><p>${message}</p></div>`);
 }
 
 /** 启动失败占位页：原因 + 重试 + 查看日志 */

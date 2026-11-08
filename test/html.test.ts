@@ -15,6 +15,16 @@ test('loadingPage 包含加载动画与本地化文案', () => {
   assert.ok(html.includes(t('panel.loading')));
 });
 
+test('loadingPage 按服务状态显示对应文案（停止中不再显示「启动中」）', () => {
+  initI18n('en');
+  const stopping = loadingPage(t, ctx(), 'panel.stopping');
+  assert.ok(stopping.includes('spinner'));
+  assert.ok(stopping.includes(t('panel.stopping')));
+  assert.ok(!stopping.includes(t('panel.loading')), '停止中不得显示启动文案');
+  assert.ok(loadingPage(t, ctx(), 'panel.waiting').includes(t('panel.waiting')));
+  assert.ok(loadingPage(t, ctx(), 'panel.detecting').includes(t('panel.detecting')));
+});
+
 test('errorPage 包含重试按钮并转义消息中的 HTML', () => {
   initI18n('en');
   const html = errorPage(t, ctx(), '<script>alert(1)</script>');

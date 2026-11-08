@@ -6,6 +6,9 @@ const messages = {
   en: {
     // 面板占位页
     'panel.loading': 'Starting DSH service…',
+    'panel.detecting': 'Checking DSH service…',
+    'panel.waiting': 'Waiting for DSH service to become ready…',
+    'panel.stopping': 'Stopping DSH service…',
     'panel.errorTitle': 'Failed to start DSH service',
     'panel.disconnectedTitle': 'DSH service disconnected',
     'panel.reconnect': 'Reconnect',
@@ -45,6 +48,7 @@ const messages = {
     // 状态栏
     'status.running': 'DSH: Running',
     'status.starting': 'DSH: Starting',
+    'status.stopping': 'DSH: Stopping',
     'status.failed': 'DSH: Failed',
     'status.stopped': 'DSH: Stopped',
     // 辅助侧边栏引导
@@ -70,6 +74,9 @@ const messages = {
   },
   zh: {
     'panel.loading': '正在启动 DSH 服务…',
+    'panel.detecting': '正在检查 DSH 服务…',
+    'panel.waiting': '正在等待 DSH 服务就绪…',
+    'panel.stopping': '正在停止 DSH 服务…',
     'panel.errorTitle': 'DSH 服务启动失败',
     'panel.disconnectedTitle': 'DSH 服务已断开',
     'panel.reconnect': '重新连接',
@@ -107,6 +114,7 @@ const messages = {
     'err.loadFailed': '无法加载 DSH 页面。',
     'status.running': 'DSH: 运行中',
     'status.starting': 'DSH: 启动中',
+    'status.stopping': 'DSH: 正在停止',
     'status.failed': 'DSH: 失败',
     'status.stopped': 'DSH: 已停止',
     'guide.secondaryTitle': 'DSH：双侧栏入口',

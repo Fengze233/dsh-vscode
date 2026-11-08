@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DshPanelProvider } from '../../src/panel/provider';
+import { initI18n, t } from '../../src/i18n';
 import * as vscodeStub from '../vscode-stub';
 
 /** 假 ServiceManager(仅 provider 用到的接口) */
@@ -63,6 +64,20 @@ test('refreshContextBar 重渲染并让新的缩放档位即时生效', () => {
 test('未打开面板时 refreshContextBar 安全返回(不抛异常)', () => {
   const provider = new DshPanelProvider(fakeManager() as never);
   provider.refreshContextBar(); // 无 view：内部判空直接返回
+});
+
+// 文案回归：点击「停止服务」后 manager 进入 stopping，面板不能仍显示「正在启动」。
+test('stopping 状态的面板显示「正在停止」而不是「正在启动」', () => {
+  initI18n('en');
+  const manager = {
+    ...fakeManager(),
+    getSnapshot: () => ({ state: 'stopping', url: null, error: null, owned: true }),
+  };
+  const provider = new DshPanelProvider(manager as never);
+  const view = fakeView();
+  provider.resolveWebviewView(view as never);
+  assert.ok(view.webview.html.includes(t('panel.stopping')));
+  assert.ok(!view.webview.html.includes(t('panel.loading')));
 });
 
 // issue #33：交付物（图片/PDF/未知二进制）必须用 vscode.open 打开。

@@ -331,9 +331,18 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
         case 'idle':
           html = this.wasConnected ? disconnectedPage(t, ctx) : stoppedPage(t, ctx);
           break;
-        default:
-          // detecting / starting / waiting / stopping：统一加载中动画页
-          html = loadingPage(t, ctx);
+        case 'detecting':
+          html = loadingPage(t, ctx, 'panel.detecting');
+          break;
+        case 'starting':
+          html = loadingPage(t, ctx, 'panel.loading');
+          break;
+        case 'waiting':
+          html = loadingPage(t, ctx, 'panel.waiting');
+          break;
+        case 'stopping':
+          html = loadingPage(t, ctx, 'panel.stopping');
+          break;
       }
     }
     v.webview.html = html;
