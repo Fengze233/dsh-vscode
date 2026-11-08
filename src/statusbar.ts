@@ -3,10 +3,11 @@ import * as vscode from 'vscode';
 import { ServiceManager, type ServiceSnapshot } from './service/manager';
 import { t } from './i18n';
 
-/** 四种状态的图标 + 文案键 + 颜色主题 ID（绿/黄/红/灰） */
+/** 五种状态的图标 + 文案键 + 颜色主题 ID（绿/黄/橙/红/灰） */
 const PRESETS = {
   running: { icon: '$(check)', color: 'charts.green', textKey: 'status.running' },
   starting: { icon: '$(sync~spin)', color: 'charts.yellow', textKey: 'status.starting' },
+  stopping: { icon: '$(sync~spin)', color: 'charts.orange', textKey: 'status.stopping' },
   failed: { icon: '$(error)', color: 'charts.red', textKey: 'status.failed' },
   stopped: { icon: '$(circle-outline)', color: 'descriptionForeground', textKey: 'status.stopped' },
 } as const;
@@ -25,14 +26,26 @@ export class StatusBarController {
   }
 
   private update(s: ServiceSnapshot): void {
-    const key: PresetKey =
-      s.state === 'ready'
-        ? 'running'
-        : s.state === 'failed'
-          ? 'failed'
-          : s.state === 'idle'
-            ? 'stopped'
-            : 'starting';
+    let key: PresetKey;
+    switch (s.state) {
+      case 'ready':
+        key = 'running';
+        break;
+      case 'failed':
+        key = 'failed';
+        break;
+      case 'idle':
+        key = 'stopped';
+        break;
+      case 'stopping':
+        key = 'stopping';
+        break;
+      case 'detecting':
+      case 'starting':
+      case 'waiting':
+        key = 'starting';
+        break;
+    }
     const p = PRESETS[key];
     this.item.text = `${p.icon} ${t(p.textKey)}`;
     this.item.color = new vscode.ThemeColor(p.color);

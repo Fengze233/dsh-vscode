@@ -58,11 +58,27 @@ export function findInPathWin(
   envPath: string | undefined,
   exists: (p: string) => boolean,
 ): string | null {
+  return findShimInPathWin(target, envPath, exists, () => true);
+}
+
+/**
+ * 在 PATH 里找第一个「存在且满足 accept」的固定文件名。
+ *
+ * 为什么需要 accept：PATH 里可能同时有 npm 全局 shim 与 DSH Desktop 的 dsh.cmd，
+ * 两者布局不同，不能只取第一个再判定——否则 Desktop 排在 PATH 前面时，
+ * npm 版永远找不到（issue #41 的现场就是 Desktop 命令先命中）。
+ */
+function findShimInPathWin(
+  target: string,
+  envPath: string | undefined,
+  exists: (p: string) => boolean,
+  accept: (p: string) => boolean,
+): string | null {
   if (envPath === undefined) return null;
   for (const dir of envPath.split(';')) {
     if (dir === '') continue;
     const candidate = win32Path.join(dir, target);
-    if (exists(candidate)) return candidate;
+    if (exists(candidate) && accept(candidate)) return candidate;
   }
   return null;
 }
@@ -177,12 +193,18 @@ export function resolveLaunch(input: LaunchInput): LaunchResolution | null {
   }
 
   // 2) 两个来源各自的可用性判定（都做完整判定，便于回退与日志）
-  const npmShimRaw = isWin ? findInPathWin('dsh.cmd', env.path, exists) : null;
-  // PATH 里若只有 DSH Desktop 的命令，它并不是 npm 全局 shim：直接判 npm 不可用，
-  // 不再去推导 npm 布局的 bin.js（真机日志里那一长串「bin.js missing」即由此而来）。
-  const npmShim = npmShimRaw !== null && isDesktopInstallPath(npmShimRaw) ? null : npmShimRaw;
-  if (npmShimRaw !== null && npmShim === null) {
-    log.push(`npm: skipped ${npmShimRaw} (DSH Desktop install, not an npm global shim)`);
+  // PATH 里可能同时存在 npm shim 与 Desktop 命令：分别按类型扫描，不能只取第一个。
+  // issue #41 的现场：Desktop 装在 H:\，PATH 第一个命中的就是 Desktop 命令；
+  // 旧逻辑把它从 npm 候选丢弃后没有任何 Desktop 兜底，默认目录探测又落空 → ENOENT。
+  const npmShim = isWin
+    ? findShimInPathWin('dsh.cmd', env.path, exists, (p) => !isDesktopInstallPath(p))
+    : null;
+  const desktopFromPath = isWin
+    ? findShimInPathWin('dsh.cmd', env.path, exists, isDesktopInstallPath)
+    : null;
+  if (npmShim === null && desktopFromPath !== null) {
+    // 保留原有日志语义：PATH 里只有 Desktop 命令时，npm 不应再推导 npm 布局的 bin.js
+    log.push(`npm: skipped ${desktopFromPath} (DSH Desktop install, not an npm global shim)`);
   }
   const npmBinJs = npmShim === null ? null : binJsFromShim(npmShim);
   // 关键：推导出的 bin.js 必须真实存在才算 npm 可用（issue #30 的根因就在这里）
@@ -193,14 +215,29 @@ export function resolveLaunch(input: LaunchInput): LaunchResolution | null {
     ? input.desktopCommandPath
     : null;
   const desktopDefault = isWin ? desktopDefaultCommand(env.localAppData) : null;
-  const desktopCmd = desktopConfigured !== null && exists(desktopConfigured)
-    ? desktopConfigured
-    : desktopDefault !== null && exists(desktopDefault) ? desktopDefault : null;
-  if (desktopConfigured !== null && desktopCmd !== desktopConfigured) {
+  // Desktop 候选顺序：用户配置 → 默认安装目录 → PATH 命中的 Desktop 命令。
+  // 最后一项是 issue #41 的修法：非默认盘符安装时，默认目录探测必然落空，
+  // 但 Desktop 的「管理 dsh 命令」已经把命令加进 PATH，必须接住它。
+  let desktopCmd: string | null = null;
+  let desktopFrom: 'configured' | 'default' | 'path' | null = null;
+  if (desktopConfigured !== null && exists(desktopConfigured)) {
+    desktopCmd = desktopConfigured;
+    desktopFrom = 'configured';
+  } else if (desktopDefault !== null && exists(desktopDefault)) {
+    desktopCmd = desktopDefault;
+    desktopFrom = 'default';
+  } else if (desktopFromPath !== null) {
+    desktopCmd = desktopFromPath;
+    desktopFrom = 'path';
+  }
+  if (desktopConfigured !== null && desktopFrom !== 'configured') {
     // 设置里填了路径但不存在：不弹错，退回自动探测并留痕（设计 D2）
     log.push(`desktop: configured ${desktopConfigured} not found, falling back to default probe`);
   }
   if (desktopCmd === null && desktopDefault !== null) log.push(`desktop: not found at ${desktopDefault}`);
+  if (desktopFrom === 'path' && desktopFromPath !== null) {
+    log.push(`desktop: using PATH hit ${desktopFromPath} (non-default install)`);
+  }
 
   const makeNpm = (fellBack: boolean): LaunchResolution => ({
     source: 'npm', mode: 'node', executablePath: npmBinJs as string, argsPrefix: [npmBinJs as string],
