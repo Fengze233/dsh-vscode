@@ -95,6 +95,7 @@ npm run package        # produces dsh-vscode.vsix
 - Click the whale in the Activity Bar or Secondary Side Bar; the panel title bar has **Open in Browser**, **Restart Service**, **Stop Service**, **Copy URL** and **Show Logs**.
 - The status bar shows the live service state (running / starting / stopping / failed / stopped); click it to toggle the panel.
 - If `dsh.port` is occupied by another program, the extension temporarily switches to the first free port for this session and tells you; your setting is unchanged.
+- Platform rule: the left whale opens the left panel, the right whale opens the right panel; a sidebar view cannot be moved into the editor area.
 
 ### Command palette (`DSH:`)
 
@@ -277,17 +278,28 @@ src/
 └── statusbar.ts          # status bar controller
 ```
 
+## 🤝 Contributing
+
+Issues and PRs are welcome. Keep PRs small and focused, and read [CONTRIBUTING.md](CONTRIBUTING.md) before opening one.
+
+**PR checklist**
+
+- [ ] One feature or fix per PR; open an issue first for large changes.
+- [ ] **Do not bump versions** (`package.json`, `package-lock.json`, `bridge-client/package.json`, `BRIDGE_VERSION`) or add tags; releases are handled by maintainers.
+- [ ] Do not add CHANGELOG version headings or release dates; put functional notes under `[Unreleased]`.
+- [ ] Keep `README.md` and `README.zh.md` in sync; test counts must match `npm test`.
+- [ ] Run `npm run typecheck`, `npm test`, `npm run compile` and `npx vsce package --no-dependencies`; CI must pass.
+- [ ] Add tests for behavior changes; note the Windows test environment if the change is Windows-specific.
+- [ ] Do not commit `out/`, `*.vsix`, logs or local caches.
+- [ ] For UI changes attach a screenshot/recording; for new settings update both NLS files and both READMEs.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full rules.
+
 ## 🧭 Known limitations
 
-- **Shift+drag from the VS Code Explorer (upstream)**: since VS Code 1.140, resource drags from the Explorer no longer deliver `dragenter`/`dragover`/`drop` to a webview ([microsoft/vscode#339278](https://github.com/microsoft/vscode/issues/339278); the upstream fix is still open). Use your system file manager to drag a file into the panel, or type `@` in the composer instead. Tracked in [issue #37](https://github.com/Fengze233/dsh-vscode/issues/37).
-- **Image fallback needs a workspace folder**: files are cached under the workspace root. With no folder open, images cannot be cached and no fallback happens. Temporary images are deleted after use (next message in the same session, or a TTL); `DSH: Clean Up Image Cache` purges leftovers.
+- **Shift+drag from the VS Code Explorer (upstream)**: since VS Code 1.140, resource drags from the Explorer no longer deliver `dragenter`/`dragover`/`drop` to a webview ([microsoft/vscode#339278](https://github.com/microsoft/vscode/issues/339278); the upstream fix is still open). Use your system file manager or type `@` in the composer. Tracked in [issue #37](https://github.com/Fengze233/dsh-vscode/issues/37).
+- **Image fallback needs a workspace folder**: files are cached under the workspace root; with no folder open, the fallback is unavailable. Temporary images are cleaned up after use; `DSH: Clean Up Image Cache` purges leftovers.
 - **Externally started DSH (≥ 0.1.2)**: the extension cannot read another process's log, so the first sign-in needs one paste of the launch URL (then up to 30 days). A service restart does not require pasting again.
-- **Narrow-viewport CJK caret (upstream)**: in a ~300–400 px wide panel the caret can land inside the last CJK character. This is a DSH web-frontend issue (tracked as [issue #9](https://github.com/Fengze233/dsh-vscode/issues/9)); the composer was rewritten upstream in 0.1.2.
-- **VS Code platform rule**: the left icon opens the left panel, the right icon opens the right panel; a sidebar view cannot be moved into the editor area.
-- **SSH Remote**: the extension must also be installed on the remote (VS Code prompts); the tunnel appears in the Ports view and can be closed manually (the extension re-creates it on the next ready).
-- **Verifying the bridge version**: in the panel DevTools console you should see `[dsh-vscode-bridge] handshake ok, v0.4.4, imageFallback=true`. If it shows an older version, run `DSH: Retry Bridge Install` or restart the DSH service.
-- **`--no-open`**: passed to `dsh web` by default; opt out with `dsh.openInBrowser` or explicit `dsh.extraArgs`.
-- **Walkthrough card icon**: the colored icon on the “Get Started with DSH” walkthrough card comes from Marketplace gallery data and appears after the extension is published; the card itself works regardless.
 
 ## 🌐 Community
 

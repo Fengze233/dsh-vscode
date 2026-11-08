@@ -95,6 +95,7 @@ npm run package        # 产出 dsh-vscode.vsix
 - 点击活动栏或辅助侧边栏的鲸鱼图标打开面板；面板标题栏提供 **Open in Browser**、**Restart Service**、**Stop Service**、**Copy URL**、**Show Logs**。
 - 底部状态栏显示服务状态（运行中 / 启动中 / 正在停止 / 失败 / 已停止），点击可切换面板。
 - `dsh.port` 被其他程序占用时，插件会为本次会话临时切换到第一个空闲端口并提示；你的设置不会被改写。
+- VS Code 平台规则：左侧鲸鱼打开左侧面板，右侧鲸鱼打开右侧面板；侧边栏视图不能移入编辑区。
 
 ### 命令面板（`DSH:`）
 
@@ -306,17 +307,28 @@ src/
 └── statusbar.ts          # 状态栏控制器
 ```
 
+## 🤝 参与贡献
+
+欢迎提交 issue 和 PR。请保持 PR 小而聚焦，并在提交前阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+**PR 要求**
+
+- [ ] 一个 PR 只做一件事；大改动先开 issue 讨论。
+- [ ] **不要改版本号**（`package.json`、`package-lock.json`、`bridge-client/package.json`、`BRIDGE_VERSION`），也不要打 tag；发布由维护者统一处理。
+- [ ] 不要加 CHANGELOG 版本标题或发布日期；功能说明写在 `[Unreleased]` 下。
+- [ ] `README.md` 与 `README.zh.md` 保持同步；测试数必须与 `npm test` 实际一致。
+- [ ] 本地跑 `npm run typecheck`、`npm test`、`npm run compile` 和 `npx vsce package --no-dependencies`；CI 必须通过。
+- [ ] 行为变更补测试；Windows 相关改动请注明测试环境。
+- [ ] 不要提交 `out/`、`*.vsix`、日志或本地缓存。
+- [ ] UI 改动附截图/录屏；新增设置同时更新两个 NLS 文件和两份 README。
+
+完整规则见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 ## 🧭 已知限制
 
-- **从资源管理器 Shift+拖文件（上游问题）**：VS Code 1.140 起，资源管理器发起的拖拽不再向 webview 投递 `dragenter`/`dragover`/`drop`（[microsoft/vscode#339278](https://github.com/microsoft/vscode/issues/339278)，上游修复仍未合并）。临时改用系统文件管理器拖文件，或在输入框里输入 `@`。跟踪：[issue #37](https://github.com/Fengze233/dsh-vscode/issues/37)。
-- **图片降级需要工作区文件夹**：缓存文件放在工作区根目录；未打开文件夹时无法落盘，也就不会降级。临时图用完后会删除（同会话下一条消息或 TTL 兜底）；`DSH: 清理图片缓存` 可手动清理。
+- **从资源管理器 Shift+拖文件（上游问题）**：VS Code 1.140 起，资源管理器发起的拖拽不再向 webview 投递 `dragenter`/`dragover`/`drop`（[microsoft/vscode#339278](https://github.com/microsoft/vscode/issues/339278)，上游修复仍未合并）。请改用系统文件管理器拖文件，或在输入框里输入 `@`。跟踪：[issue #37](https://github.com/Fengze233/dsh-vscode/issues/37)。
+- **图片降级需要工作区文件夹**：缓存文件放在工作区根目录；未打开文件夹时无法落盘，也就不会降级。临时图用完后会清理；`DSH: 清理图片缓存` 可手动清理。
 - **外部启动的 DSH（≥ 0.1.2）**：扩展读不到其它进程的日志，首次登录需要粘贴一次启动网址（之后最长 30 天）；服务重启不需要重新粘贴。
-- **窄视口中文光标（上游问题）**：面板宽度约 300–400px 时，光标可能落在最后一个中文字符中间。这是 DSH 网页前端的问题（记录于 [issue #9](https://github.com/Fengze233/dsh-vscode/issues/9)）；0.1.2 起上游已重写输入框组件。
-- **VS Code 平台规则**：左侧图标打开左侧面板、右侧图标打开右侧面板；侧边栏视图不能移入编辑区。
-- **SSH Remote**：远端也需安装本插件（VS Code 会引导）；隧道会出现在「端口(Ports)」视图，可手动关闭，插件在下次就绪时自动重建。
-- **确认桥接版本**：面板 DevTools Console 中应看到 `[dsh-vscode-bridge] handshake ok, v0.4.4, imageFallback=true`；如果仍是旧版本，执行 `DSH: 重试桥接安装` 或重启 DSH 服务。
-- **`--no-open`**：默认传给 `dsh web`；用 `dsh.openInBrowser` 或显式 `dsh.extraArgs` 可以恢复弹浏览器。
-- **欢迎页卡片图标**：欢迎页「DSH 入门」卡片的彩色图标来自 Marketplace 画廊数据，仅在商店上架后显示；卡片功能本身不受影响。
 
 ## 🌐 社区
 
