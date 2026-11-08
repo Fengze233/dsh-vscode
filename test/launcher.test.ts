@@ -184,3 +184,53 @@ test('npm 探测不把 DSH Desktop 的命令当成 npm 全局 shim', () => {
   assert.ok(r.candidateLog.some((line) => line.includes('DSH Desktop install, not an npm global shim')));
   assert.ok(!r.candidateLog.some((line) => line.includes('bin.js missing')), '不得再报 npm bin.js 缺失');
 });
+
+// issue #41：Desktop 装在非默认盘符（H:\）时，默认目录探测落空，但 PATH 里已有
+// Desktop 的 dsh.cmd。旧逻辑把 PATH 命中从 npm 候选中丢弃后没有 Desktop 兜底 → ENOENT。
+test('issue #41：Desktop 非默认盘符 + 默认目录落空 → PATH 命中作为 Desktop 兜底', () => {
+  const hCmd = 'H:\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd';
+  const hBin = 'H:\\DeepSeek Harness\\resources\\runtime\\cli\\bin';
+  const r = resolveLaunch(baseInput({
+    env: { path: `C:\\Windows;${hBin}`, localAppData: 'C:\\Users\\u\\AppData\\Local' },
+    exists: existsOf(hCmd),
+  }));
+  assert.ok(r);
+  assert.equal(r.source, 'desktop');
+  assert.equal(r.mode, 'cmd');
+  assert.equal(r.executablePath, hCmd);
+  assert.equal(r.desktopRoot, 'H:\\DeepSeek Harness');
+  assert.ok(r.candidateLog.some((line) => line.includes('non-default install')));
+});
+
+// issue #41 的顺带修复：PATH 先命中 Desktop、后面才是 npm 全局 shim 时，
+// 旧逻辑只取第一个（Desktop）就判 npm 不可用；现在按类型扫描，auto 仍应优先 npm。
+test('issue #41：PATH 里 Desktop 排在 npm 前面时，auto 仍优先 npm', () => {
+  const desktopBin = 'C:\\Users\\u\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin';
+  const r = resolveLaunch(baseInput({
+    env: {
+      path: `${desktopBin};C:\\Users\\u\\AppData\\Roaming\\npm`,
+      localAppData: 'C:\\Users\\u\\AppData\\Local',
+    },
+    exists: existsOf(DESKTOP_CMD, NPM_SHIM, NPM_BINJS),
+  }));
+  assert.ok(r);
+  assert.equal(r.source, 'npm');
+  assert.equal(r.executablePath, NPM_BINJS);
+});
+
+// issue #41：设置里填的 desktopCommandPath 失效时，仍应回退到默认目录或 PATH 里的 Desktop 命令。
+test('issue #41：desktopCommandPath 失效时，PATH 里的 Desktop 命令仍可兜底', () => {
+  const hCmd = 'H:\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd';
+  const hBin = 'H:\\DeepSeek Harness\\resources\\runtime\\cli\\bin';
+  const r = resolveLaunch(baseInput({
+    preference: 'desktop',
+    desktopCommandPath: 'D:\\gone\\dsh.cmd',
+    env: { path: hBin, localAppData: 'C:\\Users\\u\\AppData\\Local' },
+    exists: existsOf(hCmd),
+  }));
+  assert.ok(r);
+  assert.equal(r.source, 'desktop');
+  assert.equal(r.executablePath, hCmd);
+  assert.ok(r.candidateLog.some((line) => line.includes('configured')));
+  assert.ok(r.candidateLog.some((line) => line.includes('non-default install')));
+});
