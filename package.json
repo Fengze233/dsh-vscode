@@ -2,7 +2,7 @@
   "name": "dsh-vscode-panel",
   "displayName": "DSH",
   "description": "Use DeepSeek Harness (DSH) inside VS Code — embedded web UI, auto-start, one-time-token auth, and file/clipboard/image bridge.",
-  "version": "0.4.4-test1",
+  "version": "0.4.4",
   "l10n": "./l10n",
   "publisher": "Fengze233",
   "icon": "assets/icon.png",

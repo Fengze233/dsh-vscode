@@ -165,8 +165,10 @@ test('#27 回归：面板缩放仍接线且传参位置正确（0.4.2 保留 iss
 
 // ——— 文档与测试数一致性 ———
 // README/CHANGELOG 里的测试数在发布流程中被反复手改（326 → 275 → 277 → 283），
-// README 与 CHANGELOG 未发布节按静态计数校验，已发布版本保留历史数字。
-test('README 中英与 CHANGELOG 未发布测试数等于实际测试数，历史数字保持一致', () => {
+// README 与 CHANGELOG 当前版本段按静态计数校验，已发布版本保留历史数字。
+// 当前版本段：开发期是 [Unreleased]，定版后是最近的 [X.Y.Z] —— 两种形态都要能校验，
+// 否则「定版提交」本身会把仓库守卫弄失败。
+test('README 中英与 CHANGELOG 当前版本测试数等于实际测试数，历史数字保持一致', () => {
   const root = join(__dirname, '..', '..');
   // ① 静态计数：递归 test/ 下所有 *.test.ts 的顶层 test( 调用
   const stack = [join(root, 'test')];
@@ -192,13 +194,14 @@ test('README 中英与 CHANGELOG 未发布测试数等于实际测试数，历�
     assert.equal(Number(m[1]), count, `${file} 声明的测试数应与实际一致（实际 ${count}）`);
   }
 
-  // ③ CHANGELOG 未发布节记录当前测试数，避免为新增用例修改已发布版本。
+  // ③ CHANGELOG 当前版本段（开发期 [Unreleased]，定版后最近的 [X.Y.Z]）
+  // 记录当前测试数，避免为新增用例修改已发布版本。
   const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
-  const unreleased = /## \[Unreleased\]([\s\S]*?)(?=\n## |$)/.exec(changelog);
-  assert.ok(unreleased, 'CHANGELOG 应包含未发布节');
-  const currentCount = /测试用例共 (\d+) 个/.exec(unreleased[1]);
-  assert.ok(currentCount, 'CHANGELOG 未发布节应写明当前测试数');
-  assert.equal(Number(currentCount[1]), count, 'CHANGELOG 未发布测试数应与实际一致');
+  const current = /## \[(?:Unreleased|\d+\.\d+\.\d+)\][^\n]*\n([\s\S]*?)(?=\n## |$)/.exec(changelog);
+  assert.ok(current, 'CHANGELOG 应包含未发布节或最近版本节');
+  const currentCount = /测试用例共 (\d+) 个/.exec(current[1]);
+  assert.ok(currentCount, 'CHANGELOG 当前版本段应写明当前测试数');
+  assert.equal(Number(currentCount[1]), count, 'CHANGELOG 当前测试数应与实际一致');
   // ④ 已发布 0.4.2 段落的 "npm test X/X 全绿" 与 "由 A 降至 X" 保持一致。
   const green = /`npm test` (\d+)\/\1 全绿/.exec(changelog);
   assert.ok(green, 'CHANGELOG 应写明 npm test 全绿的数量');
