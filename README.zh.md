@@ -10,7 +10,7 @@
 
 [English](README.md) | **中文**
 
-![DSH for VS Code](docs/screenshots/banner.png)
+![DSH for VS Code](docs/screenshots/banner.zh.png)
 
 **在 VS Code 里直接使用 DeepSeek Harness（DSH）。** 点击鲸鱼图标，DSH 网页就出现在代码旁边——插件负责启动或复用 `dsh web`、处理 DSH 的一次性 token 鉴权，并通过桥接把文件、剪贴板和图片能力接到编辑器里。
 
@@ -166,7 +166,7 @@ DSH ≥ 0.1.2 需要浏览器会话。插件自己启动的服务会自动登录
 
 ## 🏗 工作原理
 
-![架构：VS Code、扩展宿主、本地代理与回环上的 dsh web](docs/screenshots/architecture.png)
+![架构：VS Code、扩展宿主、本地代理与回环上的 dsh web](docs/screenshots/architecture.zh.png)
 
 插件负责服务生命周期和本地代理。面板是 VS Code webview 里的 iframe；扩展宿主通过 `127.0.0.1` 与 `dsh web` 通信。桥接运行在 DSH 页面内，通过 `postMessage` 把编辑器动作转发给扩展宿主。
 
