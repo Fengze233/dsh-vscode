@@ -180,11 +180,32 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       // vscode.open 由 VS Code 自选编辑器：文本→文本编辑器、图片→图片预览、PDF→内建 PDF 预览、
       // 未知二进制→占位页（提示而非报错）。依赖契约仍为 Thenable<void>，故不返回其执行结果。
       openTextDocument: async (p) => {
-        await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(p), { preview: false });
+        // p 可能是绝对路径字符串，也可能是 findFilesByName 返回的 Uri（虚拟工作区必须保留 scheme）
+        const target = typeof p === 'string' ? vscode.Uri.file(p) : (p as vscode.Uri);
+        await vscode.commands.executeCommand('vscode.open', target, { preview: false });
       },
       // 用户提示统一走 vscode.window.showWarningMessage（host 层不 import vscode，保持纯逻辑可单测）
       showWarning: (m) => void vscode.window.showWarningMessage(m),
       workspaceRoot: this.workspaceRoot(), // 工作区根目录：openFile 相对路径解析的兜底基准
+      // 页面只转发来文件名时的兜底（issue #43）：按名字在工作区里找，返回原始 Uri 而不是 fsPath
+      findFilesByName: async (name) => {
+        // 这个名字来自页面文案，不是用户输入的搜索式：路径分隔符、scheme 冒号与 glob 元字符一律不放行
+        if (/[\\/]/.test(name)) return [];
+        if ([':', '*', '?', '[', ']', '{', '}'].some((c) => name.includes(c))) return [];
+        return await vscode.workspace.findFiles(`**/${name}`, '**/{.git,node_modules}/**', 50);
+      },
+      // 判断路径是否真实存在（issue #43）。用异步 workspace.fs.stat 而不是同步 existsSync：
+      // 后者跑在扩展宿主主线程上，网络盘/断线 SSHFS 会把宿主卡住。只有「确实不存在」才返回 false，
+      // 其他错误（EACCES 等）一律按「存在」处理，保持原来的「尝试打开」语义。
+      exists: async (p) => {
+        try {
+          await vscode.workspace.fs.stat(vscode.Uri.file(p));
+          return true;
+        } catch (err) {
+          const code = (err as { code?: string }).code;
+          return code !== 'FileNotFound' && code !== 'ENOENT';
+        }
+      },
       // 图片缓存：以 base64 写入（node:fs/promises 支持 base64 编码字符串）；删除用 unlink
       writeFile: async (p, b64) => {
         await nodeFs.writeFile(p, Buffer.from(b64, 'base64'));
