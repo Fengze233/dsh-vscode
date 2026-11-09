@@ -56,7 +56,7 @@ test('handleBridgeMessage openExternal 抛错时提示用户', async () => {
 
 test('handleBridgeMessage openFile 调用打开文档', async () => {
   // 相对路径 + cwd → 解析为绝对路径后交给 openTextDocument
-  const opened: string[] = [];
+  const opened: unknown[] = [];
   await handleBridgeMessage({ type: 'bridgeOpenFile', path: 'src/main.ts', cwd: '/proj' }, {
     openExternal: async () => true,
     openTextDocument: async (p) => { opened.push(p); },
@@ -112,6 +112,143 @@ test('handleBridgeMessage openFile 无法解析时提示缺哪个基准（含桥
   assert.ok(warnings[0].includes('no-ctx'), `应带桥接侧诊断原因：${warnings[0]}`);
   assert.ok(warnings[0].includes('绝对路径'), `应给出路：${warnings[0]}`);
 });
+// —— issue #43：页面只给得出文件名时，按名在工作区里唯一定位 ——
+test('handleBridgeMessage openFile：目标存在时照旧打开，不触发按名查找', async () => {
+  // 关键回归：绝不能让「搜索」抢在「存在性判断」前面，否则 cwd 里的真文件会被同名文件顶掉
+  const opened: unknown[] = [];
+  let searched = 0;
+  await handleBridgeMessage(
+    { type: 'bridgeOpenFile', path: 'Fig1.png', cwd: '/vault' },
+    {
+      openExternal: async () => true,
+      openTextDocument: async (p) => { opened.push(p); },
+      showWarning: () => {},
+      workspaceRoot: '/vault',
+      exists: async () => true,
+      findFilesByName: async () => { searched += 1; return []; },
+    },
+  );
+  assert.deepEqual(opened, ['/vault/Fig1.png']);
+  assert.equal(searched, 0);
+});
+
+test('handleBridgeMessage openFile：目标不存在时按基名唯一匹配后打开（图片链接场景）', async () => {
+  // DSH 对图片链接不写 title，桥接退回按钮文案 → 只剩文件名 → 拼出的路径不存在
+  const opened: unknown[] = [];
+  const warnings: string[] = [];
+  const asked: string[] = [];
+  const hit = { fsPath: '/vault/ws/figs/Fig1.png', toString: () => 'vscode-remote://x/vault/ws/figs/Fig1.png' };
+  await handleBridgeMessage(
+    { type: 'bridgeOpenFile', path: 'Fig1.png', cwd: '/vault' },
+    {
+      openExternal: async () => true,
+      openTextDocument: async (p) => { opened.push(p); },
+      showWarning: (m) => { warnings.push(m); },
+      workspaceRoot: '/vault',
+      exists: async () => false,
+      findFilesByName: async (n) => { asked.push(n); return [hit]; },
+    },
+  );
+  assert.deepEqual(asked, ['Fig1.png']);
+  // 打开的是句柄本身（保留 scheme），不是 fsPath 字符串
+  assert.deepEqual(opened, [hit]);
+  assert.deepEqual(warnings, []);
+});
+
+test('handleBridgeMessage openFile：带目录的错路径也按基名兜底', async () => {
+  const opened: unknown[] = [];
+  await handleBridgeMessage(
+    { type: 'bridgeOpenFile', path: 'figures/Fig1.png', cwd: '/vault' },
+    {
+      openExternal: async () => true,
+      openTextDocument: async (p) => { opened.push(p); },
+      showWarning: () => {},
+      workspaceRoot: '/vault',
+      exists: async () => false,
+      findFilesByName: async (n) => {
+        assert.equal(n, 'Fig1.png', '应只拿基名去搜');
+        return [{ fsPath: '/vault/ws/figs/Fig1.png', toString: () => 'x' }];
+      },
+    },
+  );
+  assert.equal(opened.length, 1);
+});
+
+test('handleBridgeMessage openFile：同名多个时不猜，给出候选提示', async () => {
+  const opened: unknown[] = [];
+  const warnings: string[] = [];
+  await handleBridgeMessage(
+    { type: 'bridgeOpenFile', path: 'Fig1.png', cwd: '/vault' },
+    {
+      openExternal: async () => true,
+      openTextDocument: async (p) => { opened.push(p); },
+      showWarning: (m) => { warnings.push(m); },
+      workspaceRoot: '/vault',
+      exists: async () => false,
+      findFilesByName: async () => [
+        { fsPath: '/vault/a/Fig1.png', toString: () => 'x' },
+        { fsPath: '/vault/b/Fig1.png', toString: () => 'x' },
+      ],
+    },
+  );
+  assert.deepEqual(opened, []);
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0].includes('2 个'), `应报数量：${warnings[0]}`);
+  assert.ok(warnings[0].includes('/vault/a/Fig1.png'), `应给候选：${warnings[0]}`);
+});
+
+test('handleBridgeMessage openFile：零命中时明确提示，不去开不存在的路径', async () => {
+  const opened: unknown[] = [];
+  const warnings: string[] = [];
+  await handleBridgeMessage(
+    { type: 'bridgeOpenFile', path: 'Fig1.png', cwd: '/vault' },
+    {
+      openExternal: async () => true,
+      openTextDocument: async (p) => { opened.push(p); },
+      showWarning: (m) => { warnings.push(m); },
+      workspaceRoot: '/vault',
+      exists: async () => false,
+      findFilesByName: async () => [],
+    },
+  );
+  assert.deepEqual(opened, []);
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0].includes('找不到文件'), `应给明确提示：${warnings[0]}`);
+  assert.ok(warnings[0].includes('Fig1.png'), `应回显路径：${warnings[0]}`);
+});
+
+test('handleBridgeMessage openFile：按名查找抛错时提示，不冒未处理异常', async () => {
+  const warnings: string[] = [];
+  await handleBridgeMessage(
+    { type: 'bridgeOpenFile', path: 'Fig1.png', cwd: '/vault' },
+    {
+      openExternal: async () => true,
+      openTextDocument: async () => {},
+      showWarning: (m) => { warnings.push(m); },
+      workspaceRoot: '/vault',
+      exists: async () => false,
+      findFilesByName: async () => { throw new Error('search exploded'); },
+    },
+  );
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0].includes('search exploded'), `应含错误摘要：${warnings[0]}`);
+});
+
+test('handleBridgeMessage openFile：deps 未提供 exists/findFilesByName 时保持原行为', async () => {
+  // 老调用方（未注入新依赖）不受影响
+  const opened: unknown[] = [];
+  await handleBridgeMessage(
+    { type: 'bridgeOpenFile', path: 'Fig1.png', cwd: '/vault' },
+    {
+      openExternal: async () => true,
+      openTextDocument: async (p) => { opened.push(p); },
+      showWarning: () => {},
+      workspaceRoot: '/vault',
+    },
+  );
+  assert.deepEqual(opened, ['/vault/Fig1.png']);
+});
+
 // —— v0.3.0 图片缓存落盘/删除（路径安全） ——
 test('saveImageToCwd：合法写入并登记，返回绝对路径', async () => {
   const written: string[] = [];
