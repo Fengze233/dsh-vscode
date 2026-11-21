@@ -280,7 +280,7 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 
 ```bash
 npm install
-npm run test          # 340 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话）
+npm run test          # 341 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话）
 npm run compile       # 构建 out/extension.js
 npm run watch         # 监听构建
 npm run typecheck     # 类型检查
@@ -328,6 +328,9 @@ src/
 
 - **从资源管理器 Shift+拖文件（上游问题）**：VS Code 1.140 起，资源管理器发起的拖拽不再向 webview 投递 `dragenter`/`dragover`/`drop`（[microsoft/vscode#339278](https://github.com/microsoft/vscode/issues/339278)，上游修复仍未合并）。请改用系统文件管理器拖文件，或在输入框里输入 `@`。跟踪：[issue #37](https://github.com/Fengze233/dsh-vscode/issues/37)。
 - **图片降级需要工作区文件夹**：缓存文件放在工作区根目录；未打开文件夹时无法落盘，也就不会降级。临时图用完后会清理；`DSH: 清理图片缓存` 可手动清理。
+- **面板内无法使用麦克风（VS Code 限制）**：VS Code 给 webview 的 iframe 只放行 `cross-origin-isolated` / `autoplay` / 剪贴板权限，
+  没有 `microphone`，内层 iframe 再声明 `allow="microphone"` 也拿不到授权，且不会弹出系统授权框。
+  需要语音输入时请用 `DSH: 在浏览器中打开`（面板右下角也会给一条提示）。
 - **外部启动的 DSH（≥ 0.1.2）**：扩展读不到其它进程的日志，首次登录需要粘贴一次启动网址（之后最长 30 天）；服务重启不需要重新粘贴。
 
 ## 🌐 社区

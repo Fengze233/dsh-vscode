@@ -27,10 +27,12 @@
 
 ### 修复
 
-- **面板里无法使用语音输入（麦克风权限未开启）**：面板 iframe 的 `allow` 只写了 `clipboard-write`，
-  跨源 iframe 的 `getUserMedia` 会被 Permissions Policy 直接拦掉，DSH 语音设置页因此提示
-  「麦克风权限未开启」。现在补上 `microphone`，请求会走 VS Code 的权限询问（首次使用需允许），
-  再由系统把麦克风交给 VS Code。
+- **面板内语音输入不可用（VS Code 平台限制）**：VS Code 创建 webview 的 iframe 时只声明了
+  `cross-origin-isolated` / `autoplay` / `clipboard-*` 权限，没有 `microphone`；webview 文档因此
+  拿不到麦克风授权，内层 iframe 再写 `allow="microphone"` 也无法向上追溯，表现就是 DSH 语音设置页
+  恒提示「麦克风权限未开启」且系统不弹授权框（已对照 1.147 运行时源码核实）。
+  现在面板右下角会自动检测（Permissions Policy）并给出「在浏览器中打开」的提示；
+  真正的语音输入请用浏览器打开 DSH。
 
 - **点击图片链接始终打不开（issue #43）**：DSH 为保留缩略图预览，不给 markdown 图片链接的按钮写
   `title`，桥接只能退回按钮文案（通常就是文件名），扩展按会话 cwd 拼出的路径往往不存在，报
@@ -46,7 +48,7 @@
 
 ### 测试
 
-测试用例共 340 个；本地验证 339 个通过、1 个 Windows 专属用例在非 Windows 平台跳过。
+测试用例共 341 个；本地验证 340 个通过、1 个 Windows 专属用例在非 Windows 平台跳过。
 当前测试数量由 README 与本节共同校验，已发布版本的历史测试数字保持不变。
 
 ## [0.4.4] - 2026-11-08

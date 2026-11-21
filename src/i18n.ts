@@ -14,6 +14,8 @@ const messages = {
     'panel.reconnect': 'Reconnect',
     'panel.retry': 'Retry',
     'panel.openExternal': 'Open in Browser',
+    'panel.micHint':
+      'Voice input needs a microphone, which VS Code does not allow inside panel webviews. Open DSH in a browser to use it.',
     'panel.remoteDisabled': 'SSH Remote support is disabled. Enable "dsh.remote.enabled" in settings, then reload the window.',
     'panel.openSettings': 'Open Settings',
     'panel.restart': 'Restart Service',
@@ -86,6 +88,7 @@ const messages = {
     'panel.reconnect': '重新连接',
     'panel.retry': '重试',
     'panel.openExternal': '在浏览器中打开',
+    'panel.micHint': '面板内无法使用麦克风（VS Code 的 webview 限制）；语音输入请用「在浏览器中打开」。',
     'panel.remoteDisabled': 'SSH Remote 支持未开启。请在设置中开启 "dsh.remote.enabled" 后重载窗口。',
     'panel.openSettings': '打开设置',
     'panel.restart': '重启服务',

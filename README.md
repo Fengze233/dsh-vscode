@@ -251,7 +251,7 @@ Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 340 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
+npm run test          # 341 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
 npm run compile       # builds out/extension.js
 npm run watch         # watch build
 npm run typecheck     # type check
@@ -299,6 +299,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full rules.
 
 - **Shift+drag from the VS Code Explorer (upstream)**: since VS Code 1.140, resource drags from the Explorer no longer deliver `dragenter`/`dragover`/`drop` to a webview ([microsoft/vscode#339278](https://github.com/microsoft/vscode/issues/339278); the upstream fix is still open). Use your system file manager or type `@` in the composer. Tracked in [issue #37](https://github.com/Fengze233/dsh-vscode/issues/37).
 - **Image fallback needs a workspace folder**: files are cached under the workspace root; with no folder open, the fallback is unavailable. Temporary images are cleaned up after use; `DSH: Clean Up Image Cache` purges leftovers.
+- **No microphone inside the panel (VS Code limitation)**: VS Code's webview iframe only allows
+  `cross-origin-isolated` / `autoplay` / clipboard features — not `microphone`. Declaring `allow="microphone"`
+  on the inner iframe cannot grant what the host never delegated, and no system prompt is shown.
+  Use `DSH: Open in Browser` for voice input (the panel shows a hint in the bottom-left corner).
 - **Externally started DSH (≥ 0.1.2)**: the extension cannot read another process's log, so the first sign-in needs one paste of the launch URL (then up to 30 days). A service restart does not require pasting again.
 
 ## 🌐 Community

@@ -252,3 +252,12 @@ test('readyPage 握手脚本包含「插入文件引用」（添加到对话）�
   assert.ok(html.includes("kind === 'insertMentionsAck'"), '应转发 iframe 的插入回执');
   assert.ok(html.includes("type: 'bridgeInsertMentionsAck'"), '应向扩展宿主发送回执');
 });
+
+test('readyPage 在麦克风不可用时给出「用浏览器打开」提示（VS Code webview 限制）', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
+  // VS Code 给 webview 的 iframe 不声明 microphone，内层 iframe 再 allow 也追不回来；
+  // 这里用 Permissions Policy 自检，真不可用时给一条可关闭的提示，引导用户去浏览器。
+  assert.ok(html.includes('id="dsh-mic-hint"'), '应有麦克风不可用提示浮层');
+  assert.ok(html.includes("allowsFeature('microphone')"), '应通过 Permissions Policy 自检');
+  assert.ok(html.includes('data-action="openExternal"'), '提示里应能一键在浏览器中打开');
+});

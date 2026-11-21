@@ -1,5 +1,5 @@
 // src/panel/html.ts — 面板占位页模板（纯函数、无逻辑、不依赖 vscode）
-import type { MsgKey } from '../i18n';
+import { t as translate, type MsgKey } from '../i18n';
 
 /** 翻译函数签名（把 i18n.t 传入模板） */
 export type T = (key: MsgKey, vars?: Record<string, string | number>) => string;
@@ -70,6 +70,13 @@ iframe.frame { position: fixed; inset: 0; width: 100%; height: 100%; border: non
       —— 缩小与放大两个方向都能完美铺满（旧实现只在 ≤1 时成立，>1 会右/下落空）。
    变量名刻意用 --dshv- 前缀，避免与页面里 iframe 元素的 id 子串互相干扰。 */
 .frame-zoom { position: absolute; inset: 0; }
+/* 麦克风不可用提示（VS Code 的 webview iframe 权限策略不放行 microphone）：右下角浮层，可关闭 */
+.mic-hint { position: fixed; left: 12px; bottom: 12px; z-index: 20; max-width: 340px; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 6px; font-size: 12px; line-height: 1.4;
+  background: var(--vscode-editorWidget-background, #252526); color: var(--vscode-editorWidget-foreground, #ccc);
+  border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35)); box-shadow: 0 2px 8px rgba(0,0,0,.35); }
+.mic-hint[hidden] { display: none; }
+.mic-hint button { margin: 0; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
 .frame-zoom > iframe.frame {
   position: absolute; left: 0; top: 0; display: block; border: none;
   width: calc(100% / var(--dshv-zoom, 1));
@@ -77,6 +84,33 @@ iframe.frame { position: fixed; inset: 0; width: 100%; height: 100%; border: non
   transform: scale(var(--dshv-zoom, 1));
   transform-origin: 0 0;
 }
+`;
+
+/**
+ * 麦克风可用性提示的内联脚本。
+ *
+ * 背景（真机实测）：VS Code 给 webview 创建的 iframe 只声明了 cross-origin-isolated / autoplay /
+ * clipboard-* 这几项 allow，没有 microphone；webview 文档随之拿不到麦克风权限，
+ * 我们内层 iframe 再写 allow="microphone" 也无法向上追溯到授权。表现就是 DSH 语音设置页
+ * 恒提示「麦克风权限未开启」，且系统/VS Code 都不会弹授权询问。
+ * 这里用 Permissions Policy API 自检：确实不可用时给一条提示，引导用户用「在浏览器中打开」。
+ * 若将来 VS Code 放开该权限，这个检测会自动不再显示提示。
+ */
+const MIC_HINT_SCRIPT = `
+(function () {
+  var el = document.getElementById('dsh-mic-hint');
+  if (!el) return;
+  var policy = document.permissionsPolicy || document.featurePolicy;
+  var allowed = true;
+  try {
+    if (policy && typeof policy.allowsFeature === 'function') allowed = policy.allowsFeature('microphone');
+  } catch (e) { allowed = true; }
+  if (allowed) return;
+  el.hidden = false;
+  // 关闭按钮：只隐藏本次
+  var close = el.querySelector('button[data-dismiss]');
+  if (close) close.addEventListener('click', function () { el.hidden = true; });
+})();
 `;
 
 /** 按钮点击 → postMessage 的内联脚本（nonce 放行） */
@@ -405,7 +439,12 @@ export function readyPage(
     'frame-body',
     // allow 里必须显式放行 microphone：跨源 iframe 默认被 Permissions Policy 拦掉 getUserMedia，
     // 表现就是 DSH 语音输入里那句「麦克风权限未开启」——放行后才会走到 VS Code/系统的权限询问。
-    `<div class="frame-zoom"${zoomAttr}><iframe id="dsh-frame" class="frame" allow="clipboard-write; microphone" src="${url}"></iframe></div>`,
-    extraScripts,
+    `<div class="frame-zoom"${zoomAttr}><iframe id="dsh-frame" class="frame" allow="clipboard-write; microphone" src="${url}"></iframe></div>` +
+      // 麦克风不可用提示（默认隐藏，脚本按 Permissions Policy 决定是否显示）
+      `<div id="dsh-mic-hint" class="mic-hint" hidden>` +
+      `<span>${escapeHtml(translate('panel.micHint'))}</span>` +
+      `<button data-action="openExternal">${escapeHtml(translate('panel.openExternal'))}</button>` +
+      `<button data-dismiss="1" title="×">×</button></div>`,
+    `<script nonce="${ctx.nonce}">${MIC_HINT_SCRIPT}</script>` + extraScripts,
   );
 }
