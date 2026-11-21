@@ -102,3 +102,35 @@ test('bridgeDeps 的 openTextDocument 走 vscode.open（支持二进制交付物
   assert.deepEqual(executed[0], ['vscode.open', { fsPath: 'C:\\tmp\\kf11_full.png' }, { preview: false }]);
   assert.equal(shownText.length, 0, '不得再用 window.showTextDocument');
 });
+
+// 编辑区标签页（v0.5.0）：WebviewPanel 只提供 webview，没有 WebviewView 外壳，
+// 因此 provider 必须能直接绑定一个 Webview 宿主，并与侧边栏共用同一套渲染逻辑。
+test('resolveWebview 可直接绑定编辑区面板宿主并渲染 ready 页', () => {
+  const provider = new DshPanelProvider(
+    fakeManager() as never,
+    undefined, undefined,
+    () => '/proj', () => true, () => false,
+    async (u) => u, () => true,
+    {},
+  );
+  const webview = fakeView().webview;
+  provider.resolveWebview(webview as never);
+  assert.ok(webview.html.includes('<iframe'), '绑定后应渲染出 DSH 的 iframe');
+});
+
+// 关闭编辑区标签页会销毁 webview：detach 之后若仍渲染，会向已销毁宿主写 html。
+test('detach 之后不再向旧宿主渲染', () => {
+  const provider = new DshPanelProvider(
+    fakeManager() as never,
+    undefined, undefined,
+    () => '/proj', () => true, () => false,
+    async (u) => u, () => true,
+    {},
+  );
+  const webview = fakeView().webview;
+  provider.resolveWebview(webview as never);
+  const rendered = webview.html;
+  provider.detach(webview as never);
+  provider.refreshContextBar();
+  assert.equal(webview.html, rendered, '解绑后 refreshContextBar 不应再写 html');
+});

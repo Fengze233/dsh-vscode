@@ -685,6 +685,45 @@ export function activate(context: vscode.ExtensionContext): void {
     panelUi(),
   );
   panels.push(panelPrimary, panelSecondary);
+
+  // 编辑区标签页：与两侧边栏共用同一套 provider 逻辑，只是把 webview 宿主换成 WebviewPanel。
+  // provider 与 manager 常驻复用：关闭标签页只解绑 webview，再次打开时新建标签页即可，
+  // 不会重复订阅 manager.onChange（订阅发生在 provider 构造时）。
+  let editorPanel: vscode.WebviewPanel | null = null;
+  let editorProvider: DshPanelProvider | null = null;
+  const openInEditor = (): void => {
+    if (editorPanel !== null) {
+      void editorPanel.reveal(); // 已打开：聚焦已有标签页，不再开第二个
+      return;
+    }
+    const m = manager;
+    if (m === null) return;
+    const panel = vscode.window.createWebviewPanel('dsh.editor', 'DSH', vscode.ViewColumn.Active, {
+      enableScripts: true,
+      // 切走标签页时不销毁 iframe：DSH 页面会话、滚动位置与桥接握手都保留
+      retainContextWhenHidden: true,
+    });
+    if (editorProvider === null) {
+      editorProvider = new DshPanelProvider(
+        m,
+        undefined, // 编辑区入口不重复弹「移到右侧栏」的一次性引导
+        onBridgeAck,
+        workspaceRootGetter,
+        bridgeEnabledGetter,
+        remoteEnabledGetter,
+        resolveExternalUrl,
+        imageFallbackGetter,
+        panelUi(),
+      );
+      panels.push(editorProvider); // 配置变更 / 鉴权完成时由 refreshPanels() 一并刷新
+    }
+    editorPanel = panel;
+    panel.onDidDispose(() => {
+      editorProvider?.detach(panel.webview); // 解绑：避免向已销毁的宿主渲染或投递消息
+      editorPanel = null;
+    });
+    editorProvider.resolveWebview(panel.webview);
+  };
   new StatusBarController(manager);
 
   // 服务就绪后启动握手超时（若面板已打开）；并执行会话判定/兑换（自启自动、外部服务→登录引导页）
@@ -706,7 +745,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('dsh.openPanel', () => openPanel()),
     vscode.commands.registerCommand('dsh.openSecondary', () => openSecondary(context)),
-    vscode.commands.registerCommand('dsh.openFromTitle', () => openSecondary(context)),
+    // 编辑器标题栏图标：默认在编辑区标签页打开（与 Claude Code 同形态），不再跳右侧侧边栏；
+    // 需要侧边栏时仍可用「DSH: 在辅助侧边栏打开」（dsh.openSecondary）。
+    vscode.commands.registerCommand('dsh.openFromTitle', () => openInEditor()),
     vscode.commands.registerCommand('dsh.openExternal', () => openExternal()),
     vscode.commands.registerCommand('dsh.restart', () => void manager?.restart()),
     vscode.commands.registerCommand('dsh.stop', () => void manager?.stop()),
