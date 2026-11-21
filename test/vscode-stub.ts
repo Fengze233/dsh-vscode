@@ -18,6 +18,8 @@ export const window = {
   createOutputChannel: (_name: string) => ({ appendLine: (_line: string) => {}, dispose: () => {} }),
   createStatusBarItem: (_alignment: number, _priority: number) => ({ show: () => {}, dispose: () => {} }),
   registerWebviewViewProvider: (_id: string, _provider: WebviewViewProvider) => ({ dispose: () => {} }),
+  // 编辑区标签页：扩展激活时注册序列化器（重载窗口后恢复面板）
+  registerWebviewPanelSerializer: (_id: string, _serializer: unknown) => ({ dispose: () => {} }),
 };
 
 export const env = {

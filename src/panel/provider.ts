@@ -231,9 +231,14 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       rmFile: async (p) => {
         await nodeFs.unlink(p);
       },
-      // 回执：由顶层握手脚本转发回 iframe（saveImageAck / deleteImagesAck）
+      // 回执：由顶层握手脚本转发回 iframe（saveImageAck / deleteImagesAck）。
+      // 宿主可能已被销毁（关闭编辑区标签页与桥接回执的竞态），投递失败不应冒到用户面前。
       reply: async (m) => {
-        await this.webview?.postMessage(m);
+        try {
+          await this.webview?.postMessage(m);
+        } catch {
+          /* 宿主已销毁：回执丢弃 */
+        }
       },
     };
   }
@@ -384,7 +389,11 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
           break;
       }
     }
-    w.html = html;
+    try {
+      w.html = html;
+    } catch {
+      // 宿主已被销毁（关闭标签页与状态回调的竞态）：丢弃这次渲染即可，下次绑定会重绘
+    }
   }
 
   /**
