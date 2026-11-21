@@ -37,8 +37,10 @@ test('编辑器标题栏图标：紧凑画布 + 明暗两套单色资源（issue
     const svg = readFileSync(join(root, file), 'utf8');
     assert.ok(!svg.includes('#FFFFFF'), `${file} 不得再含白色背景块`);
     assert.ok(svg.includes(fill), `${file} 应使用单色填充 ${fill}`);
-    // 紧凑画布：宽度撑满约 90%（原图内容只占 ~73%，视觉上偏小）
-    assert.ok(/scale\(2\.3\d\)/.test(svg), `${file} 应使用紧凑变换（内容放大到约 90% 画布）`);
+    // 紧凑画布：viewBox 紧贴内容（不再是 0 0 128 128），否则内容只占约 73%，看起来偏小
+    assert.ok(!svg.includes('viewBox="0 0 128 128"'), `${file} 应使用紧贴内容的 viewBox`);
+    // 鲸鱼是宽扁造型，等比缩放时永远显矮：用 preserveAspectRatio="none" 纵向拉满，视觉尺寸才与 codicon 一致
+    assert.ok(svg.includes('preserveAspectRatio="none"'), `${file} 应纵向拉满（preserveAspectRatio="none"）`);
   }
   const menu: { command: string; group?: string }[] = p.contributes.menus['editor/title'] || [];
   const item = menu.find((m) => m.command === 'dsh.openFromTitle');
@@ -54,12 +56,18 @@ test('存在手动清理图片缓存命令 dsh.cleanupImageCache', () => {
   assert.ok(Array.isArray(p.activationEvents) && p.activationEvents.includes('onCommand:dsh.cleanupImageCache'), '需声明激活事件');
 });
 
-test('活动栏/辅助侧边栏容器图标与标题栏共用同一对明暗单色图标（issue #46）', () => {
+test('活动栏/辅助侧边栏容器图标必须单文件（viewsContainers.icon 只接受路径字符串）', () => {
   const p = pkg();
-  const expected = { light: 'assets/whale-icon-light.svg', dark: 'assets/whale-icon-dark.svg' };
+  // 真机 + v0.3.0 的教训：容器图标传 {light,dark} 对象会被渲染成空白占位方块
+  // （VS Code 的 viewsContainers 扩展点 schema 里 icon 只声明为 string）。
   for (const container of [...p.contributes.viewsContainers.activitybar, ...p.contributes.viewsContainers.secondarySidebar]) {
-    assert.deepEqual(container.icon, expected, container.id + ' 应使用明暗两套单色图标');
+    assert.equal(container.icon, 'assets/whale-icon.svg', container.id + ' 应使用单文件图标');
   }
+  const file = join(__dirname, '..', '..', 'assets', 'whale-icon.svg');
+  assert.ok(existsSync(file), '容器图标文件应存在');
+  const svg = readFileSync(file, 'utf8');
+  assert.ok(svg.includes('#8A8A8A'), '容器图标用中性灰：#1F1F1F 与 #FFFFFF 上都可辨');
+  assert.ok(svg.includes('preserveAspectRatio="none"'), '容器图标同样纵向拉满，避免显小');
 });
 
 test('v0.3.0 设置项：remote.enabled 默认 false、image.fallback 默认 true、openInBrowser 默认 false', () => {
