@@ -7,21 +7,16 @@ import * as vscode from 'vscode';
 import { ServiceManager, type ServiceSnapshot } from './service/manager';
 import { t } from './i18n';
 
-/**
- * 状态栏上的产品图标：鲸鱼（DSH 的标志）。
- *
- * 为什么用字符而不是图片：`StatusBarItem.text` 只支持纯文本与 codicon（`$(...)`），
- * 不支持图片；codicon 里也没有鲸鱼，所以用鲸鱼 emoji（U+1F40B）作为产品标志。
- */
-const PRODUCT_GLYPH = '🐋';
-
 /** 各状态的图标与提示文案；颜色只在「需要被注意到」的状态下给 */
 const PRESETS = {
-  running: { icon: PRODUCT_GLYPH, textKey: 'status.running', color: undefined },
+  // 不做产品图标：`StatusBarItem.text` 只支持纯文本与 codicon（`$(...)`），不支持图片；
+  // codicon 里也没有鲸鱼。真机确认「用 emoji 代鲸鱼」也不可接受，于是按用户要求去掉图标，
+  // 只在「进行中/失败」这两种需要被注意到的状态用 codicon 表达状态。
+  running: { icon: '', textKey: 'status.running', color: undefined },
   starting: { icon: '$(sync~spin)', textKey: 'status.starting', color: undefined },
   stopping: { icon: '$(sync~spin)', textKey: 'status.stopping', color: undefined },
   failed: { icon: '$(error)', textKey: 'status.failed', color: 'charts.red' },
-  stopped: { icon: PRODUCT_GLYPH, textKey: 'status.stopped', color: 'descriptionForeground' },
+  stopped: { icon: '', textKey: 'status.stopped', color: 'descriptionForeground' },
 } as const;
 
 type PresetKey = keyof typeof PRESETS;
@@ -62,7 +57,8 @@ export class StatusBarController {
         break;
     }
     const p = PRESETS[key];
-    this.item.text = `${p.icon} ${SHORT_NAME}`;
+    // icon 为空时只显示产品名（不留多余空格）
+    this.item.text = p.icon === '' ? SHORT_NAME : `${p.icon} ${SHORT_NAME}`;
     this.item.color = p.color === undefined ? undefined : new vscode.ThemeColor(p.color);
     // 具体状态与错误都放 tooltip：状态栏本身保持安静（对齐 Claude Code 的观感）
     this.item.tooltip = s.error ? t(s.error, s.errorVars) : t(p.textKey);

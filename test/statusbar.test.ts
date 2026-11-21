@@ -1,6 +1,6 @@
 // test/statusbar.test.ts — 状态栏样式与文案随服务状态变化的回归测试
-// 视觉口径（v0.5.0）：与 Claude Code 的状态栏项一致——一个符号 + 产品名，运行中不着色，
-// 具体状态与错误放进 tooltip，避免常驻的绿色/橙色条目抢占注意力。
+// 视觉口径（v0.5.0）：状态栏只显示产品名 `DSH`、运行中不着色，具体状态与错误放进 tooltip；
+// 产品图标不做（StatusBarItem 不支持图片、codicon 也没有鲸鱼），只在「进行中/失败」用 codicon 表达状态。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as vscodeStub from './vscode-stub';
@@ -38,7 +38,7 @@ test('状态栏：运行中不着色、状态进 tooltip，停止中不得显示
   };
 
   // 运行中：静态星号 + 产品名，与 Claude Code 的 `✻ Claude Code` 同构
-  assert.equal(item.text, '🐋 DSH');
+  assert.equal(item.text, 'DSH');
   assert.equal(item.color, undefined, '运行中不应设置颜色');
   assert.equal(item.tooltip, t('status.running'));
   assert.equal(item.command, 'dsh.openPanel');
@@ -51,7 +51,7 @@ test('状态栏：运行中不着色、状态进 tooltip，停止中不得显示
 
   // 已停止：灰点图标（保留弱化色）
   fire({ state: 'idle', url: null, error: null, owned: false });
-  assert.equal(item.text, '🐋 DSH');
+  assert.equal(item.text, 'DSH');
   assert.equal((item.color as { id?: string } | undefined)?.id, 'descriptionForeground');
 
   // 失败：唯一需要抢注意力的状态，保留红色
