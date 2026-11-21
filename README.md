@@ -64,23 +64,32 @@ npm run package        # produces dsh-vscode.vsix
 
 *DSH embedded in the right-side panel — code and agent side by side.*
 
+![Add File to DSH Chat from the Explorer context menu](docs/screenshots/context-menu-add-to-chat.png)
+
+*Right-click a file → **Add File to DSH Chat** to drop its `@path` into the composer.*
+
 ## 🎬 Demo video
 
 [![How to use DeepSeek Harness in VS Code with DSH (Bilibili)](docs/screenshots/video-cover.jpg)](https://www.bilibili.com/video/BV1p8bD6dE18)
 
 *59-second demo on Bilibili (Chinese): [BV1p8bD6dE18](https://www.bilibili.com/video/BV1p8bD6dE18)*
 
-## 🆕 What's new in 0.4.4
+## 🆕 What's new in 0.5.0
 
-- **Accurate stopping state** ([#40](https://github.com/Fengze233/dsh-vscode/pull/40)): when you click **Stop Service**, the panel now says “Stopping DSH service…” and the status bar turns orange — it no longer pretends to be “Starting”.
-- **DSH Desktop on a non-default drive** ([#41](https://github.com/Fengze233/dsh-vscode/issues/41)): if Desktop is installed outside `%LOCALAPPDATA%` (for example `H:\DeepSeek Harness`), the extension now uses the Desktop command already on PATH as a fallback instead of failing with `ENOENT`.
-- This is a maintenance release; no new panels or commands. Full history: [CHANGELOG](CHANGELOG.md).
+- **Editor tab**: the DSH icon in the editor title bar now opens DSH as a tab in a **new editor column** instead of the right side bar — switching tabs keeps the session, reloading restores it, and a closed tab can be reopened.
+- **Add to chat from the Explorer**: right-click a file → **Add File to DSH Chat** to insert its `@path` into the DSH composer (multi-select works; the panel opens first if needed).
+- **DSH Desktop in a custom folder** ([#44](https://github.com/Fengze233/dsh-vscode/issues/44)): Desktop installed outside the default location (for example `D:\dsh`) no longer fails with “dsh not found”.
+- **Image links open again** ([#43](https://github.com/Fengze233/dsh-vscode/issues/43)): clicking an image link in chat now falls back to locating the file by name in the workspace. Fixed by [@log-li](https://github.com/log-li).
+- **Clearer icons** ([#46](https://github.com/Fengze233/dsh-vscode/issues/46)): compact canvas plus light/dark monochrome assets — no more white sticker, larger and legible.
+- **Quieter status bar**: just `DSH`; a spinner while starting/stopping and a red icon on failure, with details on hover.
 
 ## ✨ Features at a glance
 
 | Feature | What you get |
 |---|---|
-| 🖱️ **One-click open** | A whale icon in the left Activity Bar and the right Secondary Side Bar; the editor title bar has a white-bg whale that opens the right-side panel. |
+| 🖱️ **One-click open** | Whale icons in the Activity Bar and Secondary Side Bar; the editor title bar icon opens DSH as a tab in a **new editor column**. |
+| 🗂️ **Editor tab** | DSH opens like a regular file tab: context is kept when you switch away, restored after a reload, and the tab can be reopened after closing. |
+| 📎 **Add to chat** | Right-click a file in the Explorer → **Add File to DSH Chat** to insert `@path` into the composer (multi-select supported). |
 | 🚀 **Service management** | Auto-detect the port; reuse a running `dsh web`, otherwise start one in the background. Port conflicts temporarily fall back to the first free port, with a notification. |
 | 🛟 **Recoverable errors** | Dedicated pages for missing `dsh`, occupied port, start timeout, crash and disconnect — each with a one-click reconnect. |
 | 🔐 **Auth relay** | Parses the one-time launch URL, stores a 30-day session cookie, and forwards the panel through a loopback relay. Externally started services get a one-time paste page. |
@@ -93,7 +102,7 @@ npm run package        # produces dsh-vscode.vsix
 ## 🕹 Everyday use
 
 - Click the whale in the Activity Bar or Secondary Side Bar; the panel title bar has **Open in Browser**, **Restart Service**, **Stop Service**, **Copy URL** and **Show Logs**.
-- The status bar shows the live service state (running / starting / stopping / failed / stopped); click it to toggle the panel.
+- The status bar shows just `DSH`: a spinner while starting/stopping, a red icon on failure, and full details on hover; click it to open the panel.
 - If `dsh.port` is occupied by another program, the extension temporarily switches to the first free port for this session and tells you; your setting is unchanged.
 - Platform rule: the left whale opens the left panel, the right whale opens the right panel; a sidebar view cannot be moved into the editor area.
 
@@ -103,7 +112,8 @@ npm run package        # produces dsh-vscode.vsix
 |---|---|
 | `DSH: Open Panel` | Open the left panel |
 | `DSH: Open in Secondary Side Bar` | Open the right panel |
-| `DSH: Open Right Panel` | Editor-title whale button: open the right panel |
+| `DSH: Open in Editor` | Editor-title whale button: open DSH as an editor tab |
+| `Add File to DSH Chat` | Explorer context menu: insert the selected files as `@path` into the composer |
 | `DSH: Open in Browser` | Open the DSH page in the system browser |
 | `DSH: Restart Service` | Restart the extension-managed service |
 | `DSH: Stop Service` | Stop the extension-started service |
@@ -322,12 +332,14 @@ Many improvements here came from the community. Contributions are grouped by typ
 | Contributor | Contribution | Ref |
 |---|---|---|
 | [@jubeater](https://github.com/jubeater) | Configurable DSH profile and multi-profile bridge cleanup; accurate stopping-state UX | #35, #40 |
+| [@log-li](https://github.com/log-li) | Root-cause analysis and patch for image links that could not be opened (existence-first, filename fallback) | #45 |
 
 ### Issue reports
 
 | Reporter | Report | Ref |
 |---|---|---|
 | [@Donarli](https://github.com/Donarli) | DSH Desktop installed on a non-default drive (`H:\`) failing with ENOENT, with complete root-cause analysis and a suggested fix | #41 |
+| [@log-li](https://github.com/log-li) | Image links in chat never opening: traced it to DSH omitting `title` on image links plus the bridge falling back to button text, with production evidence | #43 |
 | [@Joshuayang228](https://github.com/Joshuayang228) | Shift+drag from the Explorer not reaching the webview: identified the VS Code regression and the Lexical second layer | #37 |
 | [@AAAwoshi](https://github.com/AAAwoshi) | Panel reloading on every active-editor switch: traced it to the redundant `render()` and regenerated nonce, with log evidence and a minimal patch | #27 |
 | [@Joshuayang228](https://github.com/Joshuayang228) | File clicks not forwarded to the editor: pinpointed the CSS Module hashed class name and provided reproduction evidence and a fix sketch | #22 |

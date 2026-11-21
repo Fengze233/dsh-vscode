@@ -64,23 +64,32 @@ npm run package        # 产出 dsh-vscode.vsix
 
 *DSH 嵌入右侧面板——代码与 Agent 并排。*
 
+![在资源管理器右键「将文件添加到 DSH 对话」](docs/screenshots/context-menu-add-to-chat.png)
+
+*右键文件 →「将文件添加到 DSH 对话」，路径以 `@路径` 直接进输入框。*
+
 ## 🎬 演示视频
 
 [![如何在 VS Code 中使用 DeepSeek Harness（DSH）——Bilibili](docs/screenshots/video-cover.jpg)](https://www.bilibili.com/video/BV1p8bD6dE18)
 
 *Bilibili 59 秒演示（中文）：[BV1p8bD6dE18](https://www.bilibili.com/video/BV1p8bD6dE18)*
 
-## 🆕 0.4.4 新特性
+## 🆕 0.5.0 新特性
 
-- **停止状态更准确**（[#40](https://github.com/Fengze233/dsh-vscode/pull/40)）：点击「停止服务」后，面板显示「正在停止 DSH 服务…」，状态栏变为橙色，不再误显示「正在启动」。
-- **DSH Desktop 装在非默认盘符**（[#41](https://github.com/Fengze233/dsh-vscode/issues/41)）：Desktop 不在 `%LOCALAPPDATA%`（例如 `H:\DeepSeek Harness`）时，插件会把 PATH 里已有的 Desktop 命令作为兜底，不再直接 `ENOENT`。
-- 这是维护版本，没有新增面板或命令。完整历史见 [CHANGELOG](CHANGELOG.md)。
+- **编辑器标签页**：编辑器标题栏的 DSH 图标不再跳右侧栏，改为在**新的一列**打开 DSH 标签页——切走会话不丢、重载窗口自动恢复、关掉后可再打开。
+- **右键加入对话**：资源管理器右键「**将文件添加到 DSH 对话**」，把 `@相对路径` 直接插进 DSH 输入框（支持多选；面板没打开会先打开）。
+- **DSH Desktop 装在自定义目录**（[#44](https://github.com/Fengze233/dsh-vscode/issues/44)）：安装在 `D:\dsh` 这类非默认位置时，不再误报「未找到可用的 dsh」。
+- **图片链接能打开了**（[#43](https://github.com/Fengze233/dsh-vscode/issues/43)）：点聊天里的图片链接会按文件名在工作区兜底定位；由 [@log-li](https://github.com/log-li) 定位并修复。
+- **图标更清楚**（[#46](https://github.com/Fengze233/dsh-vscode/issues/46)）：活动栏与标题栏图标改为紧凑画布 + 明暗两套单色资源，去掉白底、更大更清楚。
+- **状态栏更安静**：平时只显示 `DSH`；启动/停止转圈、失败红色叹号，具体状态看 hover。
 
 ## ✨ 功能一览
 
 | 功能 | 说明 |
 |---|---|
-| 🖱️ **一键打开** | 左侧活动栏与右侧辅助侧边栏各有一个鲸鱼图标；编辑器标题栏的白底鲸鱼打开右侧面板。 |
+| 🖱️ **一键打开** | 活动栏与辅助侧边栏各有一个鲸鱼图标；编辑器标题栏的图标在**新的一列**打开 DSH 标签页。 |
+| 🗂️ **编辑器标签页** | DSH 像普通文件一样作为标签页打开：切走保留会话、重载自动恢复、关闭后可重开。 |
+| 📎 **右键加入对话** | 资源管理器右键「将文件添加到 DSH 对话」，把 `@路径` 插进输入框（支持多选）。 |
 | 🚀 **服务管理** | 自动探测端口；复用正在运行的 `dsh web`，否则后台启动。端口被占用时临时切换到第一个空闲端口并提示。 |
 | 🛟 **可恢复的错误页** | `dsh` 缺失、端口占用、启动超时、崩溃、断连都有独立页面，并提供一键重连。 |
 | 🔐 **鉴权代理** | 解析一次性启动网址、保存 30 天会话 cookie，并通过回环代理转发面板；外部启动的服务提供一次性粘贴登录页。 |
@@ -93,7 +102,7 @@ npm run package        # 产出 dsh-vscode.vsix
 ## 🕹 日常使用
 
 - 点击活动栏或辅助侧边栏的鲸鱼图标打开面板；面板标题栏提供 **Open in Browser**、**Restart Service**、**Stop Service**、**Copy URL**、**Show Logs**。
-- 底部状态栏显示服务状态（运行中 / 启动中 / 正在停止 / 失败 / 已停止），点击可切换面板。
+- 底部状态栏平时只显示 `DSH`：启动/停止时转圈、失败时红色叹号，具体状态与错误看 hover 提示；点击可打开面板。
 - `dsh.port` 被其他程序占用时，插件会为本次会话临时切换到第一个空闲端口并提示；你的设置不会被改写。
 - VS Code 平台规则：左侧鲸鱼打开左侧面板，右侧鲸鱼打开右侧面板；侧边栏视图不能移入编辑区。
 
@@ -103,7 +112,8 @@ npm run package        # 产出 dsh-vscode.vsix
 |---|---|
 | `DSH: 打开面板` | 打开左侧面板 |
 | `DSH: 在辅助侧边栏打开` | 打开右侧面板 |
-| `DSH：打开右侧面板` | 编辑器标题栏鲸鱼按钮：打开右侧面板 |
+| `DSH：在编辑区打开` | 编辑器标题栏鲸鱼按钮：在编辑区标签页打开 DSH |
+| `将文件添加到 DSH 对话` | 资源管理器右键：把选中文件以 `@路径` 插入 DSH 输入框 |
 | `DSH: 在浏览器中打开` | 在系统浏览器打开 DSH 页面 |
 | `DSH: 重启服务` | 重启插件管理的服务 |
 | `DSH: 停止服务` | 停止插件启动的服务 |
@@ -350,12 +360,14 @@ src/
 | 贡献者 | 贡献内容 | 关联 |
 |---|---|---|
 | [@jubeater](https://github.com/jubeater) | 可配置 DSH profile 与多 profile 桥接清理；停止状态文案与状态栏修复 | #35、#40 |
+| [@log-li](https://github.com/log-li) | 图片链接打不开的根因分析与补丁（先判存在、再按文件名兜底） | #45 |
 
 ### 问题报告
 
 | 报告者 | 报告内容 | 关联 |
 |---|---|---|
 | [@Donarli](https://github.com/Donarli) | DSH Desktop 装在非默认盘符（`H:\`）时报 ENOENT，附完整根因分析与修复建议 | #41 |
+| [@log-li](https://github.com/log-li) | 聊天里的图片链接必然打不开：定位到 DSH 不写 `title`、桥接退回按钮文案，附生产包实测证据 | #43 |
 | [@Joshuayang228](https://github.com/Joshuayang228) | Shift+拖动文件无法进入 webview：定位到 VS Code 回归与 Lexical 第二层原因 | #37 |
 | [@AAAwoshi](https://github.com/AAAwoshi) | 切换活动编辑器导致面板整页重载：定位到 `refreshContextBar()` 里多余的 `render()` 与每次渲染重生成 nonce，并附日志采样证据、最小补丁与补丁后复测数据 | #27 |
 | [@Joshuayang228](https://github.com/Joshuayang228) | 点文件不转发到编辑器：定位到 CSS Module 哈希类名根因，并附完整实测证据与修法 | #22 |
