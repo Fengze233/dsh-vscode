@@ -151,16 +151,27 @@ export async function cleanupStaleImageCaches(
   return removed;
 }
 
+/**
+ * 打开目标：绝对路径字符串，或生产侧的 `vscode.Uri`。
+ * host 层不依赖 vscode，只把它原样透传给 openTextDocument——虚拟工作区（vscode-vfs 等）
+ * 必须保留 scheme/authority，退回 fsPath 会丢。
+ */
+export type FileTarget = string | { fsPath?: string; toString(): string };
+
 /** 桥接消息处理依赖（生产接 vscode API，测试注入假实现） */
 export interface BridgeMessageDeps {
   /** 打开外部链接（生产接 vscode.env.openExternal，返回是否成功） */
   openExternal(url: string): Thenable<boolean>;
-  /** 打开文本文档（生产接 vscode.window.showTextDocument） */
-  openTextDocument(path: string): Thenable<void>;
+  /** 打开文本文档/文件（生产接 vscode.open；接受路径字符串或 findFilesByName 返回的句柄） */
+  openTextDocument(target: FileTarget): Thenable<void>;
   /** 弹用户可见提示（生产接 vscode.window.showWarningMessage，测试注入假实现以断言） */
   showWarning(msg: string): void;
   /** 工作区根目录（相对路径解析的兜底基准，生产由扩展入口注入） */
   workspaceRoot?: string;
+  /** 判断路径是否真实存在（生产接 vscode.workspace.fs.stat）；只有「确实不存在」才返回 false */
+  exists?: (path: string) => Thenable<boolean>;
+  /** 按文件名在工作区里查找（生产接 vscode.workspace.findFiles）——issue #43 的兜底用 */
+  findFilesByName?: (name: string) => Thenable<FileTarget[]>;
   /** 写入图片缓存文件（生产接 node:fs/promises，产物 base64）——v0.3.0 图片降级用 */
   writeFile?: (path: string, dataB64: string) => Thenable<void>;
   /** 删除图片缓存文件（生产接 node:fs/promises）——v0.3.0 会话结束清理用 */
@@ -178,6 +189,49 @@ function errSummary(err: unknown): string {
   if (typeof err === 'string') return err;
   if (err === null || err === undefined) return '';
   return String(err);
+}
+
+/** 展示用文本：字符串原样；句柄优先 fsPath，兜底 String()。 */
+function displayTarget(target: FileTarget): string {
+  return typeof target === 'string' ? target : (target.fsPath ?? String(target));
+}
+
+/**
+ * 页面只给得出文件名时的兜底：按基名在工作区里唯一匹配后打开（issue #43）。
+ *
+ * 背景：DSH 对 markdown 图片链接不写 `title`，桥接只能退回按钮文案（通常就是文件名），
+ * 扩展按会话 cwd 拼出的路径往往不存在（真实文件在子目录里）。这里不去猜路径——猜错会
+ * 静默打开同名文件——改为按名字找：唯一命中才打开，多命中/零命中都明确提示。
+ *
+ * @param rawPath 页面转发来的原始路径（只取它的基名）
+ * @param joinedPath 按 cwd/工作区根拼接后的绝对路径（仅用于「找不到」的提示文案）
+ * @param deps 桥接依赖（findFilesByName 的返回值原样交给 openTextDocument）
+ */
+async function openByFileName(rawPath: string, joinedPath: string, deps: BridgeMessageDeps): Promise<void> {
+  const name = basename(rawPath);
+  let hits: FileTarget[] = [];
+  if (name !== '' && deps.workspaceRoot !== undefined && deps.findFilesByName !== undefined) {
+    try {
+      hits = await deps.findFilesByName(name);
+    } catch (err) {
+      deps.showWarning(`按文件名查找失败：${name}（${errSummary(err)}）`);
+      return;
+    }
+  }
+  if (hits.length === 1) {
+    try {
+      await deps.openTextDocument(hits[0]);
+    } catch (err) {
+      deps.showWarning(`无法打开文件：${displayTarget(hits[0])}（${errSummary(err)}）`);
+    }
+    return;
+  }
+  if (hits.length > 1) {
+    const sample = hits.slice(0, 5).map(displayTarget).join('、');
+    deps.showWarning(`工作区里有 ${hits.length} 个名为「${name}」的文件，无法确定打开哪一个：${sample}`);
+    return;
+  }
+  deps.showWarning(`找不到文件：${joinedPath}（页面转发来的路径是「${rawPath}」）`);
 }
 
 /**
@@ -217,6 +271,14 @@ export async function handleBridgeMessage(msg: PanelMessage, deps: BridgeMessage
   }
   if (msg.type === 'bridgeOpenFile') {
     const r = resolveBridgePath(msg.path, msg.cwd, deps.workspaceRoot);
+    // 顺序很关键（issue #43）：先判原路径是否真实存在，存在就照旧打开——绝不能先按名字搜，
+    // 否则会话 cwd 里的真文件会被工作区里另一个同名文件顶掉。只有确实不存在时才退化为按名查找。
+    if (r.kind === 'abs' && deps.exists !== undefined && deps.findFilesByName !== undefined) {
+      if (!(await deps.exists(r.path))) {
+        await openByFileName(msg.path, r.path, deps);
+        return;
+      }
+    }
     if (r.kind === 'abs') {
       try {
         // 打开文档可能因文件不存在/无权限等失败，捕获后给用户可见反馈而非未处理拒绝
