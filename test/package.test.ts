@@ -18,16 +18,28 @@ test('extensionKind 优先 workspace（远程场景跑在远端）', () => {
   assert.equal(p.extensionKind[0], 'workspace');
 });
 
-test('右上角图标命令与 editor/title 菜单（v0.3.0）', () => {
+test('编辑器标题栏图标：紧凑画布 + 明暗两套单色资源（issue #46）', () => {
   const p = pkg();
   const cmd = p.contributes.commands.find((c: { command: string }) => c.command === 'dsh.openFromTitle');
   assert.ok(cmd, '存在 dsh.openFromTitle 命令');
-  // 右上角图标：原鲸鱼 + 白底（明暗主题都清晰可见），不再用明暗双主题变体
-  assert.equal(cmd.icon, 'assets/whale-icon-bg.svg', '右上角命令图标应为白底鲸鱼');
-  assert.ok(existsSync(join(__dirname, '..', '..', 'assets', 'whale-icon-bg.svg')), '白底鲸鱼图标文件应存在');
-  const bg = readFileSync(join(__dirname, '..', '..', 'assets', 'whale-icon-bg.svg'), 'utf8');
-  assert.ok(bg.includes('#FFFFFF'), '白底图标应含白色背景');
-  assert.ok(bg.includes('#000000'), '白底图标应保留原黑色鲸鱼路径');
+  // issue #46：VS Code 不会给扩展图标按主题着色，所以只能用 {light, dark} 两份单色资源，
+  // 并且不再有白色底块（白色圆角底是 v0.3.0 为解决深色主题不可见加的临时方案）。
+  assert.deepEqual(cmd.icon, {
+    light: 'assets/whale-icon-light.svg',
+    dark: 'assets/whale-icon-dark.svg',
+  }, '右上角命令图标应为明暗两套单色图标');
+  const root = join(__dirname, '..', '..');
+  for (const [file, fill] of [
+    ['assets/whale-icon-light.svg', '#424242'],
+    ['assets/whale-icon-dark.svg', '#C5C5C5'],
+  ] as const) {
+    assert.ok(existsSync(join(root, file)), `${file} 应存在`);
+    const svg = readFileSync(join(root, file), 'utf8');
+    assert.ok(!svg.includes('#FFFFFF'), `${file} 不得再含白色背景块`);
+    assert.ok(svg.includes(fill), `${file} 应使用单色填充 ${fill}`);
+    // 紧凑画布：宽度撑满约 90%（原图内容只占 ~73%，视觉上偏小）
+    assert.ok(/scale\(2\.3\d\)/.test(svg), `${file} 应使用紧凑变换（内容放大到约 90% 画布）`);
+  }
   const menu: { command: string; group?: string }[] = p.contributes.menus['editor/title'] || [];
   const item = menu.find((m) => m.command === 'dsh.openFromTitle');
   assert.ok(item, 'editor/title 菜单包含该命令');
@@ -42,12 +54,12 @@ test('存在手动清理图片缓存命令 dsh.cleanupImageCache', () => {
   assert.ok(Array.isArray(p.activationEvents) && p.activationEvents.includes('onCommand:dsh.cleanupImageCache'), '需声明激活事件');
 });
 
-test('活动栏/辅助侧边栏容器图标保持原始鲸鱼图标（assets/whale-icon.svg）', () => {
+test('活动栏/辅助侧边栏容器图标与标题栏共用同一对明暗单色图标（issue #46）', () => {
   const p = pkg();
+  const expected = { light: 'assets/whale-icon-light.svg', dark: 'assets/whale-icon-dark.svg' };
   for (const container of [...p.contributes.viewsContainers.activitybar, ...p.contributes.viewsContainers.secondarySidebar]) {
-    assert.equal(container.icon, 'assets/whale-icon.svg', container.id + ' 应保持原始鲸鱼图标');
+    assert.deepEqual(container.icon, expected, container.id + ' 应使用明暗两套单色图标');
   }
-  assert.ok(existsSync(join(__dirname, '..', '..', 'assets', 'whale-icon.svg')), '原始鲸鱼图标文件应存在');
 });
 
 test('v0.3.0 设置项：remote.enabled 默认 false、image.fallback 默认 true、openInBrowser 默认 false', () => {

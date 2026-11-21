@@ -2,7 +2,7 @@
   "name": "dsh-vscode-panel",
   "displayName": "DSH",
   "description": "Use DeepSeek Harness (DSH) inside VS Code — embedded web UI, auto-start, one-time-token auth, and file/clipboard/image bridge.",
-  "version": "0.5.0-test5",
+  "version": "0.5.0-test6",
   "l10n": "./l10n",
   "publisher": "Fengze233",
   "icon": "assets/icon.png",
@@ -43,14 +43,20 @@
         {
           "id": "dsh",
           "title": "%dsh.container.title%",
-          "icon": "assets/whale-icon.svg"
+          "icon": {
+            "light": "assets/whale-icon-light.svg",
+            "dark": "assets/whale-icon-dark.svg"
+          }
         }
       ],
       "secondarySidebar": [
         {
           "id": "dsh-secondary",
           "title": "%dsh.container.title%",
-          "icon": "assets/whale-icon.svg"
+          "icon": {
+            "light": "assets/whale-icon-light.svg",
+            "dark": "assets/whale-icon-dark.svg"
+          }
         }
       ]
     },
@@ -147,7 +153,10 @@
       {
         "command": "dsh.openFromTitle",
         "title": "%dsh.cmd.openFromTitle.title%",
-        "icon": "assets/whale-icon-bg.svg"
+        "icon": {
+          "light": "assets/whale-icon-light.svg",
+          "dark": "assets/whale-icon-dark.svg"
+        }
       },
       {
         "command": "dsh.addToChat",
