@@ -130,13 +130,20 @@ export function containsPath(parent: string, target: string): boolean {
 }
 
 /**
- * 从 Desktop 的 `dsh.cmd` 路径反推 Desktop 安装根（`…\DeepSeek Harness`）。
+ * 从 Desktop 的 `dsh.cmd` 路径反推 Desktop 安装根（`<根>`，根目录名不限）。
  * 用途：① 让「npm 装法探测」不把 Desktop 的命令误当成 npm 全局 shim（否则每次启动都报
  * 「bin.js missing」并多算一次候选）；② 供版本探测定位 `resources\runtime\cli` 下的包清单。
- * 返回 null 表示不像 Desktop 的标准布局（此时不做任何特殊处理）。
+ *
+ * 判据是**目录结构**而不是目录名（issue #44）：Desktop 的命令固定位于
+ * `<根>\resources\runtime\cli\bin\dsh.cmd`，用户可以把 Desktop 装在任何目录（现场是 `D:\dsh`）。
+ * 旧实现要求路径里必须有字面量 `DeepSeek Harness`，自定义根因此被判成 npm shim、bin.js 推导落空后
+ * 直接丢弃，最终报「未找到可用的 dsh」。npm 全局 shim（`%APPDATA%\npm\dsh.cmd`）不含该后缀，
+ * 不会被误判。
+ *
+ * 返回 null 表示不符合 Desktop 布局（此时不做任何特殊处理）。
  */
 export function desktopRootFromShim(dshCmdPath: string): string | null {
-  const m = /^(.*[\\/]DeepSeek Harness)[\\/]resources[\\/]runtime[\\/]/i.exec(dshCmdPath);
+  const m = /^(.*)[\\/]resources[\\/]runtime[\\/]cli[\\/]bin[\\/]dsh\.(?:cmd|bat)$/i.exec(dshCmdPath);
   return m === null ? null : m[1];
 }
 

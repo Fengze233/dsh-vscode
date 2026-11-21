@@ -31,10 +31,17 @@ export interface PanelProviderUiOpts {
   onAuthUrlSubmit?: (url: string) => void;
   /** 面板缩放 getter（dsh.panel.zoomLevel，issue #8；缺省 1 = 不缩放） */
   zoomLevel?: () => number;
+  /** 是否渲染「面板内无法使用麦克风」提示（false = 用户已永久关闭） */
+  micHintEnabled?: () => boolean;
+  /** 用户点了提示上的关闭：扩展侧负责持久化，之后 refreshPanels() 重渲染即不再出现 */
+  onMicHintDismiss?: () => void;
 }
 
 export class DshPanelProvider implements vscode.WebviewViewProvider {
-  private view: vscode.WebviewView | null = null;
+  /** 等待「插入文件引用」回执的 resolver（null 表示当前没有待处理的插入请求） */
+  private insertWaiter: ((ok: boolean) => void) | null = null;
+  /** 当前绑定的 webview 宿主（侧边栏视图或编辑区面板；未打开时为 null） */
+  private webview: vscode.Webview | null = null;
   /** 曾处于 ready：用于区分"服务断开"与"手动停止"两种占位页 */
   private wasConnected = false;
   /** 面板是否已首次打开过（用于一次性回调） */
@@ -78,21 +85,38 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
-    this.view = view;
+    this.resolveWebview(view.webview);
+  }
+
+  /**
+   * 绑定一个 webview 宿主：侧边栏视图（WebviewView）与编辑区面板（WebviewPanel）共用同一套
+   * 渲染 / 桥接 / 状态订阅逻辑，差异只在宿主生命周期（创建与解绑由扩展入口负责）。
+   */
+  resolveWebview(webview: vscode.Webview): void {
+    this.webview = webview;
     // enableScripts 允许占位页的内联按钮脚本（nonce 放行）运行。
     // 注意：retainContextWhenHidden 不在这里设置——它不是 WebviewOptions 字段，
-    // 由 Task 10 注册视图时通过第三参数传入（隐藏面板时保留 iframe 会话）。
-    view.webview.options = { enableScripts: true };
-    view.webview.onDidReceiveMessage((msg: PanelMessage) => this.onMessage(msg));
+    // 由注册视图 / createWebviewPanel 的选项传入（隐藏面板时保留 iframe 会话）。
+    webview.options = { enableScripts: true };
+    webview.onDidReceiveMessage((msg: PanelMessage) => this.onMessage(msg));
     if (!this.openedOnce) {
       this.openedOnce = true;
       this.onFirstOpen?.(); // 首次打开：触发一次性引导（如"移到右侧栏"提示）
     }
     this.render();
+    // 服务可能早已就绪（例如切到编辑区标签页时），此时不会再有状态变化事件：
+    // 必须按当前状态重算一次 iframe 基地址（DSH ≥0.1.2 只能经本地代办代理访问），
+    // 否则新宿主会直连 dsh 并撞上 401「dsh web authentication required」。
+    void this.handleStateChange();
     // 远程窗口且未启用远程支持：仅显示占位页，绝不在此窗口启动远端 dsh 服务。
     if (this.remoteWindowDisabled()) return;
     // 面板打开即确保服务运行：复用已有或自动启动。
     void this.manager.ensureRunning();
+  }
+
+  /** 解绑 webview（编辑区面板关闭时调用）：防止向已销毁的宿主渲染或投递消息 */
+  detach(webview: vscode.Webview): void {
+    if (this.webview === webview) this.webview = null;
   }
 
   /**
@@ -114,6 +138,44 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   /** 当前展示用的本地可达 URL（供「复制网址」命令使用；未解析时返回 null 由调用方回退原 URL） */
   getDisplayUrl(): string | null {
     return this.pendingExternalUrl;
+  }
+
+  /**
+   * 让页面把文件以 `@相对路径` 插入 DSH 输入框（资源管理器右键「添加到对话」）。
+   *
+   * 返回值 false 表示桥接没响应：面板刚打开还没握手、桥接被禁用、或页面里找不到输入框。
+   * 为什么要重试：面板可能刚打开，iframe 里的桥接尚未握手，早发的消息会被直接丢弃；
+   * 每次尝试都等页面回执，全部超时才判定失败（由调用方提示用户）。
+   */
+  async insertMentions(paths: string[]): Promise<boolean> {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const w = this.webview;
+      if (w === null) return false;
+      if (await this.postInsertAndWait(w, paths)) return true;
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+    return false;
+  }
+
+  /** 发一次插入请求并等待回执（超时按失败处理，避免命令挂住） */
+  private postInsertAndWait(webview: vscode.Webview, paths: string[]): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finish = (ok: boolean): void => {
+        if (timer !== undefined) clearTimeout(timer);
+        if (this.insertWaiter === finish) this.insertWaiter = null;
+        resolve(ok);
+      };
+      timer = setTimeout(() => finish(false), 700);
+      this.insertWaiter = finish;
+      try {
+        // postMessage 的返回在真实 API 里是 Thenable，单测桩可能返回普通值：统一包一层再等待
+        const sent = webview.postMessage({ type: 'bridgeInsertMentions', paths });
+        void Promise.resolve(sent).then(undefined, () => finish(false));
+      } catch {
+        finish(false);
+      }
+    });
   }
 
   /** 处理面板内按钮消息（全部转交给 manager 或对应命令） */
@@ -151,6 +213,15 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
         // 桥接剪贴板消息：VS Code 会拦截跨源 iframe 的原生 clipboard API，
         // 这里由扩展宿主写系统剪贴板，并回执给 iframe 收尾其 writeText Promise。
         void this.copyTextToClipboard(msg);
+        break;
+      case 'dismissMicHint':
+        // 用户永久关闭麦克风提示：由扩展写 globalState，随后重渲染不再带这块 DOM
+        this.ui.onMicHintDismiss?.();
+        break;
+      case 'bridgeInsertMentionsAck':
+        // 页面回执：唤醒等待中的 insertMentions（找不到输入框时为 false）
+        this.insertWaiter?.(msg.ok);
+        this.insertWaiter = null;
         break;
       case 'bridgeReadText':
         // 剪贴板读取：扩展宿主读系统剪贴板（无 webview 权限限制），
@@ -213,9 +284,14 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       rmFile: async (p) => {
         await nodeFs.unlink(p);
       },
-      // 回执：由顶层握手脚本转发回 iframe（saveImageAck / deleteImagesAck）
+      // 回执：由顶层握手脚本转发回 iframe（saveImageAck / deleteImagesAck）。
+      // 宿主可能已被销毁（关闭编辑区标签页与桥接回执的竞态），投递失败不应冒到用户面前。
       reply: async (m) => {
-        await this.view?.webview.postMessage(m);
+        try {
+          await this.webview?.postMessage(m);
+        } catch {
+          /* 宿主已销毁：回执丢弃 */
+        }
       },
     };
   }
@@ -231,7 +307,7 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       // DSH 会继续走自己的 execCommand('copy') 回退路径。
     }
     try {
-      await this.view?.webview.postMessage({ type: 'bridgeCopyTextAck', requestId: msg.requestId, ok });
+      await this.webview?.postMessage({ type: 'bridgeCopyTextAck', requestId: msg.requestId, ok });
     } catch {
       // 面板可能已隐藏/销毁，回执发不出去也不影响扩展其它功能。
     }
@@ -249,7 +325,7 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       // 读剪贴板失败（如系统无剪贴板权限）：回执 ok=false，iframe 侧静默放弃
     }
     try {
-      await this.view?.webview.postMessage({
+      await this.webview?.postMessage({
         type: 'bridgeReadTextAck',
         requestId: msg.requestId,
         ok,
@@ -303,11 +379,11 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
 
   /** 按服务状态渲染对应页面 */
   private render(): void {
-    const v = this.view;
-    if (!v) return;
+    const w = this.webview;
+    if (!w) return;
     const nonce = Math.random().toString(36).slice(2);
     const { host, port } = this.manager.getTarget();
-    const ctx: PageCtx = { nonce, cspSource: v.webview.cspSource, frameHosts: [`http://${host}:${port}`] };
+    const ctx: PageCtx = { nonce, cspSource: w.cspSource, frameHosts: [`http://${host}:${port}`] };
     const s = this.manager.getSnapshot();
     let html: string;
     // 远程窗口且未启用：任何状态都只展示引导占位页，不触碰远端服务。
@@ -343,6 +419,8 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
             },
             // 面板缩放（issue #8）：未接线时 1（不缩放）
             this.ui.zoomLevel?.() ?? 1,
+            // 麦克风提示：默认渲染，用户关闭过一次后不再出现
+            this.ui.micHintEnabled?.() ?? true,
           );
           break;
         }
@@ -366,7 +444,11 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
           break;
       }
     }
-    v.webview.html = html;
+    try {
+      w.html = html;
+    } catch {
+      // 宿主已被销毁（关闭标签页与状态回调的竞态）：丢弃这次渲染即可，下次绑定会重绘
+    }
   }
 
   /**
@@ -377,7 +459,7 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
    * 注意：**不能**提前返回——未打开面板时只跳过渲染动作，由 render 自身判空。
    */
   refreshContextBar(): void {
-    if (!this.view) return;
+    if (!this.webview) return;
     this.render();
   }
 }

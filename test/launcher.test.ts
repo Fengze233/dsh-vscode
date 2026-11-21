@@ -170,6 +170,48 @@ test('desktopRootFromShim / isDesktopInstallPath：识别 DSH Desktop 安装根�
   assert.equal(isDesktopInstallPath('C:\\Users\\u\\AppData\\Roaming\\npm\\dsh.cmd'), false);
 });
 
+// issue #44：Desktop 装在自定义目录（现场是 D:\dsh）时，旧判据要求路径里必须有字面量
+// "DeepSeek Harness"，于是命令被当成 npm 全局 shim、推导出的 bin.js 又不存在 → 候选被丢弃，
+// Desktop 的 PATH 兜底同样被该判据过滤 → resolveLaunch 返回 null，报「未找到可用的 dsh」。
+// 判据改为目录结构后，根目录叫什么都应能识别。
+test('issue #44：自定义安装根（D:\\dsh）按结构识别为 Desktop 布局', () => {
+  const custom = 'D:\\dsh\\resources\\runtime\\cli\\bin\\dsh.cmd';
+  assert.equal(desktopRootFromShim(custom), 'D:\\dsh');
+  assert.equal(isDesktopInstallPath(custom), true);
+  // Windows 文件系统不区分大小写：扩展名大写同样要命中
+  assert.equal(desktopRootFromShim('D:\\dsh\\resources\\runtime\\cli\\bin\\dsh.CMD'), 'D:\\dsh');
+  // npm 全局 shim 是平铺布局，不得误判成 Desktop
+  assert.equal(desktopRootFromShim(NPM_SHIM), null);
+  assert.equal(isDesktopInstallPath(NPM_SHIM), false);
+});
+
+test('issue #44：PATH 只命中自定义根的 Desktop 命令时，照常以 cmd 模式启动', () => {
+  const custom = 'D:\\dsh\\resources\\runtime\\cli\\bin\\dsh.cmd';
+  const r = resolveLaunch(baseInput({
+    env: { path: 'C:\\Windows;D:\\dsh\\resources\\runtime\\cli\\bin', localAppData: 'C:\\Users\\u\\AppData\\Local' },
+    exists: existsOf(custom),
+  }));
+  assert.ok(r, '不应返回 null（否则用户看到 dsh not found）');
+  assert.equal(r.source, 'desktop');
+  assert.equal(r.mode, 'cmd');
+  assert.equal(r.executablePath, custom);
+  // desktopRoot 供扩展入口读取 dsh 版本；自定义根同样要给出（否则版本恒为「未知」）
+  assert.equal(r.desktopRoot, 'D:\\dsh');
+});
+
+test('issue #44：自定义根且同目录有 bin.js 时走 node 直跑', () => {
+  const custom = 'D:\\dsh\\resources\\runtime\\cli\\bin\\dsh.cmd';
+  const bin = desktopBinJsCandidate(custom);
+  const r = resolveLaunch(baseInput({
+    env: { path: 'D:\\dsh\\resources\\runtime\\cli\\bin', localAppData: 'C:\\Users\\u\\AppData\\Local' },
+    exists: existsOf(custom, bin),
+  }));
+  assert.ok(r);
+  assert.equal(r.source, 'desktop');
+  assert.equal(r.mode, 'node');
+  assert.equal(r.executablePath, bin);
+});
+
 // 真机日志反馈：PATH 里只有 Desktop 命令时，npm 分支仍去推导 npm 布局的 bin.js，
 // 每次启动都刷一长串「bin.js missing」且多算一个候选。这里把该路径彻底排除。
 test('npm 探测不把 DSH Desktop 的命令当成 npm 全局 shim', () => {

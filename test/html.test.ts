@@ -52,7 +52,7 @@ test('readyPage 为跨源 iframe 声明 clipboard-write 权限', () => {
   // VS Code webview 与 DSH 页面跨源：不声明 allow="clipboard-write" 时，
   // DSH 代码块复制按钮的 navigator.clipboard.writeText 会被 Permissions Policy 拦截。
   const html = readyPage('http://127.0.0.1:3080/', ctx());
-  assert.ok(html.includes('allow="clipboard-write"'));
+  assert.ok(html.includes('allow="clipboard-write; microphone"'), 'iframe 需同时放行剪贴板写入与麦克风');
 });
 
 test('readyPage 启用桥接时注入握手脚本', () => {
@@ -225,7 +225,7 @@ test('readyPage 缩放：注入 zoom 变量，iframe 用 calc(100%/zoom) + scale
   // 缩放由容器变量驱动；iframe 自身仍保留 id/class（桥接脚本依赖它们）
   assert.ok(html.includes('class="frame-zoom"'));
   assert.ok(html.includes('id="dsh-frame"'));
-  assert.ok(html.includes('allow="clipboard-write"'));
+  assert.ok(html.includes('allow="clipboard-write; microphone"'), 'iframe 需同时放行剪贴板写入与麦克风');
 });
 
 test('缩放支持放大方向（>1）与自定义值（如 1.15）', () => {
@@ -241,4 +241,27 @@ test('缩放布局：iframe 不参与 flex（flex:1 会固定 width，与百分�
   const html = readyPage('http://127.0.0.1:3080/', ctx(), undefined, 0.9);
   assert.ok(!/iframe\.frame \{[^}]*flex/.test(html), '不得给 iframe 加 flex');
   assert.ok(/\.frame-zoom \{[^}]*position: absolute/.test(html), '缩放容器应绝对定位铺满');
+});
+
+test('readyPage 握手脚本包含「插入文件引用」（添加到对话）的上下行转发', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
+  // 下行：扩展宿主 bridgeInsertMentions → iframe 的 insertMentions
+  assert.ok(html.includes("type === 'bridgeInsertMentions'"), '应接收扩展宿主的插入请求');
+  assert.ok(html.includes("kind: 'insertMentions'"), '应转发为 iframe 的 insertMentions');
+  // 上行：iframe 的 insertMentionsAck → 扩展宿主的 bridgeInsertMentionsAck
+  assert.ok(html.includes("kind === 'insertMentionsAck'"), '应转发 iframe 的插入回执');
+  assert.ok(html.includes("type: 'bridgeInsertMentionsAck'"), '应向扩展宿主发送回执');
+});
+
+test('readyPage 在麦克风不可用时给出「用浏览器打开」提示（VS Code webview 限制）', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
+  // VS Code 给 webview 的 iframe 不声明 microphone，内层 iframe 再 allow 也追不回来；
+  // 这里用 Permissions Policy 自检，真不可用时给一条可关闭的提示，引导用户去浏览器。
+  assert.ok(html.includes('id="dsh-mic-hint"'), '应有麦克风不可用提示浮层');
+  assert.ok(html.includes("allowsFeature('microphone')"), '应通过 Permissions Policy 自检');
+  assert.ok(html.includes('data-action="openExternal"'), '提示里应能一键在浏览器中打开');
+  // 关闭一次后应彻底不再渲染（扩展侧持久化，不是每次打开都弹）
+  assert.ok(html.includes("postMessage({ type: 'dismissMicHint' })"), '关闭按钮应通知扩展持久化');
+  const dismissed = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true }, 1, false);
+  assert.ok(!dismissed.includes('id="dsh-mic-hint"'), '已关闭时不得再渲染提示块');
 });

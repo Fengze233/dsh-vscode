@@ -18,16 +18,30 @@ test('extensionKind 优先 workspace（远程场景跑在远端）', () => {
   assert.equal(p.extensionKind[0], 'workspace');
 });
 
-test('右上角图标命令与 editor/title 菜单（v0.3.0）', () => {
+test('编辑器标题栏图标：紧凑画布 + 明暗两套单色资源（issue #46）', () => {
   const p = pkg();
   const cmd = p.contributes.commands.find((c: { command: string }) => c.command === 'dsh.openFromTitle');
   assert.ok(cmd, '存在 dsh.openFromTitle 命令');
-  // 右上角图标：原鲸鱼 + 白底（明暗主题都清晰可见），不再用明暗双主题变体
-  assert.equal(cmd.icon, 'assets/whale-icon-bg.svg', '右上角命令图标应为白底鲸鱼');
-  assert.ok(existsSync(join(__dirname, '..', '..', 'assets', 'whale-icon-bg.svg')), '白底鲸鱼图标文件应存在');
-  const bg = readFileSync(join(__dirname, '..', '..', 'assets', 'whale-icon-bg.svg'), 'utf8');
-  assert.ok(bg.includes('#FFFFFF'), '白底图标应含白色背景');
-  assert.ok(bg.includes('#000000'), '白底图标应保留原黑色鲸鱼路径');
+  // issue #46：VS Code 不会给扩展图标按主题着色，所以只能用 {light, dark} 两份单色资源，
+  // 并且不再有白色底块（白色圆角底是 v0.3.0 为解决深色主题不可见加的临时方案）。
+  assert.deepEqual(cmd.icon, {
+    light: 'assets/whale-icon-light.svg',
+    dark: 'assets/whale-icon-dark.svg',
+  }, '右上角命令图标应为明暗两套单色图标');
+  const root = join(__dirname, '..', '..');
+  for (const [file, fill] of [
+    ['assets/whale-icon-light.svg', '#424242'],
+    ['assets/whale-icon-dark.svg', '#C5C5C5'],
+  ] as const) {
+    assert.ok(existsSync(join(root, file)), `${file} 应存在`);
+    const svg = readFileSync(join(root, file), 'utf8');
+    assert.ok(!svg.includes('#FFFFFF'), `${file} 不得再含白色背景块`);
+    assert.ok(svg.includes(fill), `${file} 应使用单色填充 ${fill}`);
+    // 紧凑画布：viewBox 紧贴内容（不再是 0 0 128 128），否则内容只占约 73%，看起来偏小
+    assert.ok(!svg.includes('viewBox="0 0 128 128"'), `${file} 应使用紧贴内容的 viewBox`);
+    // 鲸鱼是宽扁造型，等比缩放时永远显矮：用 preserveAspectRatio="none" 纵向拉满，视觉尺寸才与 codicon 一致
+    assert.ok(svg.includes('preserveAspectRatio="none"'), `${file} 应纵向拉满（preserveAspectRatio="none"）`);
+  }
   const menu: { command: string; group?: string }[] = p.contributes.menus['editor/title'] || [];
   const item = menu.find((m) => m.command === 'dsh.openFromTitle');
   assert.ok(item, 'editor/title 菜单包含该命令');
@@ -42,12 +56,18 @@ test('存在手动清理图片缓存命令 dsh.cleanupImageCache', () => {
   assert.ok(Array.isArray(p.activationEvents) && p.activationEvents.includes('onCommand:dsh.cleanupImageCache'), '需声明激活事件');
 });
 
-test('活动栏/辅助侧边栏容器图标保持原始鲸鱼图标（assets/whale-icon.svg）', () => {
+test('活动栏/辅助侧边栏容器图标必须单文件（viewsContainers.icon 只接受路径字符串）', () => {
   const p = pkg();
+  // 真机 + v0.3.0 的教训：容器图标传 {light,dark} 对象会被渲染成空白占位方块
+  // （VS Code 的 viewsContainers 扩展点 schema 里 icon 只声明为 string）。
   for (const container of [...p.contributes.viewsContainers.activitybar, ...p.contributes.viewsContainers.secondarySidebar]) {
-    assert.equal(container.icon, 'assets/whale-icon.svg', container.id + ' 应保持原始鲸鱼图标');
+    assert.equal(container.icon, 'assets/whale-icon.svg', container.id + ' 应使用单文件图标');
   }
-  assert.ok(existsSync(join(__dirname, '..', '..', 'assets', 'whale-icon.svg')), '原始鲸鱼图标文件应存在');
+  const file = join(__dirname, '..', '..', 'assets', 'whale-icon.svg');
+  assert.ok(existsSync(file), '容器图标文件应存在');
+  const svg = readFileSync(file, 'utf8');
+  assert.ok(svg.includes('#8A8A8A'), '容器图标用中性灰：#1F1F1F 与 #FFFFFF 上都可辨');
+  assert.ok(svg.includes('preserveAspectRatio="none"'), '容器图标同样纵向拉满，避免显小');
 });
 
 test('v0.3.0 设置项：remote.enabled 默认 false、image.fallback 默认 true、openInBrowser 默认 false', () => {
@@ -143,11 +163,17 @@ test('#27 回归：活动编辑器变化不得触发面板刷新/重载链路', 
   assert.ok(!provider.includes("kind: 'updateContextBar'"), '不得再有 updateContextBar 下行消息');
   // ⑤ 渲染不得注入"当前文件名"（#27 的放大器：文件名进 HTML → 每次文件切换 HTML 都不同）
   assert.ok(!provider.includes('fileLabel'), 'provider 不得再向模板注入 fileLabel');
-  // ⑥ 已撤回的右键菜单块不得复活
+  // ⑥ 已撤回的右键命令不得复活。
+  // 注意：v0.5.0 起 `explorer/context` 被新功能（「DSH → 添加到对话」）占用，
+  // 所以这里不再断言整块菜单不存在，改为断言已撤回的上下文命令没有被接回来。
   const p = pkg();
+  const withdrawn = (id: string): boolean => id.startsWith('dsh.addFileContext') || id.startsWith('dsh.askAbout');
   for (const menu of ['editor/context', 'explorer/context', 'editor/title/context']) {
-    assert.equal(p.contributes.menus[menu], undefined, `菜单块 ${menu} 应已移除`);
+    for (const item of p.contributes.menus[menu] ?? []) {
+      assert.ok(!withdrawn(String(item.command ?? '')), `菜单 ${menu} 不得复活已撤回命令：${item.command}`);
+    }
   }
+  assert.ok(!p.contributes.commands.some((c: { command: string }) => withdrawn(c.command)), '命令表不得复活已撤回命令');
 });
 
 // 缩放（issue #8）在 0.4.2 中保留：它是唯一需要"重渲染才生效"的设置项，
@@ -210,4 +236,17 @@ test('README 中英与 CHANGELOG 当前版本测试数等于实际测试数，�
   // 历史版本的测试数不随新增用例变化，只验证同一版本段落内的数字一致。
   assert.equal(Number(dropped[2]), Number(green[1]), 'CHANGELOG 同一版本的测试数应一致');
   assert.ok(Number(dropped[1]) > Number(dropped[2]), '撤回后测试数应下降');
+});
+
+// v0.5.0：资源管理器右键「将文件添加到 DSH 对话」必须是**一级**菜单项。
+// 真机反馈：二级子菜单要点两次才选得到，和 VS Code 内置的「将文件添加到聊天」不一致。
+test('explorer/context 直接暴露「添加到对话」，不使用二级子菜单', () => {
+  const p = pkg();
+  const items: Array<{ command?: string; submenu?: string; group?: string }> =
+    p.contributes.menus['explorer/context'] ?? [];
+  const item = items.find((m) => m.command === 'dsh.addToChat');
+  assert.ok(item, 'explorer/context 应有 dsh.addToChat');
+  assert.equal(item.submenu, undefined, '不应再通过 submenu 包一层');
+  assert.ok(String(item.group).startsWith('1_modification'), '应与内置「将文件添加到聊天」同分组');
+  assert.ok(!(p.contributes.submenus ?? []).some((s: { id: string }) => s.id === 'dsh.chat'), '不再声明 DSH 子菜单');
 });
