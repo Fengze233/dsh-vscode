@@ -360,7 +360,8 @@
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/build.mjs --test && node --test \"out/test/**/*.test.js\"",
-    "package": "npm run compile && vsce package -o dsh-vscode.vsix"
+    "package": "npm run compile && vsce package -o dsh-vscode.vsix",
+    "verify:build": "node scripts/verify-testbuild.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
