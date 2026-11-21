@@ -34,6 +34,9 @@ import { cleanupAllImageCaches, cleanupStaleImageCaches } from './bridge/host';
 import * as nodeFs from 'node:fs/promises';
 import { evaluateBridgeStatus, bridgeWarningText } from './bridge/status';
 
+/** 麦克风提示的持久化键：用户点过一次关闭后，之后所有窗口都不再显示该提示 */
+const MIC_HINT_DISMISSED_KEY = 'dsh.micHintDismissed';
+
 let manager: ServiceManager | null = null;
 let output: vscode.OutputChannel | null = null;
 /** 本次会话捕获/提交的 DSH 启动网址（含一次性 token；供自动兑换与「浏览器打开/复制网址」使用） */
@@ -605,6 +608,12 @@ export function activate(context: vscode.ExtensionContext): void {
     onAuthUrlSubmit: (url) => void handleAuthUrlSubmit(url),
     // 面板缩放：由 dsh.panel.zoomLevel 驱动（issue #8）
     zoomLevel: () => readConfig().config.panelZoomLevel,
+    // 麦克风提示：关闭一次即永久记住（globalState 跨窗口），下次不再渲染
+    micHintEnabled: () => context.globalState.get<boolean>(MIC_HINT_DISMISSED_KEY) !== true,
+    onMicHintDismiss: () => {
+      void context.globalState.update(MIC_HINT_DISMISSED_KEY, true);
+      refreshPanels(); // 重渲染：提示块从 DOM 里去掉
+    },
   });
 
   /** 用户浏览器可打开的 DSH 地址：优先带 token 的启动网址（0.1.2 起浏览器需要它完成登录） */

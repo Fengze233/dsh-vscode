@@ -31,6 +31,10 @@ export interface PanelProviderUiOpts {
   onAuthUrlSubmit?: (url: string) => void;
   /** 面板缩放 getter（dsh.panel.zoomLevel，issue #8；缺省 1 = 不缩放） */
   zoomLevel?: () => number;
+  /** 是否渲染「面板内无法使用麦克风」提示（false = 用户已永久关闭） */
+  micHintEnabled?: () => boolean;
+  /** 用户点了提示上的关闭：扩展侧负责持久化，之后 refreshPanels() 重渲染即不再出现 */
+  onMicHintDismiss?: () => void;
 }
 
 export class DshPanelProvider implements vscode.WebviewViewProvider {
@@ -209,6 +213,10 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
         // 桥接剪贴板消息：VS Code 会拦截跨源 iframe 的原生 clipboard API，
         // 这里由扩展宿主写系统剪贴板，并回执给 iframe 收尾其 writeText Promise。
         void this.copyTextToClipboard(msg);
+        break;
+      case 'dismissMicHint':
+        // 用户永久关闭麦克风提示：由扩展写 globalState，随后重渲染不再带这块 DOM
+        this.ui.onMicHintDismiss?.();
         break;
       case 'bridgeInsertMentionsAck':
         // 页面回执：唤醒等待中的 insertMentions（找不到输入框时为 false）
@@ -411,6 +419,8 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
             },
             // 面板缩放（issue #8）：未接线时 1（不缩放）
             this.ui.zoomLevel?.() ?? 1,
+            // 麦克风提示：默认渲染，用户关闭过一次后不再出现
+            this.ui.micHintEnabled?.() ?? true,
           );
           break;
         }

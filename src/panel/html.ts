@@ -27,7 +27,9 @@ export type PanelMessage =
   /** 右键「添加到对话」的页面回执：ok=false 表示桥接没找到输入框或写入失败 */
   | { type: 'bridgeInsertMentionsAck'; ok: boolean }
   /** 需要登录引导页：用户粘贴外部启动的 DSH 启动网址后提交（扩展校验并兑换会话） */
-  | { type: 'authSubmitLaunchUrl'; url: string };
+  | { type: 'authSubmitLaunchUrl'; url: string }
+  /** 麦克风提示被用户关掉：扩展侧持久化，之后不再渲染（真机反馈：不要每次弹） */
+  | { type: 'dismissMicHint' };
 
 /** 渲染上下文 */
 export interface PageCtx {
@@ -107,9 +109,12 @@ const MIC_HINT_SCRIPT = `
   } catch (e) { allowed = true; }
   if (allowed) return;
   el.hidden = false;
-  // 关闭按钮：只隐藏本次
+  // 关闭按钮：立即隐藏，并通知扩展记住「以后都别再显示」（跨窗口持久化）
   var close = el.querySelector('button[data-dismiss]');
-  if (close) close.addEventListener('click', function () { el.hidden = true; });
+  if (close) close.addEventListener('click', function () {
+    el.hidden = true;
+    vscode.postMessage({ type: 'dismissMicHint' });
+  });
 })();
 `;
 
@@ -423,6 +428,7 @@ export function readyPage(
   ctx: PageCtx,
   bridge?: { token: string; enabled: boolean; imageFallback?: boolean },
   zoomLevel = 1,
+  micHint = true,
 ): string {
   // 桥接启用时注入握手脚本；未传入或 enabled=false 时保持向后兼容，不注入
   const extraScripts = bridge?.enabled
@@ -440,11 +446,13 @@ export function readyPage(
     // allow 里必须显式放行 microphone：跨源 iframe 默认被 Permissions Policy 拦掉 getUserMedia，
     // 表现就是 DSH 语音输入里那句「麦克风权限未开启」——放行后才会走到 VS Code/系统的权限询问。
     `<div class="frame-zoom"${zoomAttr}><iframe id="dsh-frame" class="frame" allow="clipboard-write; microphone" src="${url}"></iframe></div>` +
-      // 麦克风不可用提示（默认隐藏，脚本按 Permissions Policy 决定是否显示）
-      `<div id="dsh-mic-hint" class="mic-hint" hidden>` +
-      `<span>${escapeHtml(translate('panel.micHint'))}</span>` +
-      `<button data-action="openExternal">${escapeHtml(translate('panel.openExternal'))}</button>` +
-      `<button data-dismiss="1" title="×">×</button></div>`,
-    `<script nonce="${ctx.nonce}">${MIC_HINT_SCRIPT}</script>` + extraScripts,
+      // 麦克风不可用提示（用户关掉一次后不再渲染；脚本按 Permissions Policy 决定是否显示）
+      (micHint
+        ? `<div id="dsh-mic-hint" class="mic-hint" hidden>` +
+          `<span>${escapeHtml(translate('panel.micHint'))}</span>` +
+          `<button data-action="openExternal">${escapeHtml(translate('panel.openExternal'))}</button>` +
+          `<button data-dismiss="1" title="×">×</button></div>`
+        : ''),
+    (micHint ? `<script nonce="${ctx.nonce}">${MIC_HINT_SCRIPT}</script>` : '') + extraScripts,
   );
 }

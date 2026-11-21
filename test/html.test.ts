@@ -260,4 +260,8 @@ test('readyPage 在麦克风不可用时给出「用浏览器打开」提示（V
   assert.ok(html.includes('id="dsh-mic-hint"'), '应有麦克风不可用提示浮层');
   assert.ok(html.includes("allowsFeature('microphone')"), '应通过 Permissions Policy 自检');
   assert.ok(html.includes('data-action="openExternal"'), '提示里应能一键在浏览器中打开');
+  // 关闭一次后应彻底不再渲染（扩展侧持久化，不是每次打开都弹）
+  assert.ok(html.includes("postMessage({ type: 'dismissMicHint' })"), '关闭按钮应通知扩展持久化');
+  const dismissed = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true }, 1, false);
+  assert.ok(!dismissed.includes('id="dsh-mic-hint"'), '已关闭时不得再渲染提示块');
 });
