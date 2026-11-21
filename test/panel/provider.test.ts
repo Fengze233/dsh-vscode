@@ -134,3 +134,34 @@ test('detach 之后不再向旧宿主渲染', () => {
   provider.refreshContextBar();
   assert.equal(webview.html, rendered, '解绑后 refreshContextBar 不应再写 html');
 });
+
+// 资源管理器右键「DSH → 添加到对话」（v0.5.0）：把文件以 @路径 插入 DSH 输入框
+test('insertMentions 下发插入请求，页面回执后返回 true', async () => {
+  const provider = new DshPanelProvider(
+    fakeManager() as never,
+    undefined, undefined,
+    () => '/proj', () => true, () => false,
+    async (u) => u, () => true,
+    {},
+  );
+  const view = fakeView();
+  provider.resolveWebview(view.webview as never);
+  const pending = provider.insertMentions(['src/a.ts', 'src/b.ts']);
+  view.fire({ type: 'bridgeInsertMentionsAck', ok: true });
+  assert.equal(await pending, true);
+  assert.deepEqual(view.posted[view.posted.length - 1], {
+    type: 'bridgeInsertMentions',
+    paths: ['src/a.ts', 'src/b.ts'],
+  });
+});
+
+test('insertMentions 在没有绑定 webview 时直接返回 false', async () => {
+  const provider = new DshPanelProvider(
+    fakeManager() as never,
+    undefined, undefined,
+    () => '/proj', () => true, () => false,
+    async (u) => u, () => true,
+    {},
+  );
+  assert.equal(await provider.insertMentions(['src/a.ts']), false);
+});

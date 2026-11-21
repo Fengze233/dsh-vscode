@@ -24,6 +24,8 @@ export type PanelMessage =
   | { type: 'bridgeSaveImageAck'; requestId: string; ok: boolean; path?: string }
   | { type: 'bridgeDeleteImages'; requestId: string; paths: string[] }
   | { type: 'bridgeDeleteImagesAck'; requestId: string; ok: boolean }
+  /** 右键「添加到对话」的页面回执：ok=false 表示桥接没找到输入框或写入失败 */
+  | { type: 'bridgeInsertMentionsAck'; ok: boolean }
   /** 需要登录引导页：用户粘贴外部启动的 DSH 启动网址后提交（扩展校验并兑换会话） */
   | { type: 'authSubmitLaunchUrl'; url: string };
 
@@ -163,6 +165,11 @@ if (iframeEl) {
       iframeEl.contentWindow.postMessage({ kind: 'deleteImagesAck', requestId: d.requestId, ok: d.ok }, '*');
       return;
     }
+    // 插入文件引用：转发给 iframe，由桥接把「@路径」写进 DSH 输入框
+    if (d && d.type === 'bridgeInsertMentions' && Array.isArray(d.paths)) {
+      iframeEl.contentWindow.postMessage({ kind: 'insertMentions', paths: d.paths }, '*');
+      return;
+    }
     // —— 上行：iframe 发来的消息，source + origin 双重校验 ——
     if (e.source !== iframeEl.contentWindow || !isAllowedBridgeOrigin(e.origin)) return;
     // 握手回执：统一形状 { kind:'bridgeAck', ok }（不带 token 字段），只读 ok
@@ -173,6 +180,11 @@ if (iframeEl) {
         ok: d.ok === true,
         ...(typeof d.version === 'string' ? { version: d.version } : {}),
       });
+      return;
+    }
+    // 插入文件引用回执：交给扩展决定提示「已添加」还是「面板未就绪」
+    if (d && d.kind === 'insertMentionsAck') {
+      vscode.postMessage({ type: 'bridgeInsertMentionsAck', ok: d.ok === true });
       return;
     }
     // 打开外链：转发给扩展 → vscode.env.openExternal

@@ -742,6 +742,33 @@ export function activate(context: vscode.ExtensionContext): void {
     });
     attachEditorPanel(panel);
   };
+  /**
+   * 资源管理器右键「DSH → 添加到对话」：把选中文件以 `@相对路径` 插进 DSH 输入框。
+   *
+   * 路径口径：优先相对工作区根（与 DSH 会话 cwd 的常见情况一致，短且可读），
+   * 不在任何工作区文件夹内时退回绝对路径，保证不会因为算不出相对路径而什么都不做。
+   */
+  const addToChat = async (uri?: vscode.Uri, uris?: vscode.Uri[]): Promise<void> => {
+    const list = Array.isArray(uris) && uris.length > 0 ? uris : uri !== undefined ? [uri] : [];
+    if (list.length === 0) return;
+    if (editorPanel === null) openInEditor(); // 面板没开就先开（与「在编辑区打开」一致）
+    const provider = editorProvider;
+    if (provider === null) {
+      void vscode.window.showWarningMessage(t('msg.addToChatFailed'));
+      return;
+    }
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const paths = list.slice(0, 20).map((u) => {
+      const rel = root !== undefined && u.fsPath.startsWith(`${root}/`) ? u.fsPath.slice(root.length + 1) : u.fsPath;
+      return rel.split('\\').join('/'); // Windows 分隔符统一成正斜杠，避免 DSH 侧解析不一致
+    });
+    if (await provider.insertMentions(paths)) {
+      void vscode.window.showInformationMessage(t('msg.addToChatOk', { count: paths.length }));
+    } else {
+      void vscode.window.showWarningMessage(t('msg.addToChatFailed'));
+    }
+  };
+
   new StatusBarController(manager);
 
   // 服务就绪后启动握手超时（若面板已打开）；并执行会话判定/兑换（自启自动、外部服务→登录引导页）
@@ -773,6 +800,8 @@ export function activate(context: vscode.ExtensionContext): void {
     // 编辑器标题栏图标：默认在编辑区标签页打开（与 Claude Code 同形态），不再跳右侧侧边栏；
     // 需要侧边栏时仍可用「DSH: 在辅助侧边栏打开」（dsh.openSecondary）。
     vscode.commands.registerCommand('dsh.openFromTitle', () => openInEditor()),
+    // 资源管理器右键子菜单「DSH → 添加到对话」：把选中文件插入 DSH 输入框
+    vscode.commands.registerCommand('dsh.addToChat', (uri?: vscode.Uri, uris?: vscode.Uri[]) => addToChat(uri, uris)),
     vscode.commands.registerCommand('dsh.openExternal', () => openExternal()),
     vscode.commands.registerCommand('dsh.restart', () => void manager?.restart()),
     vscode.commands.registerCommand('dsh.stop', () => void manager?.stop()),

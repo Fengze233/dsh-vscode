@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     // —— 握手状态 ——
     let bridgeToken = ""; // 父页面下发的握手 token；未握手前为空，不激活任何拦截
     // 桥接包版本（与插件版本统一，随包发布；安装器按「版本不一致或 client.js 内容不一致」强制重装）
-    const BRIDGE_VERSION = "0.5.0-test3";
+    const BRIDGE_VERSION = "0.5.0-test4";
 
     // —— 剪贴板写桥接：VS Code webview 对跨源 iframe 的 navigator.clipboard.writeText 有权限拦截 ——
     // 背景：即使 iframe 声明 allow="clipboard-write"，VS Code（Electron）仍会拒绝写入
@@ -184,6 +184,34 @@ window.__ModuleLoader__.load({
       } catch {
         return false;
       }
+    }
+
+    // —— 下行：把工作区文件以 `@路径` 插入 DSH 输入框（资源管理器右键「添加到 DSH 对话」） ——
+    // 为什么从后往前找可编辑元素：DSH 的 composer 固定在页面底部，历史消息里可能还有别的
+    // contenteditable；找不到时返回 false（由扩展提示用户），绝不静默失败。
+    function insertMentions(paths) {
+      const editables = Array.from(document.querySelectorAll('textarea, [contenteditable="true"]'))
+        .filter((el) => isEditableElement(el) && el.isConnected && el.getBoundingClientRect().height > 0);
+      const el = editables[editables.length - 1];
+      if (el === undefined) return false;
+      try {
+        el.focus();
+      } catch {
+        return false;
+      }
+      if (el.isContentEditable) {
+        // 光标移到内容末尾：避免插进句中，或覆盖用户已选中的文本
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+        const sel = window.getSelection();
+        if (sel !== null) {
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }
+      const text = paths.map((p) => '@' + p).join(' ') + ' ';
+      return insertTextIntoFocused(el, text);
     }
 
     // —— 撤销/重做（Cmd/Ctrl+Z、Cmd+Shift+Z / Ctrl+Y） ——
@@ -522,6 +550,19 @@ window.__ModuleLoader__.load({
         // 校验消息来源，按 { kind: 'bridgeAck', ok } 解析，避免同 kind 两种形状。
         // 回执携带桥接版本：扩展侧日志据此直接确认页面里跑的是哪个版本的桥接代码
         parent.postMessage(buildSyncWorkspaceAck(true, undefined, BRIDGE_VERSION), "*");
+        return;
+      }
+      // 下行：把文件引用插入输入框（编辑器右键「添加到对话」）。无论成败都回执，
+      // 扩展据此决定提示「已添加」还是「面板未就绪 / 找不到输入框」。
+      if (d.kind === 'insertMentions' && Array.isArray(d.paths)) {
+        const paths = d.paths.filter((p) => typeof p === 'string' && p.length > 0).slice(0, 20);
+        let ok = false;
+        try {
+          ok = insertMentions(paths);
+        } catch (err) {
+          console.warn('[dsh-vscode-bridge] insertMentions failed', err);
+        }
+        parent.postMessage({ kind: 'insertMentionsAck', ok }, '*');
         return;
       }
       // 剪贴板写回执：resolve / reject 对应的 writeText Promise

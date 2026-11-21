@@ -5,6 +5,8 @@
   "dsh.cmd.openPanel.title": "DSH: 打开面板",
   "dsh.cmd.openSecondary.title": "DSH: 在辅助侧边栏打开",
   "dsh.cmd.openFromTitle.title": "DSH：在编辑区打开",
+  "dsh.cmd.addToChat.title": "添加到 DSH 对话",
+  "dsh.submenu.title": "DSH",
   "dsh.cmd.openExternal.title": "在浏览器中打开",
   "dsh.cmd.restart.title": "重启服务",
   "dsh.cmd.stop.title": "停止服务",

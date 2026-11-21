@@ -143,11 +143,17 @@ test('#27 回归：活动编辑器变化不得触发面板刷新/重载链路', 
   assert.ok(!provider.includes("kind: 'updateContextBar'"), '不得再有 updateContextBar 下行消息');
   // ⑤ 渲染不得注入"当前文件名"（#27 的放大器：文件名进 HTML → 每次文件切换 HTML 都不同）
   assert.ok(!provider.includes('fileLabel'), 'provider 不得再向模板注入 fileLabel');
-  // ⑥ 已撤回的右键菜单块不得复活
+  // ⑥ 已撤回的右键命令不得复活。
+  // 注意：v0.5.0 起 `explorer/context` 被新功能（「DSH → 添加到对话」）占用，
+  // 所以这里不再断言整块菜单不存在，改为断言已撤回的上下文命令没有被接回来。
   const p = pkg();
+  const withdrawn = (id: string): boolean => id.startsWith('dsh.addFileContext') || id.startsWith('dsh.askAbout');
   for (const menu of ['editor/context', 'explorer/context', 'editor/title/context']) {
-    assert.equal(p.contributes.menus[menu], undefined, `菜单块 ${menu} 应已移除`);
+    for (const item of p.contributes.menus[menu] ?? []) {
+      assert.ok(!withdrawn(String(item.command ?? '')), `菜单 ${menu} 不得复活已撤回命令：${item.command}`);
+    }
   }
+  assert.ok(!p.contributes.commands.some((c: { command: string }) => withdrawn(c.command)), '命令表不得复活已撤回命令');
 });
 
 // 缩放（issue #8）在 0.4.2 中保留：它是唯一需要"重渲染才生效"的设置项，

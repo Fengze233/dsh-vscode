@@ -34,6 +34,8 @@ export interface PanelProviderUiOpts {
 }
 
 export class DshPanelProvider implements vscode.WebviewViewProvider {
+  /** 等待「插入文件引用」回执的 resolver（null 表示当前没有待处理的插入请求） */
+  private insertWaiter: ((ok: boolean) => void) | null = null;
   /** 当前绑定的 webview 宿主（侧边栏视图或编辑区面板；未打开时为 null） */
   private webview: vscode.Webview | null = null;
   /** 曾处于 ready：用于区分"服务断开"与"手动停止"两种占位页 */
@@ -134,6 +136,44 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
     return this.pendingExternalUrl;
   }
 
+  /**
+   * 让页面把文件以 `@相对路径` 插入 DSH 输入框（资源管理器右键「添加到对话」）。
+   *
+   * 返回值 false 表示桥接没响应：面板刚打开还没握手、桥接被禁用、或页面里找不到输入框。
+   * 为什么要重试：面板可能刚打开，iframe 里的桥接尚未握手，早发的消息会被直接丢弃；
+   * 每次尝试都等页面回执，全部超时才判定失败（由调用方提示用户）。
+   */
+  async insertMentions(paths: string[]): Promise<boolean> {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const w = this.webview;
+      if (w === null) return false;
+      if (await this.postInsertAndWait(w, paths)) return true;
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+    return false;
+  }
+
+  /** 发一次插入请求并等待回执（超时按失败处理，避免命令挂住） */
+  private postInsertAndWait(webview: vscode.Webview, paths: string[]): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finish = (ok: boolean): void => {
+        if (timer !== undefined) clearTimeout(timer);
+        if (this.insertWaiter === finish) this.insertWaiter = null;
+        resolve(ok);
+      };
+      timer = setTimeout(() => finish(false), 700);
+      this.insertWaiter = finish;
+      try {
+        // postMessage 的返回在真实 API 里是 Thenable，单测桩可能返回普通值：统一包一层再等待
+        const sent = webview.postMessage({ type: 'bridgeInsertMentions', paths });
+        void Promise.resolve(sent).then(undefined, () => finish(false));
+      } catch {
+        finish(false);
+      }
+    });
+  }
+
   /** 处理面板内按钮消息（全部转交给 manager 或对应命令） */
   private onMessage(msg: PanelMessage): void {
     switch (msg.type) {
@@ -169,6 +209,11 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
         // 桥接剪贴板消息：VS Code 会拦截跨源 iframe 的原生 clipboard API，
         // 这里由扩展宿主写系统剪贴板，并回执给 iframe 收尾其 writeText Promise。
         void this.copyTextToClipboard(msg);
+        break;
+      case 'bridgeInsertMentionsAck':
+        // 页面回执：唤醒等待中的 insertMentions（找不到输入框时为 false）
+        this.insertWaiter?.(msg.ok);
+        this.insertWaiter = null;
         break;
       case 'bridgeReadText':
         // 剪贴板读取：扩展宿主读系统剪贴板（无 webview 权限限制），

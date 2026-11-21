@@ -242,3 +242,13 @@ test('缩放布局：iframe 不参与 flex（flex:1 会固定 width，与百分�
   assert.ok(!/iframe\.frame \{[^}]*flex/.test(html), '不得给 iframe 加 flex');
   assert.ok(/\.frame-zoom \{[^}]*position: absolute/.test(html), '缩放容器应绝对定位铺满');
 });
+
+test('readyPage 握手脚本包含「插入文件引用」（添加到对话）的上下行转发', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true });
+  // 下行：扩展宿主 bridgeInsertMentions → iframe 的 insertMentions
+  assert.ok(html.includes("type === 'bridgeInsertMentions'"), '应接收扩展宿主的插入请求');
+  assert.ok(html.includes("kind: 'insertMentions'"), '应转发为 iframe 的 insertMentions');
+  // 上行：iframe 的 insertMentionsAck → 扩展宿主的 bridgeInsertMentionsAck
+  assert.ok(html.includes("kind === 'insertMentionsAck'"), '应转发 iframe 的插入回执');
+  assert.ok(html.includes("type: 'bridgeInsertMentionsAck'"), '应向扩展宿主发送回执');
+});
