@@ -6,7 +6,6 @@
   "dsh.cmd.openSecondary.title": "DSH: Open in Secondary Side Bar",
   "dsh.cmd.openFromTitle.title": "DSH: Open in Editor",
   "dsh.cmd.addToChat.title": "Add File to DSH Chat",
-  "dsh.submenu.title": "DSH",
   "dsh.cmd.openExternal.title": "Open in Browser",
   "dsh.cmd.restart.title": "Restart Service",
   "dsh.cmd.stop.title": "Stop Service",

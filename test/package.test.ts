@@ -217,3 +217,16 @@ test('README 中英与 CHANGELOG 当前版本测试数等于实际测试数，�
   assert.equal(Number(dropped[2]), Number(green[1]), 'CHANGELOG 同一版本的测试数应一致');
   assert.ok(Number(dropped[1]) > Number(dropped[2]), '撤回后测试数应下降');
 });
+
+// v0.5.0：资源管理器右键「将文件添加到 DSH 对话」必须是**一级**菜单项。
+// 真机反馈：二级子菜单要点两次才选得到，和 VS Code 内置的「将文件添加到聊天」不一致。
+test('explorer/context 直接暴露「添加到对话」，不使用二级子菜单', () => {
+  const p = pkg();
+  const items: Array<{ command?: string; submenu?: string; group?: string }> =
+    p.contributes.menus['explorer/context'] ?? [];
+  const item = items.find((m) => m.command === 'dsh.addToChat');
+  assert.ok(item, 'explorer/context 应有 dsh.addToChat');
+  assert.equal(item.submenu, undefined, '不应再通过 submenu 包一层');
+  assert.ok(String(item.group).startsWith('1_modification'), '应与内置「将文件添加到聊天」同分组');
+  assert.ok(!(p.contributes.submenus ?? []).some((s: { id: string }) => s.id === 'dsh.chat'), '不再声明 DSH 子菜单');
+});
