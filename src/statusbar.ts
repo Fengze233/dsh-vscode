@@ -7,13 +7,21 @@ import * as vscode from 'vscode';
 import { ServiceManager, type ServiceSnapshot } from './service/manager';
 import { t } from './i18n';
 
+/**
+ * 状态栏上的产品图标：鲸鱼（DSH 的标志）。
+ *
+ * 为什么用字符而不是图片：`StatusBarItem.text` 只支持纯文本与 codicon（`$(...)`），
+ * 不支持图片；codicon 里也没有鲸鱼，所以用鲸鱼 emoji（U+1F40B）作为产品标志。
+ */
+const PRODUCT_GLYPH = '🐋';
+
 /** 各状态的图标与提示文案；颜色只在「需要被注意到」的状态下给 */
 const PRESETS = {
-  running: { icon: '✻', textKey: 'status.running', color: undefined },
+  running: { icon: PRODUCT_GLYPH, textKey: 'status.running', color: undefined },
   starting: { icon: '$(sync~spin)', textKey: 'status.starting', color: undefined },
   stopping: { icon: '$(sync~spin)', textKey: 'status.stopping', color: undefined },
   failed: { icon: '$(error)', textKey: 'status.failed', color: 'charts.red' },
-  stopped: { icon: '$(circle-outline)', textKey: 'status.stopped', color: 'descriptionForeground' },
+  stopped: { icon: PRODUCT_GLYPH, textKey: 'status.stopped', color: 'descriptionForeground' },
 } as const;
 
 type PresetKey = keyof typeof PRESETS;

@@ -38,7 +38,7 @@ test('状态栏：运行中不着色、状态进 tooltip，停止中不得显示
   };
 
   // 运行中：静态星号 + 产品名，与 Claude Code 的 `✻ Claude Code` 同构
-  assert.equal(item.text, '✻ DSH');
+  assert.equal(item.text, '🐋 DSH');
   assert.equal(item.color, undefined, '运行中不应设置颜色');
   assert.equal(item.tooltip, t('status.running'));
   assert.equal(item.command, 'dsh.openPanel');
@@ -51,7 +51,7 @@ test('状态栏：运行中不着色、状态进 tooltip，停止中不得显示
 
   // 已停止：灰点图标（保留弱化色）
   fire({ state: 'idle', url: null, error: null, owned: false });
-  assert.equal(item.text, '$(circle-outline) DSH');
+  assert.equal(item.text, '🐋 DSH');
   assert.equal((item.color as { id?: string } | undefined)?.id, 'descriptionForeground');
 
   // 失败：唯一需要抢注意力的状态，保留红色
