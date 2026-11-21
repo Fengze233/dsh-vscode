@@ -403,7 +403,9 @@ export function readyPage(
     ctx,
     'DSH',
     'frame-body',
-    `<div class="frame-zoom"${zoomAttr}><iframe id="dsh-frame" class="frame" allow="clipboard-write" src="${url}"></iframe></div>`,
+    // allow 里必须显式放行 microphone：跨源 iframe 默认被 Permissions Policy 拦掉 getUserMedia，
+    // 表现就是 DSH 语音输入里那句「麦克风权限未开启」——放行后才会走到 VS Code/系统的权限询问。
+    `<div class="frame-zoom"${zoomAttr}><iframe id="dsh-frame" class="frame" allow="clipboard-write; microphone" src="${url}"></iframe></div>`,
     extraScripts,
   );
 }

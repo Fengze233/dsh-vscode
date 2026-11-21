@@ -27,6 +27,11 @@
 
 ### 修复
 
+- **面板里无法使用语音输入（麦克风权限未开启）**：面板 iframe 的 `allow` 只写了 `clipboard-write`，
+  跨源 iframe 的 `getUserMedia` 会被 Permissions Policy 直接拦掉，DSH 语音设置页因此提示
+  「麦克风权限未开启」。现在补上 `microphone`，请求会走 VS Code 的权限询问（首次使用需允许），
+  再由系统把麦克风交给 VS Code。
+
 - **点击图片链接始终打不开（issue #43）**：DSH 为保留缩略图预览，不给 markdown 图片链接的按钮写
   `title`，桥接只能退回按钮文案（通常就是文件名），扩展按会话 cwd 拼出的路径往往不存在，报
   `Unable to resolve nonexistent file`。现在先判断拼接后的路径是否真实存在：存在就照旧打开；

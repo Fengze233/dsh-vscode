@@ -52,7 +52,7 @@ test('readyPage 为跨源 iframe 声明 clipboard-write 权限', () => {
   // VS Code webview 与 DSH 页面跨源：不声明 allow="clipboard-write" 时，
   // DSH 代码块复制按钮的 navigator.clipboard.writeText 会被 Permissions Policy 拦截。
   const html = readyPage('http://127.0.0.1:3080/', ctx());
-  assert.ok(html.includes('allow="clipboard-write"'));
+  assert.ok(html.includes('allow="clipboard-write; microphone"'), 'iframe 需同时放行剪贴板写入与麦克风');
 });
 
 test('readyPage 启用桥接时注入握手脚本', () => {
@@ -225,7 +225,7 @@ test('readyPage 缩放：注入 zoom 变量，iframe 用 calc(100%/zoom) + scale
   // 缩放由容器变量驱动；iframe 自身仍保留 id/class（桥接脚本依赖它们）
   assert.ok(html.includes('class="frame-zoom"'));
   assert.ok(html.includes('id="dsh-frame"'));
-  assert.ok(html.includes('allow="clipboard-write"'));
+  assert.ok(html.includes('allow="clipboard-write; microphone"'), 'iframe 需同时放行剪贴板写入与麦克风');
 });
 
 test('缩放支持放大方向（>1）与自定义值（如 1.15）', () => {
