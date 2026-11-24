@@ -19,6 +19,12 @@ import {
   getValidSession,
   dropSession,
   parseLaunchTarget,
+  createPairingTicket,
+  requestPairing,
+  pollPairingStatus,
+  cancelPairing,
+  normalizeAuthInput,
+  type PairingTicket,
   type SessionStore,
   type StoredSession,
 } from './service/session';
@@ -205,27 +211,26 @@ export function shouldResetHandshake(
  * （issue #30/#31 的排查正是靠「到底用了哪个 dsh」这一行）。
  */
 function logEnvironmentInfo(config: DshConfig): void {
-  appendLog('=== DSH 扩展环境信息 ===');
-  appendLog(`扩展版本: ${extensionContext?.extension.packageJSON.version ?? '未知'}`);
-  appendLog(`VS Code 版本: ${vscode.version}`);
-  appendLog(`平台: ${process.platform} (${process.arch})`);
+  appendLog(t('log.envHeader'));
+  appendLog(t('log.extVersion', { value: extensionContext?.extension.packageJSON.version ?? t('log.unknown') }));
+  appendLog(t('log.vscodeVersion', { value: vscode.version }));
+  appendLog(t('log.platform', { value: `${process.platform} (${process.arch})` }));
   const electronVersion = (process.versions as { electron?: string }).electron;
-  appendLog(`宿主 Node: ${process.version}${electronVersion ? ` / Electron ${electronVersion}` : ''}`);
+  appendLog(t('log.hostNode', { value: `${process.version}${electronVersion ? ` / Electron ${electronVersion}` : ''}` }));
   const dshInfo = describeDshExecutable(config);
-  appendLog(`dsh 可执行文件: ${dshInfo.path ?? '未定位'}`);
-  appendLog(`dsh 版本: ${dshInfo.version ?? '未知'}`);
-  // 实际启动来源与入口：由 process runner 的 lastStart 提供（未启动时明确标注）
+  appendLog(t('log.dshExecutable', { value: dshInfo.path ?? t('log.notLocated') }));
+  appendLog(t('log.dshVersion', { value: dshInfo.version ?? t('log.unknown') }));
   const lastStart = manager?.lastStart ?? null;
-  appendLog(`dsh 启动来源: ${lastStart?.source ?? '未启动'}`);
-  appendLog(`dsh 实际入口: ${lastStart?.command ?? '未定位'}${lastStart ? ` ${JSON.stringify(lastStart.args.slice(0, 2))}` : ''}`);
-  appendLog(
-    `配置: profile=${config.profile} launchPreference=${config.launchPreference} ` +
-    `desktopCommandPath=${config.desktopCommandPath || '(空，自动探测)'} ` +
+  appendLog(t('log.dshStartSource', { value: lastStart?.source ?? t('log.notStarted') }));
+  appendLog(t('log.dshActualEntry', { value: `${lastStart?.command ?? t('log.notLocated')}${lastStart ? ` ${JSON.stringify(lastStart.args.slice(0, 2))}` : ''}` }));
+  const cfgLine =
+    `profile=${config.profile} launchPreference=${config.launchPreference} ` +
+    `desktopCommandPath=${config.desktopCommandPath || t('log.emptyAuto')} ` +
     `host=${config.host} port=${config.port} autoStart=${config.autoStart} stopOnExit=${config.stopOnExit} ` +
-    `bridgeEnabled=${config.bridgeEnabled} extraArgs=${JSON.stringify(config.extraArgs)} ` +
-    `executablePath=${config.executablePath || '(空)'}`,
-  );
-  appendLog(`工作区: ${vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath).join(', ') || '(无)'}`);
+    `bridgeEnabled=${config.bridgeEnabled} language=${config.language} extraArgs=${JSON.stringify(config.extraArgs)} ` +
+    `executablePath=${config.executablePath || t('log.empty')}`;
+  appendLog(t('log.configLine', { value: cfgLine }));
+  appendLog(t('log.workspace', { value: vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath).join(', ') || t('log.none') }));
   appendLog('=============================');
 }
 
@@ -444,7 +449,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // （自启且有可用启动网址则自动重兑；外部服务则落到「需要登录」引导页，不永久卡 401）
       onAuthFailure: () => {
         if (authSessionState !== 'ok') return; // 防抖：只在 ok 状态下降级
-        appendLog('[auth] 上游返回 401：会话失效，重新判定…');
+        appendLog(t('log.authUpstream401'));
         const { host, port } = manager!.getTarget();
         dropSession(`${host}:${port}`, { fetchImpl: fetch, store: sessionStore });
         authSessionState = 'pending';
@@ -457,12 +462,12 @@ export function activate(context: vscode.ExtensionContext): void {
     void proxy.start().then(() => {
       if (authProxy !== proxy) return; // 启动期间已被停用/替换：不置位、不刷新
       authProxyStarted = true;
-      appendLog(`[proxy] 本地代办就绪 http://127.0.0.1:${proxy.port}`);
+      appendLog(t('log.proxyReady', { port: proxy.port }));
       refreshPanels();
     }).catch((err) => {
       // 代理启动失败（端口被占等罕见）：记日志并复位，下次会话判定/兑换时重试
       if (authProxy === proxy) authProxy = null;
-      appendLog(`[proxy] 本地代办启动失败: ${String(err)}`);
+      appendLog(t('log.proxyFailed', { error: String(err) }));
     });
   }
 
@@ -487,18 +492,18 @@ export function activate(context: vscode.ExtensionContext): void {
       const launch = latestLaunchUrl;
       if (launch !== null && parseLaunchTarget(launch) === null) {
         // 旧版 dsh（≤0.1.1）：启动网址无 token，无鉴权，直接可用
-        appendLog('[auth] dsh 无浏览器鉴权（≤0.1.1），无需会话');
+        appendLog(t('log.authNoAuthLegacy'));
         authSessionState = 'ok';
       } else if (launch !== null) {
         const r = await exchangeSession(launch, { fetchImpl: fetch, store: sessionStore });
         if (r.status === 'ok') {
-          appendLog(`[auth] 会话兑换成功（${r.authority}，有效期至 ${new Date(r.expiresAt).toLocaleString()}）`);
+          appendLog(t('log.authExchanged', { authority: r.authority, expires: new Date(r.expiresAt).toLocaleString() }));
           authSessionState = 'ok';
         } else if (r.status === 'no-auth') {
-          appendLog('[auth] dsh 无浏览器鉴权，无需会话');
+          appendLog(t('log.authNoAuth'));
           authSessionState = 'ok';
         } else {
-          appendLog(`[auth] 启动网址兑换失败：${r.reason}`);
+          appendLog(t('log.authExchangeFailed', { reason: r.reason }));
           authSessionState = 'needed'; // 网址已失效：面板引导用户粘贴最新启动网址
         }
       } else {
@@ -506,20 +511,20 @@ export function activate(context: vscode.ExtensionContext): void {
           // stdout 的启动网址可能晚于 HTTP 就绪到达（dsh 全量插件 boot 后才 announce）：
           // 先保持 pending，宽限 2.5s 后重判——期间 URL 到达则自动兑换，仍未到才是外部启动
           launchGraceUsed = true;
-          appendLog('[auth] 服务已就绪但启动网址尚未到达，等待 2.5s 后重判…');
+          appendLog(t('log.authWaitingLaunchUrl'));
           setTimeout(() => void runAuthOnce(), 2500);
           refreshPanels();
           return;
         }
         // 服务在运行且宽限已过仍无启动网址：外部启动的 DSH ≥0.1.2 → 面板显示登录引导
-        appendLog('[auth] DSH 服务在运行但扩展没有会话（由外部启动）：面板将显示登录引导');
+        appendLog(t('log.authExternalNeeded'));
         authSessionState = 'needed';
       }
       ensureProxyStarted();
       refreshPanels();
     } catch (err) {
       // 兑换的网络级异常（瞬时断连等）：不能把面板卡在 pending；仅当服务仍就绪时延时重试
-      appendLog(`[auth] 会话判定异常（3 秒后自动重试）: ${String(err)}`);
+      appendLog(t('log.authProbeError', { error: String(err) }));
       if (manager?.getSnapshot().state === 'ready') {
         setTimeout(() => void runAuthOnce(), 3000);
       } else {
@@ -546,14 +551,12 @@ export function activate(context: vscode.ExtensionContext): void {
    */
   async function handleAuthUrlSubmit(rawUrl: string): Promise<void> {
     try {
-      // 容错：用户可能粘贴整行（带 dsh web: 前缀/尾部文本），取第一个 http(s) 网址段
-      const m = /https?:\/\/[^\s]+/.exec(rawUrl);
-      if (m === null) {
+      const target = serviceAuthority();
+      const launch = normalizeAuthInput(rawUrl, target);
+      if (launch === null) {
         void vscode.window.showErrorMessage(t('msg.authBadUrl'));
         return;
       }
-      const launch = m[0];
-      const target = serviceAuthority();
       let url: URL;
       try {
         url = new URL(launch);
@@ -576,7 +579,7 @@ export function activate(context: vscode.ExtensionContext): void {
         try {
           const res = await fetch(launch, { redirect: 'manual', signal: AbortSignal.timeout(3000) });
           if (res.status === 200) {
-            markAuthReady(launch, '[auth] 裸地址探测为无鉴权 DSH（≤0.1.1），无需会话');
+            markAuthReady(launch, t('log.authBareNoAuth'));
             return;
           }
         } catch {
@@ -587,10 +590,10 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const r = await exchangeSession(launch, { fetchImpl: fetch, store: sessionStore });
       if (r.status === 'ok') {
-        markAuthReady(launch, `[auth] 手动登录成功（${r.authority}，有效期至 ${new Date(r.expiresAt).toLocaleString()}）`);
+        markAuthReady(launch, t('log.authManualOk', { authority: r.authority, expires: new Date(r.expiresAt).toLocaleString() }));
         void vscode.window.showInformationMessage(t('msg.authOk'));
       } else if (r.status === 'no-auth') {
-        markAuthReady(launch, '[auth] dsh 无浏览器鉴权，无需会话');
+        markAuthReady(launch, t('log.authNoAuth'));
       } else {
         void vscode.window.showErrorMessage(t('msg.authRejected', { reason: r.reason }));
         refreshPanels(); // 保持 needed 引导页，用户可重试
@@ -600,12 +603,99 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   }
 
+
+  let activePairing: { ticket: PairingTicket; authority: string; timer: ReturnType<typeof setTimeout> | null; cancelled: boolean } | null = null;
+
+  function broadcastPairing(payload: { state: 'pending' | 'idle' | 'error'; code?: string; message?: string }): void {
+    for (const p of panels) p.postPairingUpdate(payload);
+  }
+
+  function stopPairingState(): void {
+    if (activePairing?.timer) clearTimeout(activePairing.timer);
+    if (activePairing) activePairing.cancelled = true;
+    activePairing = null;
+  }
+
+  async function handlePairingCancel(): Promise<void> {
+    const cur = activePairing;
+    stopPairingState();
+    broadcastPairing({ state: 'idle', message: t('panel.pairDesc') });
+    if (cur) {
+      await cancelPairing(cur.authority, cur.ticket, { fetchImpl: fetch });
+    }
+  }
+
+  async function handlePairingRequest(): Promise<void> {
+    stopPairingState();
+    const authority = serviceAuthority();
+    const ticket = createPairingTicket();
+    const stateObj = { ticket, authority, timer: null as ReturnType<typeof setTimeout> | null, cancelled: false };
+    activePairing = stateObj;
+
+    const req = await requestPairing(authority, ticket, { fetchImpl: fetch });
+    if (stateObj.cancelled || activePairing !== stateObj) return;
+
+    if (req.status === 'busy') {
+      activePairing = null;
+      broadcastPairing({ state: 'error', message: t('panel.pairBusy') });
+      return;
+    }
+    if (req.status === 'unavailable') {
+      activePairing = null;
+      broadcastPairing({ state: 'error', message: t('panel.pairUnavailable') });
+      return;
+    }
+    if (req.status === 'error') {
+      activePairing = null;
+      broadcastPairing({ state: 'error', message: req.reason });
+      return;
+    }
+
+    appendLog(t('log.authPairingStarted', { authority, code: req.code }));
+    broadcastPairing({ state: 'pending', code: req.code });
+
+    const schedulePoll = (delayMs: number): void => {
+      if (stateObj.cancelled || activePairing !== stateObj) return;
+      stateObj.timer = setTimeout(async () => {
+        if (stateObj.cancelled || activePairing !== stateObj) return;
+        const poll = await pollPairingStatus(authority, ticket, { fetchImpl: fetch, store: sessionStore });
+        if (stateObj.cancelled || activePairing !== stateObj) return;
+        if (poll.status === 'completed') {
+          activePairing = null;
+          markAuthReady(`http://${authority}/`, t('log.authPairingOk', { authority: poll.authority, expires: new Date(poll.expiresAt).toLocaleString() }));
+          void vscode.window.showInformationMessage(t('msg.authOk'));
+          return;
+        }
+        if (poll.status === 'pending') {
+          schedulePoll(poll.retryAfterMs ?? req.pollIntervalMs);
+          return;
+        }
+        activePairing = null;
+        const msg =
+          poll.status === 'denied'
+            ? t('panel.pairDenied')
+            : poll.status === 'expired'
+              ? t('panel.pairExpired')
+              : poll.status === 'unavailable'
+                ? t('panel.pairUnavailable')
+                : poll.status === 'error'
+                  ? poll.reason
+                  : t('panel.pairDesc');
+        broadcastPairing({ state: poll.status === 'cancelled' ? 'idle' : 'error', message: msg });
+      }, delayMs);
+    };
+
+    schedulePoll(req.pollIntervalMs);
+  }
+
   /** 面板 UI 接线（会话三态 + 代理地址覆盖 + 登录提交回调） */
   const panelUi = (): PanelProviderUiOpts => ({
     authState: () => authSessionState,
     frameBaseOverride: () =>
       authProxyStarted && authSessionState === 'ok' && manager?.getSnapshot().state === 'ready' ? (authProxy?.baseUrl ?? null) : null,
     onAuthUrlSubmit: (url) => void handleAuthUrlSubmit(url),
+    onPairingRequest: () => void handlePairingRequest(),
+    onPairingCancel: () => void handlePairingCancel(),
     // 面板缩放：由 dsh.panel.zoomLevel 驱动（issue #8）
     zoomLevel: () => readConfig().config.panelZoomLevel,
     // 麦克风提示：关闭一次即永久记住（globalState 跨窗口），下次不再渲染
@@ -645,7 +735,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // 捕获子进程 stdout 打印的启动网址（dsh web: http://…/?token=…）→ 自动会话兑换
     onLaunchUrl: (url) => {
       latestLaunchUrl = url;
-      appendLog('[auth] 已捕获 DSH 启动网址（含登录 token），将自动完成登录');
+      appendLog(t('log.authCapturedLaunchUrl'));
       if (manager?.getSnapshot().state === 'ready') void runAuthOnce();
       // 未就绪：ready 的 onChange 里统一执行 runAuthOnce
     },
@@ -836,6 +926,10 @@ export function activate(context: vscode.ExtensionContext): void {
           clearHandshakeTimer();
           handshakeOk = undefined;
         }
+      }
+      if (e.affectsConfiguration('dsh.language')) {
+        initI18n(vscode.env.language, readConfig().config.language);
+        refreshPanels();
       }
       if (e.affectsConfiguration('dsh')) onConfigChanged();
     }),

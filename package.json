@@ -366,6 +366,21 @@
             "150%（最大，适合演示）"
           ],
           "markdownDescription": "%dsh.config.panelZoom%"
+        },
+        "dsh.language": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "en",
+            "zh-cn"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "%dsh.config.language.auto%",
+            "%dsh.config.language.en%",
+            "%dsh.config.language.zh%"
+          ],
+          "markdownDescription": "%dsh.config.language%"
         }
       }
     }

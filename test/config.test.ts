@@ -26,7 +26,7 @@ test('合法配置原样通过', () => {
     // issue #18：子进程环境变量注入（默认关闭/为空，保持既有行为）
     env: {}, useEnvProxy: false,
     // issue #8：面板缩放（默认 1 = 不缩放）
-    panelZoomLevel: 1,
+    panelZoomLevel: 1, language: 'auto',
     // v0.4.3：启动来源首选（auto = npm 优先，没有再桌面端）与桌面端命令路径（空 = 自动探测）
     launchPreference: 'auto', desktopCommandPath: '',
   });

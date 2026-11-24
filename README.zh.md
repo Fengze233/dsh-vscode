@@ -248,6 +248,7 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 | `dsh.env` | `{}` | 注入 DSH 子进程的额外环境变量（与父进程环境合并）。典型代理用法：`{"NODE_OPTIONS":"--use-env-proxy"}` |
 | `dsh.useEnvProxy` | `false` | 自动为子进程的 `NODE_OPTIONS` 追加 `--use-env-proxy`（不覆盖已有选项）。必须经 HTTP/HTTPS 代理才能访问模型 API 时开启 |
 | `dsh.panel.zoomLevel` | `1` | 面板内网页缩放：下拉可选 `0.5`–`1.5`（每 0.05 一档）；更细的值可直接写 `settings.json` |
+| `dsh.language` | `auto` | 扩展日志、状态栏与面板提示的显示语言（`auto` / `en` / `zh-cn`）。`auto` 跟随 VS Code 界面语言（`zh-*` 显示简体中文，其余回退英文） |
 
 设置 `"dsh.profile": "custom-profile"` 和 `"dsh.port": 3081` 后，启动命令为 `dsh --profile custom-profile --host 127.0.0.1 --port 3081 --no-open`，桥接安装到 `$DSH_HOME/profiles/custom-profile`。修改 profile 会重启扩展自己启动的服务；外部服务仍按端口复用。默认 `web` 保持现有行为。profile 名称可包含 ASCII 字母、数字、点、下划线与连字符，不能以连字符开头，也不能是 `.` 或 `..`；首尾空白会自动去除。
 
@@ -267,6 +268,7 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 | Dsh: Extra Args | `dsh.extraArgs` | 启动 `dsh web` 时附加的参数 |
 | Dsh: Host | `dsh.host` | 服务地址（仅允许回环地址） |
 | Dsh: Image: Fallback | `dsh.image.fallback` | 模型无视觉能力时把图片降级为路径转发 |
+| Dsh: Language | `dsh.language` | 扩展动态文案显示语言：auto / en / zh-cn |
 | Dsh: Launch Preference | `dsh.launchPreference` | 启动来源首选：auto / npm / desktop |
 | Dsh: Open In Browser | `dsh.openInBrowser` | 启动后在默认浏览器打开 DSH 页面 |
 | Dsh: Panel: Zoom Level | `dsh.panel.zoomLevel` | 面板内网页缩放：0.5–1.5 |
@@ -290,7 +292,7 @@ dsh web: http://127.0.0.1:3080/?token=<一次性 token>
 
 ```bash
 npm install
-npm run test          # 341 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话）
+npm run test          # 345 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话）
 npm run compile       # 构建 out/extension.js
 npm run watch         # 监听构建
 npm run typecheck     # 类型检查

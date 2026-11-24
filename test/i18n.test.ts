@@ -31,3 +31,13 @@ test('t() 支持 {变量} 替换', () => {
     'Port 3080 is occupied by another program. Change dsh.port in settings, then retry.',
   );
 });
+
+test('initI18n respects explicit override and falls back to English for unknown locales', () => {
+  initI18n('tr', 'auto');
+  assert.equal(getLang(), 'en');
+  initI18n('en', 'zh-cn');
+  assert.equal(getLang(), 'zh');
+  initI18n('zh-cn', 'en');
+  assert.equal(getLang(), 'en');
+  initI18n('en', 'auto');
+});

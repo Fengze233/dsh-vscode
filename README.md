@@ -248,6 +248,7 @@ The extension installs its own bridge package `dsh-vscode-bridge` into DSH's off
 | `dsh.env` | `{}` | Extra environment variables injected into the DSH child process (merged with the parent environment). Typical proxy use: `{"NODE_OPTIONS":"--use-env-proxy"}` |
 | `dsh.useEnvProxy` | `false` | Append `--use-env-proxy` to the child process's `NODE_OPTIONS` (existing options are kept). Enable it when the model API is only reachable through an HTTP/HTTPS proxy |
 | `dsh.panel.zoomLevel` | `1` | Zoom of the embedded page: pick `0.5`–`1.5` from the dropdown (0.05 steps); finer values via `settings.json` |
+| `dsh.language` | `auto` | Display language for extension logs, status bar, and panel prompts (`auto`, `en`, `zh-cn`). `auto` follows VS Code's UI language (Simplified Chinese for `zh-*`, English otherwise) |
 
 Set `"dsh.profile": "custom-profile"` and `"dsh.port": 3081` to launch `dsh --profile custom-profile --host 127.0.0.1 --port 3081 --no-open` and install the bridge into `$DSH_HOME/profiles/custom-profile`. Changing the profile restarts an extension-owned service; an existing external service is still reused by port. The default `web` profile preserves current behavior. Profile names may contain ASCII letters, numbers, dots, underscores and hyphens; they cannot start with a hyphen and cannot be `.` or `..`; surrounding whitespace is trimmed.
 
@@ -261,7 +262,7 @@ Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 341 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
+npm run test          # 345 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
 npm run compile       # builds out/extension.js
 npm run watch         # watch build
 npm run typecheck     # type check

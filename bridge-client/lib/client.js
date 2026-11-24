@@ -425,13 +425,14 @@ window.__ModuleLoader__.load({
         s.className = "dsh-bridge-sep";
         return s;
       };
-      // 复制/粘贴/剪切/全选 + 撤销/重做（顺序与系统菜单惯例一致）
-      menuCopyBtn = mkBtn("复制", "copy");
-      menuPasteBtn = mkBtn("粘贴", "paste");
-      menuCutBtn = mkBtn("剪切", "cut");
-      const menuSelectAllBtn = mkBtn("全选", "selectAll");
-      menuUndoBtn = mkBtn("撤销", "undo");
-      menuRedoBtn = mkBtn("重做", "redo");
+      // 复制/粘贴/剪切/全选 + 撤销/重做（按浏览器语言自动切换中/英文）
+      const isZh = (typeof navigator !== "undefined" && typeof navigator.language === "string" && navigator.language.toLowerCase().startsWith("zh"));
+      menuCopyBtn = mkBtn(isZh ? "复制" : "Copy", "copy");
+      menuPasteBtn = mkBtn(isZh ? "粘贴" : "Paste", "paste");
+      menuCutBtn = mkBtn(isZh ? "剪切" : "Cut", "cut");
+      const menuSelectAllBtn = mkBtn(isZh ? "全选" : "Select All", "selectAll");
+      menuUndoBtn = mkBtn(isZh ? "撤销" : "Undo", "undo");
+      menuRedoBtn = mkBtn(isZh ? "重做" : "Redo", "redo");
       menuEl.append(menuCopyBtn, menuPasteBtn, menuCutBtn, menuSelectAllBtn, sep(), menuUndoBtn, menuRedoBtn);
       document.body.append(menuEl);
       // 菜单自身点击不冒泡到"关闭菜单"的全局监听

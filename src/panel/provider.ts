@@ -29,6 +29,10 @@ export interface PanelProviderUiOpts {
   frameBaseOverride?: () => string | null;
   /** 「需要登录」页提交启动网址的回调（扩展校验并兑换） */
   onAuthUrlSubmit?: (url: string) => void;
+  /** 发起设备配对请求（DSH >=0.2.3-alpha.2） */
+  onPairingRequest?: () => void;
+  /** 取消设备配对请求 */
+  onPairingCancel?: () => void;
   /** 面板缩放 getter（dsh.panel.zoomLevel，issue #8；缺省 1 = 不缩放） */
   zoomLevel?: () => number;
   /** 是否渲染「面板内无法使用麦克风」提示（false = 用户已永久关闭） */
@@ -82,6 +86,11 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   /** 强制按最新状态重渲染（会话兑换完成/代理就绪后由扩展调用，弥补 onChange 之外的触发源） */
   refresh(): void {
     void this.handleStateChange();
+  }
+
+  /** 向当前已挂载的 webview 推送设备配对状态更新 */
+  postPairingUpdate(payload: { state: 'pending' | 'idle' | 'error'; code?: string; message?: string }): void {
+    void this.webview?.postMessage({ type: 'pairingUpdate', ...payload });
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -208,6 +217,12 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       case 'authSubmitLaunchUrl':
         // 「需要登录」引导页提交的启动网址：转交扩展校验与兑换（成败反馈在扩展侧提示）
         this.ui.onAuthUrlSubmit?.(msg.url);
+        break;
+      case 'authRequestPairing':
+        this.ui.onPairingRequest?.();
+        break;
+      case 'authCancelPairing':
+        this.ui.onPairingCancel?.();
         break;
       case 'bridgeCopyText':
         // 桥接剪贴板消息：VS Code 会拦截跨源 iframe 的原生 clipboard API，

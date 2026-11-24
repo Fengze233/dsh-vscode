@@ -7,6 +7,8 @@ export type T = (key: MsgKey, vars?: Record<string, string | number>) => string;
 /** 面板内按钮发回扩展的消息类型（含桥接跳转与握手回执三类） */
 export type PanelMessage =
   | { type: 'retry' }
+  | { type: 'authRequestPairing' }
+  | { type: 'authCancelPairing' }
   | { type: 'reconnect' }
   | { type: 'openExternal' }
   | { type: 'restart' }
@@ -366,6 +368,10 @@ export function authRequiredPage(t: T, ctx: PageCtx): string {
 const input = document.getElementById('auth-url-input');
 const hint = document.getElementById('auth-hint');
 const btn = document.getElementById('auth-submit');
+const pairBtn = document.getElementById('pair-request-btn');
+const pairCancelBtn = document.getElementById('pair-cancel-btn');
+const pairStatus = document.getElementById('pair-status');
+const pairCodeEl = document.getElementById('pair-code');
 function submit() {
   const url = (input && input.value || '').trim();
   if (url === '') return;
@@ -378,6 +384,38 @@ if (input) {
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
   input.focus();
 }
+if (pairBtn) {
+  pairBtn.addEventListener('click', () => {
+    pairBtn.disabled = true;
+    if (pairStatus) pairStatus.textContent = ${JSON.stringify(t('panel.pairRequesting'))};
+    if (pairCodeEl) pairCodeEl.style.display = 'none';
+    vscode.postMessage({ type: 'authRequestPairing' });
+  });
+}
+if (pairCancelBtn) {
+  pairCancelBtn.addEventListener('click', () => {
+    vscode.postMessage({ type: 'authCancelPairing' });
+  });
+}
+window.addEventListener('message', (event) => {
+  const msg = event.data;
+  if (!msg || msg.type !== 'pairingUpdate') return;
+  if (msg.state === 'pending') {
+    if (pairBtn) pairBtn.style.display = 'none';
+    if (pairCancelBtn) pairCancelBtn.style.display = 'inline-block';
+    if (pairStatus) pairStatus.textContent = ${JSON.stringify(t('panel.pairCodeHint'))};
+    if (pairCodeEl) {
+      const c = String(msg.code || '');
+      pairCodeEl.textContent = c.length === 8 ? c.slice(0, 4) + ' ' + c.slice(4) : c;
+      pairCodeEl.style.display = 'block';
+    }
+  } else {
+    if (pairBtn) { pairBtn.style.display = 'inline-block'; pairBtn.disabled = false; }
+    if (pairCancelBtn) pairCancelBtn.style.display = 'none';
+    if (pairCodeEl) pairCodeEl.style.display = 'none';
+    if (pairStatus) pairStatus.textContent = msg.message || '';
+  }
+});
 `;
   return shell(
     ctx,
@@ -395,6 +433,14 @@ if (input) {
 <div style="text-align:center">
 <button id="auth-submit">${t('panel.authSubmit')}</button>
 <button data-action="showLogs">${t('panel.showLogs')}</button>
+</div>
+<hr style="border:0;border-top:1px solid var(--vscode-widget-border, rgba(128,128,128,0.25));margin:16px 0 12px">
+<p style="font-weight:600;margin:0 0 4px">${t('panel.pairTitle')}</p>
+<p id="pair-status" style="font-size:12px;opacity:0.8;margin:0 0 8px">${t('panel.pairDesc')}</p>
+<div id="pair-code" style="display:none;text-align:center;font-family:var(--vscode-editor-font-family, monospace);font-size:22px;font-weight:600;letter-spacing:3px;padding:8px 0;margin:4px 0 8px;border:1px solid var(--vscode-widget-border, rgba(128,128,128,0.3));border-radius:4px"></div>
+<div style="text-align:center">
+<button id="pair-request-btn">${t('panel.pairBtn')}</button>
+<button id="pair-cancel-btn" style="display:none">${t('panel.pairCancel')}</button>
 </div>
 </div>
 <script nonce="${ctx.nonce}">${inputScript}</script>`,
