@@ -1,3 +1,4 @@
+import { randomBytes, randomUUID } from 'node:crypto';
 // src/service/session.ts — DSH ≥0.1.2 浏览器会话：启动网址(带一次性 token) → 签名 cookie 兑换与持有
 // 纯模块：不依赖 vscode；fetch 与存储均依赖注入，便于 node:test 单测。
 //
@@ -186,5 +187,182 @@ export async function probeSession(
     return 'down';
   } finally {
     clearTimeout(timer);
+  }
+}
+
+
+/** DSH >=0.2.3-alpha.2 设备配对凭据 */
+export interface PairingTicket {
+  id: string;
+  secret: string;
+}
+
+export type PairingRequestResult =
+  | { status: 'ok'; code: string; expiresInMs: number; pollIntervalMs: number }
+  | { status: 'busy' }
+  | { status: 'unavailable' }
+  | { status: 'error'; reason: string };
+
+export type PairingPollResult =
+  | { status: 'pending'; retryAfterMs?: number }
+  | { status: 'completed'; authority: string; expiresAt: number }
+  | { status: 'denied' }
+  | { status: 'expired' }
+  | { status: 'cancelled' }
+  | { status: 'unavailable' }
+  | { status: 'error'; reason: string };
+
+/** 生成一次性设备配对凭据（UUID v4 + 43 字符 base64url secret） */
+export function createPairingTicket(): PairingTicket {
+  return {
+    id: randomUUID(),
+    secret: randomBytes(32).toString('base64url'),
+  };
+}
+
+/** 发起设备配对请求（POST /pairing/request） */
+export async function requestPairing(
+  authority: string,
+  ticket: PairingTicket,
+  deps: Pick<SessionDeps, 'fetchImpl'>,
+  timeoutMs = 5000,
+): Promise<PairingRequestResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await deps.fetchImpl(`http://${authority}/pairing/request`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: ticket.id, secret: ticket.secret }),
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+    if (res.status === 429) return { status: 'busy' };
+    if (res.status === 503) return { status: 'unavailable' };
+    if (!res.ok) return { status: 'error', reason: `HTTP ${res.status}` };
+    const data = (await res.json()) as {
+      code?: unknown;
+      expiresInMs?: unknown;
+      pollIntervalMs?: unknown;
+    };
+    if (typeof data.code !== 'string' || data.code === '') {
+      return { status: 'error', reason: 'Missing pairing code in response' };
+    }
+    return {
+      status: 'ok',
+      code: data.code,
+      expiresInMs: typeof data.expiresInMs === 'number' && data.expiresInMs > 0 ? data.expiresInMs : 300_000,
+      pollIntervalMs: typeof data.pollIntervalMs === 'number' && data.pollIntervalMs >= 500 ? data.pollIntervalMs : 2000,
+    };
+  } catch (err) {
+    return { status: 'error', reason: String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 轮询设备配对状态（POST /pairing/status）；completed 时自动提取并保存 dsh-auth-* cookie */
+export async function pollPairingStatus(
+  authority: string,
+  ticket: PairingTicket,
+  deps: SessionDeps,
+  timeoutMs = 5000,
+): Promise<PairingPollResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const now = deps.now?.() ?? Date.now();
+    const res = await deps.fetchImpl(`http://${authority}/pairing/status`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: ticket.id, secret: ticket.secret }),
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+    if (res.status === 429) return { status: 'pending', retryAfterMs: 5000 };
+    if (res.status === 503) return { status: 'unavailable' };
+    if (!res.ok) return { status: 'error', reason: `HTTP ${res.status}` };
+    const data = (await res.json()) as { status?: unknown };
+    const st = data.status;
+    if (st === 'completed') {
+      const cookie = extractDshCookie(res);
+      if (cookie === null) {
+        return { status: 'error', reason: 'Completed response missing dsh-auth cookie' };
+      }
+      const expiresAt = now + (cookie.maxAgeMs ?? FALLBACK_MAX_AGE_MS);
+      const record: StoredSession = {
+        cookie: `${cookie.name}=${cookie.value}`,
+        expiresAt,
+        authority,
+        issuedAt: now,
+      };
+      deps.store.set(SESSION_KEY_PREFIX + authority, record);
+      return { status: 'completed', authority, expiresAt };
+    }
+    if (st === 'pending' || st === 'denied' || st === 'expired' || st === 'cancelled' || st === 'unavailable') {
+      return { status: st };
+    }
+    return { status: 'error', reason: `Unexpected pairing status: ${String(st)}` };
+  } catch (err) {
+    return { status: 'error', reason: String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 取消进行中的设备配对请求（POST /pairing/cancel） */
+export async function cancelPairing(
+  authority: string,
+  ticket: PairingTicket,
+  deps: Pick<SessionDeps, 'fetchImpl'>,
+  timeoutMs = 3000,
+): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    await deps.fetchImpl(`http://${authority}/pairing/cancel`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: ticket.id, secret: ticket.secret }),
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+  } catch {
+    // Best-effort cancellation
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const LOOPBACK_ALIASES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+
+/**
+ * 规范化用户粘贴的登录输入：
+ * - 支持裸 43 位 token（自动拼到 targetAuthority）
+ * - 支持 localhost / --public-url（如 https://dsh.example.com/?token=...）自动映射为 http://targetAuthority/?token=...
+ * - 若为另一台不同端口的环回地址（如 127.0.0.1:3081 vs 127.0.0.1:3080）则保留原 host 以便上层提示端口不匹配
+ */
+export function normalizeAuthInput(rawInput: string, targetAuthority: string): string | null {
+  const trimmed = rawInput.trim();
+  if (/^[A-Za-z0-9_-]{43}$/.test(trimmed)) {
+    return `http://${targetAuthority}/?token=${trimmed}`;
+  }
+  const m = /https?:\/\/[^\s]+/.exec(trimmed);
+  if (m === null) return null;
+  try {
+    const u = new URL(m[0]);
+    const token = u.searchParams.get('token');
+    if (token !== null && token !== '') {
+      const targetUrl = new URL(`http://${targetAuthority}/`);
+      const samePort = (u.port || (u.protocol === 'https:' ? '443' : '80')) === (targetUrl.port || '80');
+      const isLoopback = LOOPBACK_ALIASES.has(u.hostname);
+      // Either loopback alias on same port (localhost:3080 -> 127.0.0.1:3080) OR non-loopback public URL (--public-url)
+      if ((isLoopback && samePort) || !isLoopback) {
+        return `http://${targetAuthority}/?token=${encodeURIComponent(token)}`;
+      }
+    }
+    return u.href;
+  } catch {
+    return null;
   }
 }

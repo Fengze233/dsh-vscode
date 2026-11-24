@@ -130,3 +130,12 @@ test('findFreePort：候选超出 65535 提前停止并返回 null', async () =>
   assert.equal(await findFreePort('127.0.0.1', 65535, 10, probe), null);
   assert.equal(calls, 0); // 65536 超出合法范围，一次都不探测
 });
+
+test('probeService: 401 with dsh-device-pairing (DSH >=0.2.3) returns dsh', async () => {
+  const fakeFetch = (async () =>
+    new Response('<!doctype html><html><body><dsh-device-pairing></dsh-device-pairing></body></html>', {
+      status: 401,
+      headers: { 'content-type': 'text/html' },
+    })) as unknown as typeof fetch;
+  assert.equal(await probeService('127.0.0.1', 3080, 1000, fakeFetch), 'dsh');
+});

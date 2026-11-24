@@ -13,6 +13,8 @@ const DSH_MARKER = '__DSH_BOOT__';
  * 用「dsh web」两个词判定，避免把普通站点的 401/403 误认成 DSH。
  */
 const DSH_AUTH_MARKER = 'dsh web';
+/** DSH ≥0.2.3-alpha.2 anonymous auth page marker (<dsh-device-pairing>). */
+const DSH_PAIRING_MARKER = 'dsh-device-pairing';
 
 /**
  * 探测 host:port 上运行的服务：
@@ -40,7 +42,7 @@ export async function probeService(
       // 其余错误（404/500 等）一律按“非 DSH”处理，不再消费 body。
       if (res.status === 401 || res.status === 403) {
         const body = await res.text();
-        return body.includes(DSH_AUTH_MARKER) ? 'dsh' : 'foreign';
+        return (body.includes(DSH_AUTH_MARKER) || body.includes(DSH_PAIRING_MARKER)) ? 'dsh' : 'foreign';
       }
       return 'foreign';
     }

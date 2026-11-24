@@ -6,6 +6,8 @@ import * as vscode from 'vscode';
 import { PROFILE_NAME_PATTERN } from './bridge/profile-name';
 
 /** 用户可配置的原始值（可能缺失/非法） */
+export type DshLanguage = 'auto' | 'en' | 'zh-cn';
+
 export interface RawDshConfig {
   profile?: string;
   /** 首选启动来源（dsh.launchPreference：auto/npm/desktop；非法值回退 auto） */
@@ -39,6 +41,8 @@ export interface RawDshConfig {
   useEnvProxy?: boolean;
   /** 面板内网页缩放档位（dsh.panel.zoomLevel，issue #8） */
   panelZoomLevel?: number;
+  /** 扩展动态文案语言（dsh.language） */
+  language?: string;
 }
 
 /** 规范化后的配置（均有合法默认值） */
@@ -75,6 +79,8 @@ export interface DshConfig {
   useEnvProxy: boolean;
   /** 面板内网页缩放档位（dsh.panel.zoomLevel） */
   panelZoomLevel: number;
+  /** 扩展动态文案语言（dsh.language） */
+  language: DshLanguage;
 }
 
 /** 默认配置 */
@@ -103,6 +109,7 @@ export const DEFAULTS: DshConfig = {
   useEnvProxy: false,
   // 面板缩放：默认 1（= 当前行为，零变化）
   panelZoomLevel: 1,
+  language: 'auto',
 };
 
 /** 面板缩放允许的范围（issue #8）：0.5–1.5 之间的任意数值都接受，用于"自定义缩放"。
@@ -291,12 +298,17 @@ export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors:
     panelZoomLevel = raw.panelZoomLevel;
   }
 
+  const language: DshLanguage =
+    raw.language === 'en' || raw.language === 'zh-cn' || raw.language === 'auto'
+      ? raw.language
+      : DEFAULTS.language;
+
   return {
     config: {
       profile, launchPreference, desktopCommandPath,
       host, port, autoStart, stopOnExit, extraArgs, bridgeEnabled, workspaceRootIndex,
       silenceWarning, executablePath, openInBrowser, remoteEnabled, imageFallback,
-      startTimeoutMs, env, useEnvProxy, panelZoomLevel,
+      startTimeoutMs, env, useEnvProxy, panelZoomLevel, language,
     },
     errors,
   };
@@ -347,5 +359,6 @@ export function readConfig(): { config: DshConfig; errors: string[] } {
     env: ws.get<Record<string, string>>('env'),
     useEnvProxy: ws.get<boolean>('useEnvProxy'),
     panelZoomLevel: ws.get<number>('panel.zoomLevel'),
+    language: ws.get<string>('language'),
   });
 }

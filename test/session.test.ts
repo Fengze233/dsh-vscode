@@ -172,3 +172,62 @@ test('parseLaunchTarget：提取 authority 与 token', () => {
   assert.equal(parseLaunchTarget('http://127.0.0.1:3080/'), null);
   assert.equal(parseLaunchTarget('垃圾'), null);
 });
+
+import {
+  createPairingTicket,
+  requestPairing,
+  pollPairingStatus,
+  cancelPairing,
+  normalizeAuthInput,
+} from '../src/service/session.js';
+
+test('normalizeAuthInput: accepts raw token, localhost alias, and --public-url', () => {
+  const tok = 'A'.repeat(43);
+  assert.equal(normalizeAuthInput(tok, '127.0.0.1:3080'), 'http://127.0.0.1:3080/?token=' + tok);
+  assert.equal(normalizeAuthInput('http://localhost:3080/?token=' + tok, '127.0.0.1:3080'), 'http://127.0.0.1:3080/?token=' + tok);
+  assert.equal(normalizeAuthInput('https://dsh.example.com/?token=' + tok, '127.0.0.1:3080'), 'http://127.0.0.1:3080/?token=' + tok);
+  // Different loopback port preserved so caller can warn about mismatch
+  assert.equal(normalizeAuthInput('http://127.0.0.1:3081/?token=' + tok, '127.0.0.1:3080'), 'http://127.0.0.1:3081/?token=' + tok);
+});
+
+test('device pairing: requestPairing + pollPairingStatus stores cookie on completion', async () => {
+  const ticket = createPairingTicket();
+  assert.match(ticket.secret, /^[A-Za-z0-9_-]{43}$/);
+  const storeMap = new Map<string, any>();
+  const store = {
+    get: (k: string) => storeMap.get(k),
+    set: (k: string, v: any) => void storeMap.set(k, v),
+    delete: (k: string) => void storeMap.delete(k),
+  };
+
+  let step = 0;
+  const fakeFetch = (async (url: string) => {
+    if (url.endsWith('/pairing/request')) {
+      return new Response(JSON.stringify({ code: 'ABCD1234', expiresInMs: 300000, pollIntervalMs: 2000 }), { status: 200 });
+    }
+    if (url.endsWith('/pairing/status')) {
+      step++;
+      if (step === 1) {
+        return new Response(JSON.stringify({ status: 'pending' }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ status: 'completed' }), {
+        status: 200,
+        headers: { 'set-cookie': 'dsh-auth-abc=sig; Max-Age=3600; Path=/; HttpOnly' },
+      });
+    }
+    return new Response(JSON.stringify({ status: 'cancelled' }), { status: 200 });
+  }) as unknown as typeof fetch;
+
+  const reqRes = await requestPairing('127.0.0.1:3080', ticket, { fetchImpl: fakeFetch });
+  assert.equal(reqRes.status, 'ok');
+  if (reqRes.status === 'ok') assert.equal(reqRes.code, 'ABCD1234');
+
+  const p1 = await pollPairingStatus('127.0.0.1:3080', ticket, { fetchImpl: fakeFetch, store, now: () => 1000 });
+  assert.equal(p1.status, 'pending');
+
+  const p2 = await pollPairingStatus('127.0.0.1:3080', ticket, { fetchImpl: fakeFetch, store, now: () => 2000 });
+  assert.equal(p2.status, 'completed');
+  assert.equal(storeMap.get('auth-session:127.0.0.1:3080')?.cookie, 'dsh-auth-abc=sig');
+
+  await cancelPairing('127.0.0.1:3080', ticket, { fetchImpl: fakeFetch });
+});
