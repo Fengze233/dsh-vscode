@@ -135,7 +135,8 @@ test('detach 之后不再向旧宿主渲染', () => {
   assert.equal(webview.html, rendered, '解绑后 refreshContextBar 不应再写 html');
 });
 
-// 资源管理器右键「DSH → 添加到对话」（v0.5.0）：把文件以 @路径 插入 DSH 输入框
+// 资源管理器右键「DSH → 添加到对话」：把已格式化的 @ 引用插入 DSH 输入框
+// （v0.5.1 起由扩展侧按 DSH 语法生成文本，provider 只负责下发）
 test('insertMentions 下发插入请求，页面回执后返回 true', async () => {
   const provider = new DshPanelProvider(
     fakeManager() as never,
@@ -146,13 +147,83 @@ test('insertMentions 下发插入请求，页面回执后返回 true', async () 
   );
   const view = fakeView();
   provider.resolveWebview(view.webview as never);
-  const pending = provider.insertMentions(['src/a.ts', 'src/b.ts']);
+  const pending = provider.insertMentions(['@src/a.ts', '@test/']);
   view.fire({ type: 'bridgeInsertMentionsAck', ok: true });
   assert.equal(await pending, true);
   assert.deepEqual(view.posted[view.posted.length - 1], {
     type: 'bridgeInsertMentions',
-    paths: ['src/a.ts', 'src/b.ts'],
+    mentions: ['@src/a.ts', '@test/'],
+    // v0.5.0 桥接的旧字段：扩展升级但 DSH 服务未重启时，页面里可能还是旧桥接
+    paths: ['src/a.ts', 'test/'],
   });
+});
+
+test('新标签页只在绑定完成前请求绑定工作区，回执后重渲染不再请求', () => {
+  let ackResult: { ok: boolean; reason?: string } | null = null;
+  const provider = new DshPanelProvider(
+    fakeManager() as never,
+    undefined, undefined,
+    () => '/proj', () => true, () => false,
+    async (u) => u, () => true,
+    {
+      bootstrapWorkspace: () => true, // 扩展侧：设置开 + 有工作区
+      onWorkspaceBootstrapAck: (ok, reason) => { ackResult = { ok, reason }; },
+    },
+  );
+  const view = fakeView();
+  provider.resolveWebview(view.webview as never);
+  assert.ok(view.webview.html.includes('const WORKSPACE_ROOT = "/proj";'), '应携带工作区根');
+  assert.ok(view.webview.html.includes('const BOOTSTRAP_WORKSPACE = true;'), '首次渲染应请求绑定');
+
+  // 桥接完成绑定之后（例如鉴权/代理刷新触发重渲染）：不再重复请求切换工作区。
+  // 注意不能用 bridgeAck 做闸门：握手回执远早于绑定完成，提前停发会在页面重载时打断绑定。
+  view.fire({ type: 'bridgeWorkspaceBootstrapAck', ok: false, reason: 'boom' });
+  assert.deepEqual(ackResult, { ok: false, reason: 'boom' }, '失败原因应回传');
+  provider.refreshContextBar();
+  assert.ok(view.webview.html.includes('const BOOTSTRAP_WORKSPACE = false;'), '回执后不得再触发');
+});
+
+test('侧边栏视图重建后可以再次绑定工作区（新页面重新获得一次机会）', () => {
+  const provider = new DshPanelProvider(
+    fakeManager() as never,
+    undefined, undefined,
+    () => '/proj', () => true, () => false,
+    async (u) => u, () => true,
+    { bootstrapWorkspace: () => true },
+  );
+  const first = fakeView();
+  provider.resolveWebview(first.webview as never);
+  assert.ok(first.webview.html.includes('const BOOTSTRAP_WORKSPACE = true;'), '首次打开应请求绑定');
+  first.fire({ type: 'bridgeWorkspaceBootstrapAck', ok: true });
+  provider.refreshContextBar();
+  assert.ok(first.webview.html.includes('const BOOTSTRAP_WORKSPACE = false;'), '同一页面不得重复绑定');
+
+  // 视图被重建 = 新 webview（新页面）：应重新获得一次绑定机会
+  const second = fakeView();
+  provider.resolveWebview(second.webview as never);
+  assert.ok(second.webview.html.includes('const BOOTSTRAP_WORKSPACE = true;'), '新页面应再次请求绑定');
+});
+
+test('绑定进行中时「添加到对话」先等回执，避免把引用写进即将切走的会话', async () => {
+  const provider = new DshPanelProvider(
+    fakeManager() as never,
+    undefined, undefined,
+    () => '/proj', () => true, () => false,
+    async (u) => u, () => true,
+    { bootstrapWorkspace: () => true },
+  );
+  const view = fakeView();
+  provider.resolveWebview(view.webview as never); // 渲染 ready 页 → 记录工作区绑定请求
+  const posted = (): Array<{ type?: string }> => view.posted as Array<{ type?: string }>;
+  const inserts = (): number => posted().filter((m) => m.type === 'bridgeInsertMentions').length;
+
+  const pending = provider.insertMentions(['@src/a.ts']);
+  assert.equal(inserts(), 0, '绑定完成前不得下发插入请求');
+  view.fire({ type: 'bridgeWorkspaceBootstrapAck', ok: true }); // 切换完成
+  await new Promise((resolve) => setTimeout(resolve, 0)); // 等等待者被唤醒后的微任务
+  assert.equal(inserts(), 1, '回执后应正常下发一次');
+  view.fire({ type: 'bridgeInsertMentionsAck', ok: true });
+  assert.equal(await pending, true);
 });
 
 test('insertMentions 在没有绑定 webview 时直接返回 false', async () => {
@@ -163,5 +234,5 @@ test('insertMentions 在没有绑定 webview 时直接返回 false', async () =>
     async (u) => u, () => true,
     {},
   );
-  assert.equal(await provider.insertMentions(['src/a.ts']), false);
+  assert.equal(await provider.insertMentions(['@src/a.ts']), false);
 });

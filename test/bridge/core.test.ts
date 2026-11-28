@@ -19,6 +19,9 @@ import {
   buildReadTextAck,
   FILE_ENTRY_SELECTOR,
   resolveFileEntryPath,
+  workspaceBootstrapRoot,
+  workspaceListsReady,
+  buildWorkspaceBootstrapAck,
 } from '../../bridge-client/lib/core.js';
 
 /** 构造最小按钮替身（只实现 resolveFileEntryPath 需要的接口） */
@@ -219,4 +222,37 @@ test('cwdMissReason 区分未取到会话 cwd 的各种情形', () => {
   assert.equal(cwdMissReason(ctxOf({}), 's1'), 'session-not-in-list');
   assert.equal(cwdMissReason(ctxOf({ s1: { cwd: '' } }), 's1'), 'session-has-no-cwd');
   assert.equal(cwdMissReason({ sessions: { list: { getSnapshot: () => { throw new Error('boom'); } } } }, 's1'), 'probe-failed');
+});
+
+
+// v0.5.1：新标签页绑定 VS Code 工作区的两个纯逻辑（hello 重发/列表就绪时序）
+test('workspaceBootstrapRoot：只认 bootstrapWorkspace=true 且路径非空的 hello', () => {
+  assert.equal(workspaceBootstrapRoot({ bootstrapWorkspace: true, workspaceRoot: '/proj' }), '/proj');
+  assert.equal(workspaceBootstrapRoot({ bootstrapWorkspace: true, workspaceRoot: 'D:\\proj' }), 'D:\\proj');
+  // 恢复的标签页、没有打开文件夹、旧扩展都不会带有效请求
+  assert.equal(workspaceBootstrapRoot({ bootstrapWorkspace: false, workspaceRoot: '/proj' }), null);
+  assert.equal(workspaceBootstrapRoot({ workspaceRoot: '/proj' }), null);
+  assert.equal(workspaceBootstrapRoot({ bootstrapWorkspace: true, workspaceRoot: '' }), null);
+  assert.equal(workspaceBootstrapRoot({ bootstrapWorkspace: true, workspaceRoot: 42 }), null);
+  assert.equal(workspaceBootstrapRoot(null), null);
+});
+
+test('workspaceListsReady：两个列表都 ready 才放行，服务缺失视为就绪', () => {
+  assert.equal(workspaceListsReady('ready', 'ready'), true);
+  assert.equal(workspaceListsReady('pending', 'ready'), false);
+  assert.equal(workspaceListsReady('ready', 'pending'), false);
+  // undefined = 老版本 DSH 没有该列表：不能无限等待
+  assert.equal(workspaceListsReady(undefined, 'pending'), false);
+  assert.equal(workspaceListsReady(undefined, undefined), true);
+});
+
+test('buildWorkspaceBootstrapAck：统一回执形状，ok 只取严格布尔，reason 可选', () => {
+  assert.deepEqual(buildWorkspaceBootstrapAck(true), { kind: 'workspaceBootstrapAck', ok: true });
+  assert.deepEqual(buildWorkspaceBootstrapAck(false), { kind: 'workspaceBootstrapAck', ok: false });
+  assert.deepEqual(buildWorkspaceBootstrapAck('yes'), { kind: 'workspaceBootstrapAck', ok: false });
+  // 失败原因带回扩展日志；空串/非字符串不带字段
+  assert.deepEqual(buildWorkspaceBootstrapAck(false, 'boom'), {
+    kind: 'workspaceBootstrapAck', ok: false, reason: 'boom',
+  });
+  assert.deepEqual(buildWorkspaceBootstrapAck(false, ''), { kind: 'workspaceBootstrapAck', ok: false });
 });

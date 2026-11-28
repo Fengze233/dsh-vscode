@@ -26,6 +26,8 @@ export type PanelMessage =
   | { type: 'bridgeDeleteImagesAck'; requestId: string; ok: boolean }
   /** 右键「添加到对话」的页面回执：ok=false 表示桥接没找到输入框或写入失败 */
   | { type: 'bridgeInsertMentionsAck'; ok: boolean }
+  /** v0.5.1：新标签页工作区绑定完成（ok=false 为降级/失败；扩展收到后不再重发绑定请求） */
+  | { type: 'bridgeWorkspaceBootstrapAck'; ok: boolean; reason?: string }
   /** 需要登录引导页：用户粘贴外部启动的 DSH 启动网址后提交（扩展校验并兑换会话） */
   | { type: 'authSubmitLaunchUrl'; url: string }
   /** 麦克风提示被用户关掉：扩展侧持久化，之后不再渲染（真机反馈：不要每次弹） */
@@ -141,7 +143,13 @@ document.addEventListener('click', (e) => {
  * @param token 握手防伪凭据（与桥接侧 isBridgeMessage 校验的一致）
  * @param allowedOrigin 允许的消息来源 origin（由 DSH 页面地址推导，如 http://127.0.0.1:3080）
  */
-function bridgeHandshakeScript(token: string, allowedOrigin: string, imageFallback: boolean): string {
+function bridgeHandshakeScript(
+  token: string,
+  allowedOrigin: string,
+  imageFallback: boolean,
+  workspaceRoot: string,
+  bootstrapWorkspace: boolean,
+): string {
   return `
 // dsh-bridge-handshake：DSH 页面桥接握手与消息路由（上行转发 + 剪贴板回执下行转发）
 const iframeEl = document.getElementById('dsh-frame');
@@ -150,6 +158,10 @@ if (iframeEl) {
   const TOKEN = ${JSON.stringify(token)};
   const ALLOWED_ORIGIN = ${JSON.stringify(allowedOrigin)};
   const IMAGE_FALLBACK = ${JSON.stringify(imageFallback)}; // v0.3.0：非视觉模型图片降级开关
+  // v0.5.1：VS Code 工作区绑定。路径进 JS 字符串前转义尖括号，避免路径提前闭合脚本标签；
+  // BOOTSTRAP_WORKSPACE 只对「新开的编辑区标签页」为 true（恢复的标签页由扩展侧给 false）。
+  const WORKSPACE_ROOT = ${JSON.stringify(workspaceRoot).replace(/</g, '\\u003c')};
+  const BOOTSTRAP_WORKSPACE = ${bootstrapWorkspace ? 'true' : 'false'};
   let bridgeAcked = false;
   // 发送目标判定：DSH 页面装在 vscode-webview 的 service worker 里，若它重写了 iframe 的
   // 真实 origin（remote 实测 e.origin 回流为 vscode-webview://<uuid>），用 iframe.src 推导的
@@ -204,9 +216,14 @@ if (iframeEl) {
       iframeEl.contentWindow.postMessage({ kind: 'deleteImagesAck', requestId: d.requestId, ok: d.ok }, '*');
       return;
     }
-    // 插入文件引用：转发给 iframe，由桥接把「@路径」写进 DSH 输入框
-    if (d && d.type === 'bridgeInsertMentions' && Array.isArray(d.paths)) {
-      iframeEl.contentWindow.postMessage({ kind: 'insertMentions', paths: d.paths }, '*');
+    // 插入文件引用：转发给 iframe，由桥接把已格式化的 @引用 写进 DSH 输入框。
+    // 同时转发旧字段 paths：页面里可能还跑着升级前的旧桥接（DSH 服务未重启），它只认 paths。
+    if (d && d.type === 'bridgeInsertMentions' && Array.isArray(d.mentions)) {
+      iframeEl.contentWindow.postMessage({
+        kind: 'insertMentions',
+        mentions: d.mentions,
+        ...(Array.isArray(d.paths) ? { paths: d.paths } : {}),
+      }, '*');
       return;
     }
     // —— 上行：iframe 发来的消息，source + origin 双重校验 ——
@@ -224,6 +241,16 @@ if (iframeEl) {
     // 插入文件引用回执：交给扩展决定提示「已添加」还是「面板未就绪」
     if (d && d.kind === 'insertMentionsAck') {
       vscode.postMessage({ type: 'bridgeInsertMentionsAck', ok: d.ok === true });
+      return;
+    }
+    // v0.5.1：工作区绑定完成回执（成功/降级都算完成）：扩展侧据此停止在重渲染时重发绑定请求，
+    // 失败原因一并带回，供 DSH: 复制日志 直接排查
+    if (d && d.kind === 'workspaceBootstrapAck') {
+      vscode.postMessage({
+        type: 'bridgeWorkspaceBootstrapAck',
+        ok: d.ok === true,
+        ...(typeof d.reason === 'string' ? { reason: d.reason } : {}),
+      });
       return;
     }
     // 打开外链：转发给扩展 → vscode.env.openExternal
@@ -271,7 +298,10 @@ if (iframeEl) {
   let helloAttempts = 0;
   const sendHello = () => {
     if (!bridgeAcked && iframeEl.contentWindow) {
-      iframeEl.contentWindow.postMessage({ kind: 'bridgeHello', token: TOKEN, imageFallback: IMAGE_FALLBACK }, '*');
+      iframeEl.contentWindow.postMessage({
+        kind: 'bridgeHello', token: TOKEN, imageFallback: IMAGE_FALLBACK,
+        workspaceRoot: WORKSPACE_ROOT, bootstrapWorkspace: BOOTSTRAP_WORKSPACE,
+      }, '*');
     }
   };
   sendHello();
@@ -426,13 +456,27 @@ export function stoppedPage(t: T, ctx: PageCtx): string {
 export function readyPage(
   url: string,
   ctx: PageCtx,
-  bridge?: { token: string; enabled: boolean; imageFallback?: boolean },
+  bridge?: {
+    token: string;
+    enabled: boolean;
+    imageFallback?: boolean;
+    /** VS Code 工作区根（v0.5.1；空串 = 没有打开工作区文件夹） */
+    workspaceRoot?: string;
+    /** 新开标签页时是否让 DSH 切到该工作区并打开空白会话（一次性，恢复的标签页为 false） */
+    bootstrapWorkspace?: boolean;
+  },
   zoomLevel = 1,
   micHint = true,
 ): string {
   // 桥接启用时注入握手脚本；未传入或 enabled=false 时保持向后兼容，不注入
   const extraScripts = bridge?.enabled
-    ? `<script nonce="${ctx.nonce}">${bridgeHandshakeScript(bridge.token, new URL(url).origin, bridge.imageFallback === true)}</script>`
+    ? `<script nonce="${ctx.nonce}">${bridgeHandshakeScript(
+      bridge.token,
+      new URL(url).origin,
+      bridge.imageFallback === true,
+      bridge.workspaceRoot ?? '',
+      bridge.bootstrapWorkspace === true,
+    )}</script>`
     : '';
   // 缩放：只对非 1 的档位写入内联变量（1 时保持历史 DOM，零行为变化）
   const zoomAttr =

@@ -128,3 +128,18 @@ test('shouldResetHandshake：端点变化必重握手；仅 profile 变时只保
   assert.equal(shouldResetHandshake({ profile: true, endpoint: false }, idle), true);
   assert.equal(shouldResetHandshake({ profile: true, endpoint: false }, null), true);
 });
+
+// v0.5.1（图一/图二）：编辑区标签页要能像 Claude Code 一样多开，且标签上显示 DSH 图标。
+// 这两点都在 activate() 闭包里、依赖真实 WebviewPanel 宿主，无法用现有桩跑起来，
+// 因此按仓库既有做法用源码结构回归锁定关键点（删掉任何一条都会让真机行为回退）：
+test('编辑区标签页：每次点击新开 + 标签图标 + 关闭释放 provider', () => {
+  const src = readFileSync(join(__dirname, '..', '..', 'src', 'extension.ts'), 'utf8');
+  assert.ok(!src.includes('editorPanel.reveal()'), '不得再聚焦旧标签页（旧行为导致无法多开）');
+  assert.ok(!src.includes('let editorPanel: vscode.WebviewPanel | null = null;'), '不得再只保留单个编辑区面板');
+  assert.ok(src.includes('const editorPanels = new Map<vscode.WebviewPanel, DshPanelProvider>()'), '每个标签页独立 provider');
+  assert.ok(src.includes('vscode.window.createWebviewPanel('), '仍通过 WebviewPanel 打开编辑区标签页');
+  assert.ok(/panel\.iconPath = icon/.test(src), '新建/恢复的标签页应设置 iconPath（否则只有通用占位图标）');
+  assert.ok(src.includes("assets/whale-icon-light.svg") && src.includes("assets/whale-icon-dark.svg"));
+  assert.ok(/provider\.dispose\(\)/.test(src), '关闭标签页应释放 provider 的 manager 订阅');
+  assert.ok(src.includes("registerWebviewPanelSerializer('dsh.editor'"), '多标签页仍需序列化器在重载后恢复');
+});

@@ -89,9 +89,10 @@ test('readyPage 握手脚本：下行 postMessage 使用 targetOrigin *（issue 
   // hello 与四类回执转发（copyTextAck/readTextAck/saveImageAck/deleteImagesAck）共 5 处下行
   const countStar = html.split(", '*')").length - 1;
   assert.ok(countStar >= 5, `下行 postMessage 应全部为 *，实际 ${countStar} 处`);
+  // v0.5.1：hello 增加了 workspaceRoot / bootstrapWorkspace 两个字段，仍必须是 targetOrigin '*'
   assert.ok(
-    html.includes("postMessage({ kind: 'bridgeHello', token: TOKEN, imageFallback: IMAGE_FALLBACK }, '*')"),
-    'hello 应带 imageFallback 且 targetOrigin 为 *',
+    /postMessage\(\{[\s\S]*?kind: 'bridgeHello', token: TOKEN, imageFallback: IMAGE_FALLBACK,[\s\S]*?\}, '\*'\);/.test(html),
+    'hello 应带 imageFallback/工作区字段且 targetOrigin 为 *',
   );
   // 回归防线：绝不能再以 iframeSrc 推导的 origin 作 targetOrigin（SW 重写下 postMessage 抛错）
   assert.ok(!html.includes('}, iframeSrc)'), '不得再以 iframeSrc 为 targetOrigin');
@@ -248,9 +249,49 @@ test('readyPage 握手脚本包含「插入文件引用」（添加到对话）�
   // 下行：扩展宿主 bridgeInsertMentions → iframe 的 insertMentions
   assert.ok(html.includes("type === 'bridgeInsertMentions'"), '应接收扩展宿主的插入请求');
   assert.ok(html.includes("kind: 'insertMentions'"), '应转发为 iframe 的 insertMentions');
+  assert.ok(html.includes('mentions: d.mentions'), '应把已格式化的 @ 引用原样转发（不再由桥接拼 @）');
+  assert.ok(html.includes('paths: d.paths'), '同时转发旧字段 paths（升级窗口内旧桥接仍能工作）');
   // 上行：iframe 的 insertMentionsAck → 扩展宿主的 bridgeInsertMentionsAck
   assert.ok(html.includes("kind === 'insertMentionsAck'"), '应转发 iframe 的插入回执');
   assert.ok(html.includes("type: 'bridgeInsertMentionsAck'"), '应向扩展宿主发送回执');
+});
+
+test('readyPage 握手携带 VS Code 工作区绑定字段（v0.5.1）', () => {
+  const html = readyPage('http://127.0.0.1:3080/', ctx(), {
+    token: 'tok123', enabled: true, workspaceRoot: '/proj/my-repo', bootstrapWorkspace: true,
+  });
+  assert.ok(html.includes('const WORKSPACE_ROOT = "/proj/my-repo";'), '应携带工作区根');
+  assert.ok(html.includes('const BOOTSTRAP_WORKSPACE = true;'), '新标签页应请求绑定');
+  assert.ok(html.includes('workspaceRoot: WORKSPACE_ROOT'), 'hello 里应下发 workspaceRoot');
+  assert.ok(html.includes('bootstrapWorkspace: BOOTSTRAP_WORKSPACE'), 'hello 里应下发绑定标志');
+  // 绑定完成回执：iframe → 扩展（扩展据此停止重渲染时重发请求）
+  assert.ok(html.includes("kind === 'workspaceBootstrapAck'"), '应接收绑定完成回执');
+  assert.ok(html.includes("type: 'bridgeWorkspaceBootstrapAck'"), '应转发给扩展宿主');
+  assert.ok(html.includes('reason: d.reason'), '失败原因应一并转发');
+  // 恢复的标签页 / 未接线时不请求绑定
+  const restored = readyPage('http://127.0.0.1:3080/', ctx(), { token: 't', enabled: true });
+  assert.ok(restored.includes('const BOOTSTRAP_WORKSPACE = false;'));
+  // 路径里的 '<' 必须转义，避免出现 </script> 截断内联脚本
+  const escaped = readyPage('http://127.0.0.1:3080/', ctx(), {
+    token: 't', enabled: true, workspaceRoot: '/a</script>b', bootstrapWorkspace: true,
+  });
+  assert.ok(escaped.includes('const WORKSPACE_ROOT = "/a\\u003c/script>b";'), '应转义 <');
+  assert.ok(!escaped.includes('"/a</script>b"'), '不得把原始路径直接写进脚本');
+});
+
+test('内联握手脚本不得被内容里的 </script 提前截断（脚本开闭标签数量一致）', () => {
+  // 真机回归（0.5.1-test2）：握手脚本的注释里出现了 </script> 字面量，HTML 解析器会提前结束
+  // <script>，剩余代码被当作文本在页面上闪一下，桥接握手永远不启动（工作区绑定/文件/剪贴板全部失效）。
+  for (const html of [
+    readyPage('http://127.0.0.1:3080/', ctx(), {
+      token: 'tok123', enabled: true, workspaceRoot: '/a</script>b', bootstrapWorkspace: true,
+    }),
+    readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true }),
+  ]) {
+    const opens = (html.match(/<script\b/gu) ?? []).length;
+    const closes = (html.match(/<\/script>/gu) ?? []).length;
+    assert.equal(closes, opens, '每个 <script> 必须有且只有一个对应的结束标签');
+  }
 });
 
 test('readyPage 在麦克风不可用时给出「用浏览器打开」提示（VS Code webview 限制）', () => {

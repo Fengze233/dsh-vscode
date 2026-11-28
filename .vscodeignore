@@ -29,3 +29,6 @@ dsh-imgcache-*
 .npm-cache/**
 .code-atlas/**
 .git/**
+
+# 嵌套 worktree 元数据（.agents/worktrees 等）：不随扩展打包
+.agents/**

@@ -35,6 +35,19 @@ export interface PanelProviderUiOpts {
   micHintEnabled?: () => boolean;
   /** 用户点了提示上的关闭：扩展侧负责持久化，之后 refreshPanels() 重渲染即不再出现 */
   onMicHintDismiss?: () => void;
+  /**
+   * 新开编辑区标签页时是否让 DSH 绑定当前 VS Code 工作区（v0.5.1）。
+   *
+   * 扩展侧提供 getter（负责设置/工作区是否存在）；provider 在收到桥接的「绑定完成」回执后
+   * 自动停止下发，因此页面重渲染/重载不会重复触发；重载恢复的标签页（不传该 getter）也不会触发。
+   * 缺省 undefined = 不绑定（侧边栏/恢复的标签页）。
+   */
+  bootstrapWorkspace?: () => boolean;
+  /**
+   * 工作区绑定完成回调（v0.5.1）：ok=false 时 reason 带失败原因，扩展写进输出日志。
+   * 绑定成功/失败都会回调一次（页面销毁时不会回调）。
+   */
+  onWorkspaceBootstrapAck?: (ok: boolean, reason?: string) => void;
 }
 
 export class DshPanelProvider implements vscode.WebviewViewProvider {
@@ -52,6 +65,14 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   private pendingExternalUrl: string | null = null;
   /** 渲染代数：递增使进行中的异步 URL 解析过期，防止乱序覆盖 */
   private renderGen = 0;
+  /** manager 状态订阅的退订函数（多标签页场景下 dispose 必须解绑，否则监听器随标签页数量增长） */
+  private unsubscribeFromManager: (() => void) | null = null;
+  /** 是否已收到「工作区绑定完成」回执：收到后不再下发请求，避免重渲染/重载反复切换 */
+  private workspaceBootstrapDone = false;
+  /** 是否已下发过工作区绑定请求（「添加到对话」等操作据此等切换完成再写入） */
+  private workspaceBootstrapRequested = false;
+  /** 等待绑定完成回执的 resolver（超时由等待方自行解除） */
+  private bootstrapWaiters: Array<() => void> = [];
 
   /**
    * @param manager 服务管理器（面板与服务状态联动）
@@ -76,7 +97,56 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
     private ui: PanelProviderUiOpts = {},
   ) {
     // 订阅状态变化，重绘面板（iframe 与占位页由状态驱动，无白屏路径）
-    manager.onChange(() => void this.handleStateChange());
+    this.unsubscribeFromManager = manager.onChange(() => void this.handleStateChange());
+  }
+
+  /**
+   * 释放一个面板实例（编辑区标签页关闭时调用）。
+   *
+   * 为什么必须显式 dispose：v0.5.1 起每个编辑区标签页都有独立 provider，
+   * 不解除 manager 订阅的话，关掉的标签页会一直留在监听器表里（每开一页多一份）。
+   */
+  dispose(): void {
+    this.unsubscribeFromManager?.();
+    this.unsubscribeFromManager = null;
+    this.webview = null;
+    this.insertWaiter = null;
+    this.settleWorkspaceBootstrap(); // 解除等待中的「添加到对话」，避免命令挂住
+  }
+
+  /** 新页面绑定：重置一次性绑定状态（旧页面的等待者直接放行） */
+  private resetWorkspaceBootstrap(): void {
+    const waiters = this.bootstrapWaiters;
+    this.bootstrapWaiters = [];
+    for (const wake of waiters) wake();
+    this.workspaceBootstrapDone = false;
+    this.workspaceBootstrapRequested = false;
+  }
+
+  /** 标记工作区绑定已结束（成功/失败/面板销毁）并唤醒所有等待者 */
+  private settleWorkspaceBootstrap(): void {
+    this.workspaceBootstrapDone = true;
+    const waiters = this.bootstrapWaiters;
+    this.bootstrapWaiters = [];
+    for (const wake of waiters) wake();
+  }
+
+  /**
+   * 等本次页面加载的工作区绑定完成（没有请求时立即返回）。
+   *
+   * 为什么需要：新开的标签页可能正在从旧 workspace 切到 VS Code 工作区；如果这时立刻
+   * 插入 @引用，文本会写进即将被切走的会话（用户看到"添加成功"但引用不在新会话里）。
+   * 超时也继续（不能让右键命令无限挂住），后续的插入重试仍有机会落在切换后的输入框。
+   */
+  private async waitForWorkspaceBootstrap(timeoutMs: number): Promise<void> {
+    if (!this.workspaceBootstrapRequested || this.workspaceBootstrapDone) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, timeoutMs);
+      this.bootstrapWaiters.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   }
 
   /** 强制按最新状态重渲染（会话兑换完成/代理就绪后由扩展调用，弥补 onChange 之外的触发源） */
@@ -93,6 +163,9 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
    * 渲染 / 桥接 / 状态订阅逻辑，差异只在宿主生命周期（创建与解绑由扩展入口负责）。
    */
   resolveWebview(webview: vscode.Webview): void {
+    // 侧边栏视图被重建（新 webview）时重置绑定状态：新页面可以重新绑定一次；
+    // 同时放行等待中的「添加到对话」，避免命令挂住。同一个 webview 重复绑定不重置。
+    if (this.webview !== null && this.webview !== webview) this.resetWorkspaceBootstrap();
     this.webview = webview;
     // enableScripts 允许占位页的内联按钮脚本（nonce 放行）运行。
     // 注意：retainContextWhenHidden 不在这里设置——它不是 WebviewOptions 字段，
@@ -141,24 +214,33 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * 让页面把文件以 `@相对路径` 插入 DSH 输入框（资源管理器右键「添加到对话」）。
+   * 让页面把引用文本（已按 DSH @ 语法格式化，如 `@src/a.ts`、`@test/`）插入 DSH 输入框
+   * （资源管理器右键「添加到对话」）。
    *
    * 返回值 false 表示桥接没响应：面板刚打开还没握手、桥接被禁用、或页面里找不到输入框。
    * 为什么要重试：面板可能刚打开，iframe 里的桥接尚未握手，早发的消息会被直接丢弃；
    * 每次尝试都等页面回执，全部超时才判定失败（由调用方提示用户）。
    */
-  async insertMentions(paths: string[]): Promise<boolean> {
+  async insertMentions(mentions: string[]): Promise<boolean> {
+    // 新标签页可能正在切到 VS Code 工作区：等切换完成再写，避免引用落进即将被切走的会话。
+    // 只在循环里等一次（绑定可能在命令执行期间才开始）；没有待办绑定时同步跳过，
+    // 普通面板保持原来的「调用即下发」时序。
+    let waitedForBootstrap = false;
     for (let attempt = 0; attempt < 4; attempt += 1) {
+      if (!waitedForBootstrap && this.workspaceBootstrapRequested && !this.workspaceBootstrapDone) {
+        waitedForBootstrap = true;
+        await this.waitForWorkspaceBootstrap(2500);
+      }
       const w = this.webview;
       if (w === null) return false;
-      if (await this.postInsertAndWait(w, paths)) return true;
+      if (await this.postInsertAndWait(w, mentions)) return true;
       await new Promise((resolve) => setTimeout(resolve, 350));
     }
     return false;
   }
 
   /** 发一次插入请求并等待回执（超时按失败处理，避免命令挂住） */
-  private postInsertAndWait(webview: vscode.Webview, paths: string[]): Promise<boolean> {
+  private postInsertAndWait(webview: vscode.Webview, mentions: string[]): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const finish = (ok: boolean): void => {
@@ -169,8 +251,12 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       timer = setTimeout(() => finish(false), 700);
       this.insertWaiter = finish;
       try {
+        // paths 是 v0.5.0 桥接的旧字段（扩展升级后、DSH 服务尚未重启时页面里可能还是旧桥接）：
+        // 旧桥接会自己拼 `@`，所以这里传去掉 `@` 的原文本；新桥接优先用 mentions。
+        // 两个字段同时发，升级窗口内新旧桥接都能正确插入（v0.5.1 兼容处理）。
+        const legacyPaths = mentions.map((m) => (m.startsWith('@') ? m.slice(1) : m));
         // postMessage 的返回在真实 API 里是 Thenable，单测桩可能返回普通值：统一包一层再等待
-        const sent = webview.postMessage({ type: 'bridgeInsertMentions', paths });
+        const sent = webview.postMessage({ type: 'bridgeInsertMentions', mentions, paths: legacyPaths });
         void Promise.resolve(sent).then(undefined, () => finish(false));
       } catch {
         finish(false);
@@ -238,6 +324,12 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       case 'bridgeAck':
         // 握手回执：通知注入的回调（Task 7 据此评估桥接状态；version 供日志确认桥接代码版本）
         this.onBridgeAck?.(msg.ok, msg.version);
+        break;
+      case 'bridgeWorkspaceBootstrapAck':
+        // v0.5.1：工作区绑定完成（成功或降级）→ 之后的重渲染不再下发 bootstrapWorkspace，
+        // 并唤醒等待中的「添加到对话」；失败原因交给扩展写日志
+        this.ui.onWorkspaceBootstrapAck?.(msg.ok, msg.reason);
+        this.settleWorkspaceBootstrap();
         break;
     }
   }
@@ -416,6 +508,16 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
               token: this.bridgeToken,
               enabled: this.bridgeEnabled(), // 由 dsh.bridge.enabled 配置驱动（Task 7 接入）
               imageFallback: this.imageFallback(), // v0.3.0：降级开关随握手消息带给桥接客户端
+              workspaceRoot: this.workspaceRoot(), // v0.5.1：新标签页绑定 VS Code 工作区（无文件夹时 undefined）
+              // 收到绑定完成回执后不再请求：页面重渲染（缩放/鉴权刷新）会重载 iframe，
+              // 早停会把桥接侧还没跑完的异步绑定打断，所以必须等回执而不是等握手
+              bootstrapWorkspace: (() => {
+                const bootstrap = this.workspaceBootstrapDone
+                  ? false
+                  : (this.ui.bootstrapWorkspace?.() ?? false);
+                if (bootstrap) this.workspaceBootstrapRequested = true;
+                return bootstrap;
+              })(),
             },
             // 面板缩放（issue #8）：未接线时 1（不缩放）
             this.ui.zoomLevel?.() ?? 1,
