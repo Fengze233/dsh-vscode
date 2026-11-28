@@ -52,6 +52,8 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   private pendingExternalUrl: string | null = null;
   /** 渲染代数：递增使进行中的异步 URL 解析过期，防止乱序覆盖 */
   private renderGen = 0;
+  /** manager 状态订阅的退订函数（多标签页场景下 dispose 必须解绑，否则监听器随标签页数量增长） */
+  private unsubscribeFromManager: (() => void) | null = null;
 
   /**
    * @param manager 服务管理器（面板与服务状态联动）
@@ -76,7 +78,20 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
     private ui: PanelProviderUiOpts = {},
   ) {
     // 订阅状态变化，重绘面板（iframe 与占位页由状态驱动，无白屏路径）
-    manager.onChange(() => void this.handleStateChange());
+    this.unsubscribeFromManager = manager.onChange(() => void this.handleStateChange());
+  }
+
+  /**
+   * 释放一个面板实例（编辑区标签页关闭时调用）。
+   *
+   * 为什么必须显式 dispose：v0.5.1 起每个编辑区标签页都有独立 provider，
+   * 不解除 manager 订阅的话，关掉的标签页会一直留在监听器表里（每开一页多一份）。
+   */
+  dispose(): void {
+    this.unsubscribeFromManager?.();
+    this.unsubscribeFromManager = null;
+    this.webview = null;
+    this.insertWaiter = null;
   }
 
   /** 强制按最新状态重渲染（会话兑换完成/代理就绪后由扩展调用，弥补 onChange 之外的触发源） */
@@ -141,24 +156,25 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * 让页面把文件以 `@相对路径` 插入 DSH 输入框（资源管理器右键「添加到对话」）。
+   * 让页面把引用文本（已按 DSH @ 语法格式化，如 `@src/a.ts`、`@test/`）插入 DSH 输入框
+   * （资源管理器右键「添加到对话」）。
    *
    * 返回值 false 表示桥接没响应：面板刚打开还没握手、桥接被禁用、或页面里找不到输入框。
    * 为什么要重试：面板可能刚打开，iframe 里的桥接尚未握手，早发的消息会被直接丢弃；
    * 每次尝试都等页面回执，全部超时才判定失败（由调用方提示用户）。
    */
-  async insertMentions(paths: string[]): Promise<boolean> {
+  async insertMentions(mentions: string[]): Promise<boolean> {
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const w = this.webview;
       if (w === null) return false;
-      if (await this.postInsertAndWait(w, paths)) return true;
+      if (await this.postInsertAndWait(w, mentions)) return true;
       await new Promise((resolve) => setTimeout(resolve, 350));
     }
     return false;
   }
 
   /** 发一次插入请求并等待回执（超时按失败处理，避免命令挂住） */
-  private postInsertAndWait(webview: vscode.Webview, paths: string[]): Promise<boolean> {
+  private postInsertAndWait(webview: vscode.Webview, mentions: string[]): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const finish = (ok: boolean): void => {
@@ -169,8 +185,12 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       timer = setTimeout(() => finish(false), 700);
       this.insertWaiter = finish;
       try {
+        // paths 是 v0.5.0 桥接的旧字段（扩展升级后、DSH 服务尚未重启时页面里可能还是旧桥接）：
+        // 旧桥接会自己拼 `@`，所以这里传去掉 `@` 的原文本；新桥接优先用 mentions。
+        // 两个字段同时发，升级窗口内新旧桥接都能正确插入（v0.5.1 兼容处理）。
+        const legacyPaths = mentions.map((m) => (m.startsWith('@') ? m.slice(1) : m));
         // postMessage 的返回在真实 API 里是 Thenable，单测桩可能返回普通值：统一包一层再等待
-        const sent = webview.postMessage({ type: 'bridgeInsertMentions', paths });
+        const sent = webview.postMessage({ type: 'bridgeInsertMentions', mentions, paths: legacyPaths });
         void Promise.resolve(sent).then(undefined, () => finish(false));
       } catch {
         finish(false);

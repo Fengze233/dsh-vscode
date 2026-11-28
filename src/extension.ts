@@ -12,6 +12,7 @@ import { ServiceManager, type ManagerOptions } from './service/manager';
 import { DshPanelProvider } from './panel/provider';
 import { StatusBarController } from './statusbar';
 import { resolveWorkspaceRoot } from './workspaceRoot';
+import { formatMentions, type MentionTarget } from './chatMentions';
 import { createUrlResolver, handshakeTimeoutMs, bridgeEvalDelayMs, classifyRemote, toLocalhostUrl } from './remote';
 import { createDshProxy, type DshProxy } from './service/proxy';
 import {
@@ -696,83 +697,129 @@ export function activate(context: vscode.ExtensionContext): void {
   panels.push(panelPrimary, panelSecondary);
 
   // 编辑区标签页：与两侧边栏共用同一套 provider 逻辑，只是把 webview 宿主换成 WebviewPanel。
-  // provider 与 manager 常驻复用：关闭标签页只解绑 webview，再次打开时新建标签页即可，
-  // 不会重复订阅 manager.onChange（订阅发生在 provider 构造时）。
-  let editorPanel: vscode.WebviewPanel | null = null;
-  let editorProvider: DshPanelProvider | null = null;
+  // v0.5.1 起每次点击都新开一个标签页（像 Claude Code 一样可多开）：每个标签页一个 provider，
+  // 互不共享 webview 宿主与渲染代数；关闭标签页时解绑并释放该 provider 的 manager 订阅。
+  const editorPanels = new Map<vscode.WebviewPanel, DshPanelProvider>();
+  /** 最近获得焦点的编辑区标签页：右键「添加到对话」优先插到用户正在看的这一页 */
+  let activeEditorPanel: vscode.WebviewPanel | null = null;
 
-  /** 把一个编辑区面板接到 provider 上（新建与「重载窗口后由序列化器恢复」两条路径共用） */
-  const attachEditorPanel = (panel: vscode.WebviewPanel): void => {
-    const m = manager;
-    if (m === null) return;
-    if (editorProvider === null) {
-      editorProvider = new DshPanelProvider(
-        m,
-        undefined, // 编辑区入口不重复弹「移到右侧栏」的一次性引导
-        onBridgeAck,
-        workspaceRootGetter,
-        bridgeEnabledGetter,
-        remoteEnabledGetter,
-        resolveExternalUrl,
-        imageFallbackGetter,
-        panelUi(),
-      );
-      panels.push(editorProvider); // 配置变更 / 鉴权完成时由 refreshPanels() 一并刷新
+  /** 编辑区标签图标：与编辑器标题栏同源（明暗两套单色资源） */
+  const editorTabIcon = (): { light: vscode.Uri; dark: vscode.Uri } | undefined => {
+    try {
+      return {
+        light: vscode.Uri.file(context.asAbsolutePath('assets/whale-icon-light.svg')),
+        dark: vscode.Uri.file(context.asAbsolutePath('assets/whale-icon-dark.svg')),
+      };
+    } catch {
+      return undefined; // 极简宿主/单测环境没有 asAbsolutePath：图标缺省不影响功能
     }
-    editorPanel = panel;
-    panel.onDidDispose(() => {
-      // 只清理「当前这个」面板：重载窗口时序列化器可能已经绑了新面板，别把新状态清掉
-      if (editorPanel === panel) editorPanel = null;
-      editorProvider?.detach(panel.webview); // 解绑：避免向已销毁的宿主渲染或投递消息
-    });
-    editorProvider.resolveWebview(panel.webview);
   };
 
-  const openInEditor = (): void => {
-    if (editorPanel !== null) {
-      // 已打开：聚焦已有标签页，不再开第二个。reveal 在宿主已被销毁时会抛
-      // 「Webview is disposed」（关闭标签页与再次点击的竞态），此时按新建处理。
-      try {
-        void editorPanel.reveal();
-        return;
-      } catch {
-        editorPanel = null;
+  /** 把一个编辑区面板接到独立 provider 上（新建与「重载窗口后由序列化器恢复」两条路径共用） */
+  const attachEditorPanel = (panel: vscode.WebviewPanel): DshPanelProvider => {
+    const existing = editorPanels.get(panel);
+    if (existing !== undefined) return existing;
+    const provider = new DshPanelProvider(
+      manager!,
+      undefined, // 编辑区入口不重复弹「移到右侧栏」的一次性引导
+      onBridgeAck,
+      workspaceRootGetter,
+      bridgeEnabledGetter,
+      remoteEnabledGetter,
+      resolveExternalUrl,
+      imageFallbackGetter,
+      panelUi(),
+    );
+    editorPanels.set(panel, provider);
+    panels.push(provider); // 配置变更 / 鉴权完成时由 refreshPanels() 一并刷新
+    // 标签图标：不设置时 VS Code 只显示通用占位图标（真机反馈"对话栏图标不显示"）
+    const icon = editorTabIcon();
+    if (icon !== undefined) panel.iconPath = icon;
+    panel.onDidDispose(() => {
+      editorPanels.delete(panel);
+      const index = panels.indexOf(provider);
+      if (index >= 0) panels.splice(index, 1);
+      provider.dispose(); // 解除 manager 订阅，避免关掉的标签页继续被回调
+      if (activeEditorPanel === panel) {
+        // 优先接替到当前仍处于激活态的标签页，其次取最后打开的一页
+        activeEditorPanel = [...editorPanels.keys()].find((p) => p.active)
+          ?? [...editorPanels.keys()].at(-1)
+          ?? null;
       }
-    }
-    // 与 Claude Code 一致：开在「新的一列」而不是覆盖当前编辑器所在的那一列，
-    // 这样能边看代码边聊；当前列没有编辑器时（如空窗口）直接开在当前列，避免多出空分组。
-    const column = vscode.window.tabGroups.activeTabGroup.tabs.length > 0
+    });
+    panel.onDidChangeViewState((e) => {
+      if (e.webviewPanel.active) activeEditorPanel = panel;
+    });
+    provider.resolveWebview(panel.webview);
+    // 只把真正处于激活态的面板记为「当前页」：重载窗口时序列化器会一次性恢复多页，
+    // 无条件覆盖会让「添加到对话」落到最后恢复的那页而不是用户正在看的这页。
+    if (panel.active) activeEditorPanel = panel;
+    return provider;
+  };
+
+  /** 新标签页落在哪一列：首个 DSH 标签页开在代码旁边，之后与已有 DSH 标签页同列（同组多标签） */
+  const editorPanelColumn = (): vscode.ViewColumn => {
+    const last = activeEditorPanel ?? [...editorPanels.keys()].at(-1) ?? null;
+    if (last !== null && last.viewColumn !== undefined) return last.viewColumn;
+    // 与 Claude Code 一致：当前列有编辑器时开在新的一列，空窗口直接开在当前列，避免多出空分组
+    return vscode.window.tabGroups.activeTabGroup.tabs.length > 0
       ? vscode.ViewColumn.Beside
       : vscode.ViewColumn.Active;
-    const panel = vscode.window.createWebviewPanel('dsh.editor', 'DSH', column, {
+  };
+
+  /** 打开一个新的编辑区标签页（每次调用都会新开，对应「多开」） */
+  const openInEditor = (): DshPanelProvider => {
+    const panel = vscode.window.createWebviewPanel('dsh.editor', 'DSH', editorPanelColumn(), {
       enableScripts: true,
       // 切走标签页时不销毁 iframe：DSH 页面会话、滚动位置与桥接握手都保留
       retainContextWhenHidden: true,
     });
-    attachEditorPanel(panel);
+    return attachEditorPanel(panel);
   };
+
+  /** 当前应接收「添加到对话」的 provider：最近激活的标签页；一个都没开时返回 null（调用方会新开） */
+  const activeEditorProvider = (): DshPanelProvider | null => {
+    if (activeEditorPanel !== null) {
+      const provider = editorPanels.get(activeEditorPanel);
+      if (provider !== undefined) return provider;
+    }
+    return editorPanels.values().next().value ?? null;
+  };
+
   /**
-   * 资源管理器右键「DSH → 添加到对话」：把选中文件以 `@相对路径` 插进 DSH 输入框。
+   * 资源管理器右键「DSH → 添加到对话」：把选中文件以 `@路径` 插进 DSH 输入框。
    *
-   * 路径口径：优先相对工作区根（与 DSH 会话 cwd 的常见情况一致，短且可读），
-   * 不在任何工作区文件夹内时退回绝对路径，保证不会因为算不出相对路径而什么都不做。
+   * 路径口径（v0.5.1）：
+   * - 相对工作区根（与 DSH 会话 cwd 一致，短且可读），工作区外退回绝对路径；
+   * - 文件夹补尾斜杠（DSH 靠它区分文件/文件夹；v0.5.0 漏了，选中文件夹时引用被当成文件、
+   *   打开与应用都不正确）；
+   * - 路径含空白用 @"…" 成对引号，否则会在空白处被截断。
    */
   const addToChat = async (uri?: vscode.Uri, uris?: vscode.Uri[]): Promise<void> => {
     const list = Array.isArray(uris) && uris.length > 0 ? uris : uri !== undefined ? [uri] : [];
     if (list.length === 0) return;
-    if (editorPanel === null) openInEditor(); // 面板没开就先开（与「在编辑区打开」一致）
-    const provider = editorProvider;
-    if (provider === null) {
+    const root = workspaceRootGetter();
+    const targets: MentionTarget[] = [];
+    for (const u of list.slice(0, 20)) {
+      let isDirectory = false;
+      try {
+        // 只有 Directory 位被置上才算文件夹（符号链接目录通常同时带 Directory）
+        const stat = await vscode.workspace.fs.stat(u);
+        isDirectory = (stat.type & vscode.FileType.Directory) !== 0;
+      } catch {
+        // 类型探测失败（极少数虚拟文件系统）：按文件处理，至少还能插入路径
+      }
+      targets.push({ path: u.fsPath, isDirectory });
+    }
+    const mentions = formatMentions(targets, root);
+    if (mentions.length === 0) {
       void vscode.window.showWarningMessage(t('msg.addToChatFailed'));
       return;
     }
-    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const paths = list.slice(0, 20).map((u) => {
-      const rel = root !== undefined && u.fsPath.startsWith(`${root}/`) ? u.fsPath.slice(root.length + 1) : u.fsPath;
-      return rel.split('\\').join('/'); // Windows 分隔符统一成正斜杠，避免 DSH 侧解析不一致
-    });
-    if (await provider.insertMentions(paths)) {
-      void vscode.window.showInformationMessage(t('msg.addToChatOk', { count: paths.length }));
+    // 优先插到用户正在看的标签页；一个都没开时先开一个新的
+    const provider = activeEditorProvider() ?? openInEditor();
+    if (await provider.insertMentions(mentions)) {
+      void vscode.window.showInformationMessage(t('msg.addToChatOk', { count: mentions.length }));
     } else {
       void vscode.window.showWarningMessage(t('msg.addToChatFailed'));
     }
@@ -806,11 +853,16 @@ export function activate(context: vscode.ExtensionContext): void {
         attachEditorPanel(panel);
       },
     }),
-    // 编辑器标题栏图标：默认在编辑区标签页打开（与 Claude Code 同形态），不再跳右侧侧边栏；
+    // 编辑器标题栏图标：默认在编辑区标签页打开（与 Claude Code 同形态，可多开），不再跳右侧侧边栏；
     // 需要侧边栏时仍可用「DSH: 在辅助侧边栏打开」（dsh.openSecondary）。
-    vscode.commands.registerCommand('dsh.openFromTitle', () => openInEditor()),
-    // 资源管理器右键子菜单「DSH → 添加到对话」：把选中文件插入 DSH 输入框
+    vscode.commands.registerCommand('dsh.openFromTitle', () => {
+      openInEditor();
+    }),
+    // 资源管理器右键「DSH → 添加到对话」：把选中文件插入 DSH 输入框。
+    // 文件与文件夹是两个命令：VS Code 的菜单标题来自命令本身，只有拆开才能在右键文件夹时
+    // 显示「将文件夹添加到 DSH 对话」（v0.5.0 只有一个命令，文件夹上仍写"文件"）。
     vscode.commands.registerCommand('dsh.addToChat', (uri?: vscode.Uri, uris?: vscode.Uri[]) => addToChat(uri, uris)),
+    vscode.commands.registerCommand('dsh.addFolderToChat', (uri?: vscode.Uri, uris?: vscode.Uri[]) => addToChat(uri, uris)),
     vscode.commands.registerCommand('dsh.openExternal', () => openExternal()),
     vscode.commands.registerCommand('dsh.restart', () => void manager?.restart()),
     vscode.commands.registerCommand('dsh.stop', () => void manager?.stop()),

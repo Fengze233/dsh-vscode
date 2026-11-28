@@ -66,7 +66,7 @@ npm run package        # produces dsh-vscode.vsix
 
 ![Add File to DSH Chat from the Explorer context menu](docs/screenshots/context-menu-add-to-chat.png)
 
-*Right-click a file → **Add File to DSH Chat** to drop its `@path` into the composer.*
+*Right-click a file or folder → **Add File / Folder to DSH Chat** to drop its `@path` into the composer.*
 
 ## 🎬 Demo video
 
@@ -74,22 +74,21 @@ npm run package        # produces dsh-vscode.vsix
 
 *59-second demo on Bilibili (Chinese): [BV1p8bD6dE18](https://www.bilibili.com/video/BV1p8bD6dE18)*
 
-## 🆕 What's new in 0.5.0
+## 🆕 What's new in 0.5.1
 
-- **Editor tab**: the DSH icon in the editor title bar now opens DSH as a tab in a **new editor column** instead of the right side bar — switching tabs keeps the session, reloading restores it, and a closed tab can be reopened.
-- **Add to chat from the Explorer**: right-click a file → **Add File to DSH Chat** to insert its `@path` into the DSH composer (multi-select works; the panel opens first if needed).
-- **DSH Desktop in a custom folder** ([#44](https://github.com/Fengze233/dsh-vscode/issues/44)): Desktop installed outside the default location (for example `D:\dsh`) no longer fails with “dsh not found”.
-- **Image links open again** ([#43](https://github.com/Fengze233/dsh-vscode/issues/43)): clicking an image link in chat now falls back to locating the file by name in the workspace. Fixed by [@log-li](https://github.com/log-li).
-- **Clearer icons** ([#46](https://github.com/Fengze233/dsh-vscode/issues/46)): compact canvas plus light/dark monochrome assets — no more white sticker, larger and legible.
-- **Quieter status bar**: just `DSH`; a spinner while starting/stopping and a red icon on failure, with details on hover.
+- **Multiple DSH tabs**: the editor-title whale icon and the status-bar `DSH` item now open a **new** DSH tab on every click — just like Claude Code. Each tab is an independent session and the tab shows the DSH icon.
+- **Status bar at startup**: the `DSH` status-bar item now appears as soon as the window opens, even if the extension has not been used in that window yet.
+- **Folder-aware context menu**: right-clicking a folder shows **Add Folder to DSH Chat** instead of “Add File …”.
+- **References DSH can parse**: folders are inserted as `@folder/` and paths containing spaces as `@"my dir/file.ts"`, so mentions open and apply correctly (relative to the DSH workspace root).
+- **Clicking the status bar opens the editor**: the `DSH` item no longer jumps to the side bar; it opens a new editor tab.
 
 ## ✨ Features at a glance
 
 | Feature | What you get |
 |---|---|
-| 🖱️ **One-click open** | Whale icons in the Activity Bar and Secondary Side Bar; the editor title bar icon opens DSH as a tab in a **new editor column**. |
-| 🗂️ **Editor tab** | DSH opens like a regular file tab: context is kept when you switch away, restored after a reload, and the tab can be reopened after closing. |
-| 📎 **Add to chat** | Right-click a file in the Explorer → **Add File to DSH Chat** to insert `@path` into the composer (multi-select supported). |
+| 🖱️ **One-click open** | Whale icons in the Activity Bar and Secondary Side Bar; the editor title bar icon and the status-bar `DSH` item open a **new editor tab** on every click. |
+| 🗂️ **Editor tabs** | DSH opens like a regular file tab and supports **multiple tabs** (one independent session each): context is kept when you switch away, restored after a reload, and tabs can be reopened after closing. |
+| 📎 **Add to chat** | Right-click files or folders in the Explorer → **Add File / Folder to DSH Chat** to insert `@path` into the composer (folders get a trailing `/`; multi-select supported). |
 | 🚀 **Service management** | Auto-detect the port; reuse a running `dsh web`, otherwise start one in the background. Port conflicts temporarily fall back to the first free port, with a notification. |
 | 🛟 **Recoverable errors** | Dedicated pages for missing `dsh`, occupied port, start timeout, crash and disconnect — each with a one-click reconnect. |
 | 🔐 **Auth relay** | Parses the one-time launch URL, stores a 30-day session cookie, and forwards the panel through a loopback relay. Externally started services get a one-time paste page. |
@@ -102,7 +101,7 @@ npm run package        # produces dsh-vscode.vsix
 ## 🕹 Everyday use
 
 - Click the whale in the Activity Bar or Secondary Side Bar; the panel title bar has **Open in Browser**, **Restart Service**, **Stop Service**, **Copy URL** and **Show Logs**.
-- The status bar shows just `DSH`: a spinner while starting/stopping, a red icon on failure, and full details on hover; click it to open the panel.
+- The status bar shows just `DSH`: a spinner while starting/stopping, a red icon on failure, and full details on hover; click it to open a **new DSH editor tab**.
 - If `dsh.port` is occupied by another program, the extension temporarily switches to the first free port for this session and tells you; your setting is unchanged.
 - Platform rule: the left whale opens the left panel, the right whale opens the right panel; a sidebar view cannot be moved into the editor area.
 
@@ -112,8 +111,9 @@ npm run package        # produces dsh-vscode.vsix
 |---|---|
 | `DSH: Open Panel` | Open the left panel |
 | `DSH: Open in Secondary Side Bar` | Open the right panel |
-| `DSH: Open in Editor` | Editor-title whale button: open DSH as an editor tab |
-| `Add File to DSH Chat` | Explorer context menu: insert the selected files as `@path` into the composer |
+| `DSH: Open in Editor` | Editor-title whale button / status bar: open a **new** DSH editor tab |
+| `Add File to DSH Chat` | Explorer context menu (files): insert the selected files as `@path` into the composer |
+| `Add Folder to DSH Chat` | Explorer context menu (folders): insert the selected folders as `@folder/` into the composer |
 | `DSH: Open in Browser` | Open the DSH page in the system browser |
 | `DSH: Restart Service` | Restart the extension-managed service |
 | `DSH: Stop Service` | Stop the extension-started service |
@@ -261,7 +261,7 @@ Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 341 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
+npm run test          # 350 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
 npm run compile       # builds out/extension.js
 npm run watch         # watch build
 npm run typecheck     # type check

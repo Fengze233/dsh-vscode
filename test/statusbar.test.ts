@@ -41,7 +41,8 @@ test('状态栏：运行中不着色、状态进 tooltip，停止中不得显示
   assert.equal(item.text, 'DSH');
   assert.equal(item.color, undefined, '运行中不应设置颜色');
   assert.equal(item.tooltip, t('status.running'));
-  assert.equal(item.command, 'dsh.openPanel');
+  // v0.5.1：点击状态栏在编辑区新开 DSH 标签页（与编辑器标题栏图标同一入口，可多开）
+  assert.equal(item.command, 'dsh.openFromTitle');
 
   // 停止中：转圈图标，状态写进 tooltip，且不能误写成「启动中」
   fire({ state: 'stopping', url: null, error: null, owned: true });

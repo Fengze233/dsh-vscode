@@ -248,6 +248,8 @@ test('readyPage 握手脚本包含「插入文件引用」（添加到对话）�
   // 下行：扩展宿主 bridgeInsertMentions → iframe 的 insertMentions
   assert.ok(html.includes("type === 'bridgeInsertMentions'"), '应接收扩展宿主的插入请求');
   assert.ok(html.includes("kind: 'insertMentions'"), '应转发为 iframe 的 insertMentions');
+  assert.ok(html.includes('mentions: d.mentions'), '应把已格式化的 @ 引用原样转发（不再由桥接拼 @）');
+  assert.ok(html.includes('paths: d.paths'), '同时转发旧字段 paths（升级窗口内旧桥接仍能工作）');
   // 上行：iframe 的 insertMentionsAck → 扩展宿主的 bridgeInsertMentionsAck
   assert.ok(html.includes("kind === 'insertMentionsAck'"), '应转发 iframe 的插入回执');
   assert.ok(html.includes("type: 'bridgeInsertMentionsAck'"), '应向扩展宿主发送回执');

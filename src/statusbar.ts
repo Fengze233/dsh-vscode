@@ -29,7 +29,9 @@ export class StatusBarController {
 
   constructor(manager: ServiceManager) {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    this.item.command = 'dsh.openPanel';
+    // 点击状态栏 = 在编辑区新开一个 DSH 标签页（与编辑器标题栏图标同一入口，可多开）。
+    // v0.5.0 指向 dsh.openPanel（聚焦侧边栏），真机反馈"点开后不在编辑区"。
+    this.item.command = 'dsh.openFromTitle';
     this.item.show();
     manager.onChange((s) => this.update(s));
     this.update(manager.getSnapshot());

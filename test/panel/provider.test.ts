@@ -135,7 +135,8 @@ test('detach 之后不再向旧宿主渲染', () => {
   assert.equal(webview.html, rendered, '解绑后 refreshContextBar 不应再写 html');
 });
 
-// 资源管理器右键「DSH → 添加到对话」（v0.5.0）：把文件以 @路径 插入 DSH 输入框
+// 资源管理器右键「DSH → 添加到对话」：把已格式化的 @ 引用插入 DSH 输入框
+// （v0.5.1 起由扩展侧按 DSH 语法生成文本，provider 只负责下发）
 test('insertMentions 下发插入请求，页面回执后返回 true', async () => {
   const provider = new DshPanelProvider(
     fakeManager() as never,
@@ -146,12 +147,14 @@ test('insertMentions 下发插入请求，页面回执后返回 true', async () 
   );
   const view = fakeView();
   provider.resolveWebview(view.webview as never);
-  const pending = provider.insertMentions(['src/a.ts', 'src/b.ts']);
+  const pending = provider.insertMentions(['@src/a.ts', '@test/']);
   view.fire({ type: 'bridgeInsertMentionsAck', ok: true });
   assert.equal(await pending, true);
   assert.deepEqual(view.posted[view.posted.length - 1], {
     type: 'bridgeInsertMentions',
-    paths: ['src/a.ts', 'src/b.ts'],
+    mentions: ['@src/a.ts', '@test/'],
+    // v0.5.0 桥接的旧字段：扩展升级但 DSH 服务未重启时，页面里可能还是旧桥接
+    paths: ['src/a.ts', 'test/'],
   });
 });
 
@@ -163,5 +166,5 @@ test('insertMentions 在没有绑定 webview 时直接返回 false', async () =>
     async (u) => u, () => true,
     {},
   );
-  assert.equal(await provider.insertMentions(['src/a.ts']), false);
+  assert.equal(await provider.insertMentions(['@src/a.ts']), false);
 });

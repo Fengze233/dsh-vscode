@@ -250,3 +250,33 @@ test('explorer/context 直接暴露「添加到对话」，不使用二级子菜
   assert.ok(String(item.group).startsWith('1_modification'), '应与内置「将文件添加到聊天」同分组');
   assert.ok(!(p.contributes.submenus ?? []).some((s: { id: string }) => s.id === 'dsh.chat'), '不再声明 DSH 子菜单');
 });
+
+// v0.5.1（图三）：右键文件夹仍显示「将文件添加到 DSH 对话」。
+// VS Code 的菜单标题来自命令本身，因此必须拆成两个命令 + when 分流。
+test('explorer/context 按文件/文件夹显示不同标题（文件夹不再写"文件"）', () => {
+  const p = pkg();
+  const items: Array<{ command?: string; when?: string; group?: string }> =
+    p.contributes.menus['explorer/context'] ?? [];
+  const fileItem = items.find((m) => m.command === 'dsh.addToChat');
+  const folderItem = items.find((m) => m.command === 'dsh.addFolderToChat');
+  assert.ok(fileItem, '文件项应使用 dsh.addToChat');
+  assert.ok(folderItem, '文件夹项应使用 dsh.addFolderToChat');
+  assert.equal(fileItem.when, '!explorerResourceIsFolder');
+  assert.equal(folderItem.when, 'explorerResourceIsFolder');
+  assert.equal(folderItem.group, fileItem.group, '两项应与内置「添加到聊天」同分组');
+  const folderCmd = p.contributes.commands.find((c: { command: string }) => c.command === 'dsh.addFolderToChat');
+  assert.ok(folderCmd, '存在 dsh.addFolderToChat 命令');
+  assert.ok(String(folderCmd.title).includes('dsh.cmd.addFolderToChat.title'), '标题走本地化');
+  const zh = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.nls.zh-cn.json'), 'utf8'));
+  assert.equal(zh['dsh.cmd.addFolderToChat.title'], '将文件夹添加到 DSH 对话');
+  assert.ok(p.activationEvents.includes('onCommand:dsh.addFolderToChat'), '需声明激活事件');
+});
+
+// v0.5.1（图五）：VS Code 启动时若插件从未激活，状态栏的 DSH 项不会出现。
+// 状态栏不是激活事件，必须显式声明 onStartupFinished。
+test('activationEvents 包含 onStartupFinished（启动即显示状态栏 DSH 项）', () => {
+  const p = pkg();
+  assert.equal(p.activationEvents[0], 'onStartupFinished', '应把 onStartupFinished 放在激活事件首位');
+  // 重载窗口后由序列化器恢复编辑区标签页：扩展必须先被激活，显式声明避免恢复时插件尚未启动
+  assert.ok(p.activationEvents.includes('onWebviewPanel:dsh.editor'), '声明编辑区标签页的激活事件');
+});

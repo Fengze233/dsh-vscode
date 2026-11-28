@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     // —— 握手状态 ——
     let bridgeToken = ""; // 父页面下发的握手 token；未握手前为空，不激活任何拦截
     // 桥接包版本（与插件版本统一，随包发布；安装器按「版本不一致或 client.js 内容不一致」强制重装）
-    const BRIDGE_VERSION = "0.5.0";
+    const BRIDGE_VERSION = "0.5.1-test1";
 
     // —— 剪贴板写桥接：VS Code webview 对跨源 iframe 的 navigator.clipboard.writeText 有权限拦截 ——
     // 背景：即使 iframe 声明 allow="clipboard-write"，VS Code（Electron）仍会拒绝写入
@@ -186,10 +186,12 @@ window.__ModuleLoader__.load({
       }
     }
 
-    // —— 下行：把工作区文件以 `@路径` 插入 DSH 输入框（资源管理器右键「添加到 DSH 对话」） ——
+    // —— 下行：把已格式化的 @ 引用插入 DSH 输入框（资源管理器右键「添加到 DSH 对话」） ——
+    // 引用文本由扩展侧按 DSH 的 @ 语法生成（文件夹带尾斜杠、含空白用成对引号）：
+    // 这里只做写入，不再拼 '@' 前缀，避免两处各拼一半导致语法漂移。
     // 为什么从后往前找可编辑元素：DSH 的 composer 固定在页面底部，历史消息里可能还有别的
     // contenteditable；找不到时返回 false（由扩展提示用户），绝不静默失败。
-    function insertMentions(paths) {
+    function insertMentions(mentions) {
       const editables = Array.from(document.querySelectorAll('textarea, [contenteditable="true"]'))
         .filter((el) => isEditableElement(el) && el.isConnected && el.getBoundingClientRect().height > 0);
       const el = editables[editables.length - 1];
@@ -210,7 +212,7 @@ window.__ModuleLoader__.load({
           sel.addRange(range);
         }
       }
-      const text = paths.map((p) => '@' + p).join(' ') + ' ';
+      const text = mentions.join(' ') + ' ';
       return insertTextIntoFocused(el, text);
     }
 
@@ -552,13 +554,16 @@ window.__ModuleLoader__.load({
         parent.postMessage(buildSyncWorkspaceAck(true, undefined, BRIDGE_VERSION), "*");
         return;
       }
-      // 下行：把文件引用插入输入框（编辑器右键「添加到对话」）。无论成败都回执，
+      // 下行：把引用文本插入输入框（编辑器右键「添加到对话」）。无论成败都回执，
       // 扩展据此决定提示「已添加」还是「面板未就绪 / 找不到输入框」。
-      if (d.kind === 'insertMentions' && Array.isArray(d.paths)) {
-        const paths = d.paths.filter((p) => typeof p === 'string' && p.length > 0).slice(0, 20);
+      // 兼容两种字段：mentions（v0.5.1，已含 @ 与引号/尾斜杠）优先；paths（v0.5.0 旧扩展，
+      // 这里补回 @ 前缀）。同一个 DSH profile 可能被新旧两个 VS Code 窗口共用，桥接要都认。
+      if (d.kind === 'insertMentions' && (Array.isArray(d.mentions) || Array.isArray(d.paths))) {
+        const raw = Array.isArray(d.mentions) ? d.mentions : d.paths.map((p) => '@' + p);
+        const mentions = raw.filter((m) => typeof m === 'string' && m.length > 0).slice(0, 20);
         let ok = false;
         try {
-          ok = insertMentions(paths);
+          ok = insertMentions(mentions);
         } catch (err) {
           console.warn('[dsh-vscode-bridge] insertMentions failed', err);
         }

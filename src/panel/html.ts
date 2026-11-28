@@ -204,9 +204,14 @@ if (iframeEl) {
       iframeEl.contentWindow.postMessage({ kind: 'deleteImagesAck', requestId: d.requestId, ok: d.ok }, '*');
       return;
     }
-    // 插入文件引用：转发给 iframe，由桥接把「@路径」写进 DSH 输入框
-    if (d && d.type === 'bridgeInsertMentions' && Array.isArray(d.paths)) {
-      iframeEl.contentWindow.postMessage({ kind: 'insertMentions', paths: d.paths }, '*');
+    // 插入文件引用：转发给 iframe，由桥接把已格式化的 @引用 写进 DSH 输入框。
+    // 同时转发旧字段 paths：页面里可能还跑着升级前的旧桥接（DSH 服务未重启），它只认 paths。
+    if (d && d.type === 'bridgeInsertMentions' && Array.isArray(d.mentions)) {
+      iframeEl.contentWindow.postMessage({
+        kind: 'insertMentions',
+        mentions: d.mentions,
+        ...(Array.isArray(d.paths) ? { paths: d.paths } : {}),
+      }, '*');
       return;
     }
     // —— 上行：iframe 发来的消息，source + origin 双重校验 ——

@@ -6,6 +6,7 @@
   "dsh.cmd.openSecondary.title": "DSH: 在辅助侧边栏打开",
   "dsh.cmd.openFromTitle.title": "DSH：在编辑区打开",
   "dsh.cmd.addToChat.title": "将文件添加到 DSH 对话",
+  "dsh.cmd.addFolderToChat.title": "将文件夹添加到 DSH 对话",
   "dsh.cmd.openExternal.title": "在浏览器中打开",
   "dsh.cmd.restart.title": "重启服务",
   "dsh.cmd.stop.title": "停止服务",
