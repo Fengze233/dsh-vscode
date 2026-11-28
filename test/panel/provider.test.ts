@@ -183,6 +183,27 @@ test('新标签页只在绑定完成前请求绑定工作区，回执后重渲�
   assert.ok(view.webview.html.includes('const BOOTSTRAP_WORKSPACE = false;'), '回执后不得再触发');
 });
 
+test('侧边栏视图重建后可以再次绑定工作区（新页面重新获得一次机会）', () => {
+  const provider = new DshPanelProvider(
+    fakeManager() as never,
+    undefined, undefined,
+    () => '/proj', () => true, () => false,
+    async (u) => u, () => true,
+    { bootstrapWorkspace: () => true },
+  );
+  const first = fakeView();
+  provider.resolveWebview(first.webview as never);
+  assert.ok(first.webview.html.includes('const BOOTSTRAP_WORKSPACE = true;'), '首次打开应请求绑定');
+  first.fire({ type: 'bridgeWorkspaceBootstrapAck', ok: true });
+  provider.refreshContextBar();
+  assert.ok(first.webview.html.includes('const BOOTSTRAP_WORKSPACE = false;'), '同一页面不得重复绑定');
+
+  // 视图被重建 = 新 webview（新页面）：应重新获得一次绑定机会
+  const second = fakeView();
+  provider.resolveWebview(second.webview as never);
+  assert.ok(second.webview.html.includes('const BOOTSTRAP_WORKSPACE = true;'), '新页面应再次请求绑定');
+});
+
 test('绑定进行中时「添加到对话」先等回执，避免把引用写进即将切走的会话', async () => {
   const provider = new DshPanelProvider(
     fakeManager() as never,

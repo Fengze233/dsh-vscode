@@ -228,7 +228,7 @@ Open DevTools inside the DSH panel; the console shows `[dsh-vscode-bridge] hands
 | `dsh.useEnvProxy` | `false` | Append `--use-env-proxy` to the child's `NODE_OPTIONS` |
 | `dsh.panel.zoomLevel` | `1` | Embedded page zoom, 0.5–1.5 |
 | `dsh.workspaceRootIndex` | `0` | Multi-root workspaces: which root becomes the `dsh web` working directory |
-| `dsh.workspace.autoOpen` | `true` | Newly opened DSH editor tabs switch DSH to the current VS Code workspace folder and open/reuse a blank session there; restored tabs are untouched |
+| `dsh.workspace.autoOpen` | `true` | Newly opened DSH editor tabs and DSH sidebar views switch DSH to the current VS Code workspace folder and open/reuse a blank session there; restored editor tabs are untouched |
 | `dsh.bridge.enabled` | `true` | Enable the editor bridge (file links, clipboard, undo/redo, images) |
 | `dsh.bridge.silenceWarning` | `false` | Suppress the bridge degradation warning |
 
@@ -282,7 +282,7 @@ Requirements: Node.js ≥ 22, VS Code ≥ 1.91.
 
 ```bash
 npm install
-npm run test          # 358 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
+npm run test          # 359 unit/integration tests (including real dsh web flows: service lifecycle, auth session)
 npm run compile       # builds out/extension.js
 npm run watch         # watch build
 npm run typecheck     # type check

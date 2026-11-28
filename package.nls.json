@@ -25,7 +25,7 @@
   "dsh.config.extraArgs": "Extra arguments appended when the plugin starts `dsh web` (e.g. `--trusted-host`).",
   "dsh.config.bridgeEnabled": "Enable the DSH page bridge (external links and file jumps between the panel and DSH).",
   "dsh.config.workspaceRootIndex": "Which workspace root to use as the working directory for the auto-started `dsh web` (0-based; falls back to the first root when out of range).",
-  "dsh.config.workspaceAutoOpen": "New DSH editor tabs automatically switch DSH to the current VS Code workspace folder and open (or reuse) a blank session there. Requires an open workspace folder; applies to newly opened tabs only — restored tabs keep their conversation. Disable to keep DSH on its own last-used workspace.",
+  "dsh.config.workspaceAutoOpen": "Newly opened DSH editor tabs and DSH sidebar views automatically switch DSH to the current VS Code workspace folder and open (or reuse) a blank session there. Requires an open workspace folder; restored editor tabs keep their conversation. Disable to keep DSH on its own last-used workspace.",
   "dsh.config.bridgeSilenceWarning": "Suppress bridge warnings (e.g. when a DSH page is open outside the panel).",
   "dsh.config.executablePath": "Absolute path to the dsh executable (dsh.cmd on Windows). Empty = look up on PATH.",
   "dsh.config.openInBrowser": "Open the DSH page in the default browser after the service starts (when off, `--no-open` is passed to `dsh web`).",

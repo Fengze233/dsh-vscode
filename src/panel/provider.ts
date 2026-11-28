@@ -114,6 +114,15 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
     this.settleWorkspaceBootstrap(); // 解除等待中的「添加到对话」，避免命令挂住
   }
 
+  /** 新页面绑定：重置一次性绑定状态（旧页面的等待者直接放行） */
+  private resetWorkspaceBootstrap(): void {
+    const waiters = this.bootstrapWaiters;
+    this.bootstrapWaiters = [];
+    for (const wake of waiters) wake();
+    this.workspaceBootstrapDone = false;
+    this.workspaceBootstrapRequested = false;
+  }
+
   /** 标记工作区绑定已结束（成功/失败/面板销毁）并唤醒所有等待者 */
   private settleWorkspaceBootstrap(): void {
     this.workspaceBootstrapDone = true;
@@ -154,6 +163,9 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
    * 渲染 / 桥接 / 状态订阅逻辑，差异只在宿主生命周期（创建与解绑由扩展入口负责）。
    */
   resolveWebview(webview: vscode.Webview): void {
+    // 侧边栏视图被重建（新 webview）时重置绑定状态：新页面可以重新绑定一次；
+    // 同时放行等待中的「添加到对话」，避免命令挂住。同一个 webview 重复绑定不重置。
+    if (this.webview !== null && this.webview !== webview) this.resetWorkspaceBootstrap();
     this.webview = webview;
     // enableScripts 允许占位页的内联按钮脚本（nonce 放行）运行。
     // 注意：retainContextWhenHidden 不在这里设置——它不是 WebviewOptions 字段，

@@ -663,6 +663,19 @@ export function activate(context: vscode.ExtensionContext): void {
   // 该 getter 仅用于 provider 的文件相对路径解析（openFile 的 workspaceRoot 兜底基准）。
   const workspaceRootGetter = (): string | undefined =>
     resolveWorkspaceRoot(vscode.workspace.workspaceFolders ?? [], readConfig().config.workspaceRootIndex);
+  /**
+   * 工作区绑定 getter 工厂（v0.5.1）：带日志，便于排查「请求到底发没发」。
+   *
+   * 每次渲染 ready 页都可能被调用（直到桥接回执），所以同一行日志可能出现 2~3 次；
+   * 绑定结果由桥接回执另行记录。
+   */
+  const workspaceBootstrapGetter = (surface: string): (() => boolean) => (): boolean => {
+    const autoOpen = readConfig().config.workspaceAutoOpen;
+    const root = workspaceRootGetter();
+    appendLog(`[workspace] ${surface}请求绑定工作区: autoOpen=${autoOpen} root=${root ?? '(未打开工作区文件夹)'}`);
+    return autoOpen && root !== undefined;
+  };
+
   // 桥接启用 getter：随时读取最新配置，供 readyPage 决定是否注入握手脚本
   const bridgeEnabledGetter = (): boolean => readConfig().config.bridgeEnabled;
   // 远程启用 getter：v0.3.0 由 dsh.remote.enabled 驱动（默认关闭，远程窗口不自动启动远端 dsh）
@@ -687,7 +700,7 @@ export function activate(context: vscode.ExtensionContext): void {
     remoteEnabledGetter, // remoteEnabled：dsh.remote.enabled 驱动远程隧道（开启后才接线）
     resolveExternalUrl, // resolveExternalUrl：远程窗口的 URL 隧道解析
     imageFallbackGetter, // imageFallback：dsh.image.fallback 驱动图片降级
-    panelUi(), // 会话三态 / 代理地址覆盖 / 登录提交（DSH ≥0.1.2 鉴权适配）
+    panelUi(workspaceBootstrapGetter('左侧边栏')), // 活动栏入口也绑定一次工作区
   );
   panelSecondary = new DshPanelProvider(
     manager,
@@ -698,7 +711,7 @@ export function activate(context: vscode.ExtensionContext): void {
     remoteEnabledGetter,
     resolveExternalUrl,
     imageFallbackGetter,
-    panelUi(),
+    panelUi(workspaceBootstrapGetter('右侧边栏')), // 辅助侧边栏入口同样绑定
   );
   panels.push(panelPrimary, panelSecondary);
 
@@ -730,11 +743,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const attachEditorPanel = (panel: vscode.WebviewPanel, fresh: boolean): DshPanelProvider => {
     const existing = editorPanels.get(panel);
     if (existing !== undefined) return existing;
-    // 只对新标签页下发绑定请求；provider 在收到桥接握手回执后自动停止下发（重渲染不会重复切换）。
-    // 设置关闭或没有打开工作区文件夹时返回 false；恢复的标签页不传这个 getter（不触发）。
-    const bootstrapWorkspace = fresh
-      ? (): boolean => readConfig().config.workspaceAutoOpen && workspaceRootGetter() !== undefined
-      : undefined;
+    // 只对新标签页下发绑定请求；provider 在收到桥接的「绑定完成」回执后自动停止下发。
+    // 恢复的标签页不传这个 getter（不触发）；侧边栏入口已在各自 provider 上独立接线。
+    const bootstrapWorkspace = fresh ? workspaceBootstrapGetter('编辑区标签页') : undefined;
     const provider = new DshPanelProvider(
       manager!,
       undefined, // 编辑区入口不重复弹「移到右侧栏」的一次性引导
