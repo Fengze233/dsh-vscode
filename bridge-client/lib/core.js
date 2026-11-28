@@ -102,10 +102,14 @@ export function workspaceListsReady(workspacePhase, sessionPhase) {
  * ok=false 表示老版本 DSH 缺服务/路径非法/注册失败，扩展不该反复重试。
  *
  * @param ok 绑定是否成功
+ * @param reason 失败原因（可选，会写入扩展日志）
  * @returns 上行消息
  */
-export function buildWorkspaceBootstrapAck(ok) {
-  return { kind: 'workspaceBootstrapAck', ok: ok === true };
+export function buildWorkspaceBootstrapAck(ok, reason) {
+  const ack = { kind: 'workspaceBootstrapAck', ok: ok === true };
+  // 失败原因随回执带回扩展日志：用户拿 DSH: 复制日志 就能看到，不用开 webview DevTools
+  if (typeof reason === 'string' && reason !== '') ack.reason = reason;
+  return ack;
 }
 
 /**

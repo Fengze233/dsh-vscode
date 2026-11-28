@@ -27,7 +27,7 @@ export type PanelMessage =
   /** 右键「添加到对话」的页面回执：ok=false 表示桥接没找到输入框或写入失败 */
   | { type: 'bridgeInsertMentionsAck'; ok: boolean }
   /** v0.5.1：新标签页工作区绑定完成（ok=false 为降级/失败；扩展收到后不再重发绑定请求） */
-  | { type: 'bridgeWorkspaceBootstrapAck'; ok: boolean }
+  | { type: 'bridgeWorkspaceBootstrapAck'; ok: boolean; reason?: string }
   /** 需要登录引导页：用户粘贴外部启动的 DSH 启动网址后提交（扩展校验并兑换会话） */
   | { type: 'authSubmitLaunchUrl'; url: string }
   /** 麦克风提示被用户关掉：扩展侧持久化，之后不再渲染（真机反馈：不要每次弹） */
@@ -158,7 +158,7 @@ if (iframeEl) {
   const TOKEN = ${JSON.stringify(token)};
   const ALLOWED_ORIGIN = ${JSON.stringify(allowedOrigin)};
   const IMAGE_FALLBACK = ${JSON.stringify(imageFallback)}; // v0.3.0：非视觉模型图片降级开关
-  // v0.5.1：VS Code 工作区绑定。路径进 JS 字符串前转义 '<'，避免路径里出现 </script> 截断内联脚本；
+  // v0.5.1：VS Code 工作区绑定。路径进 JS 字符串前转义尖括号，避免路径提前闭合脚本标签；
   // BOOTSTRAP_WORKSPACE 只对「新开的编辑区标签页」为 true（恢复的标签页由扩展侧给 false）。
   const WORKSPACE_ROOT = ${JSON.stringify(workspaceRoot).replace(/</g, '\\u003c')};
   const BOOTSTRAP_WORKSPACE = ${bootstrapWorkspace ? 'true' : 'false'};
@@ -243,9 +243,14 @@ if (iframeEl) {
       vscode.postMessage({ type: 'bridgeInsertMentionsAck', ok: d.ok === true });
       return;
     }
-    // v0.5.1：工作区绑定完成回执（成功/降级都算完成）：扩展侧据此停止在重渲染时重发绑定请求
+    // v0.5.1：工作区绑定完成回执（成功/降级都算完成）：扩展侧据此停止在重渲染时重发绑定请求，
+    // 失败原因一并带回，供 DSH: 复制日志 直接排查
     if (d && d.kind === 'workspaceBootstrapAck') {
-      vscode.postMessage({ type: 'bridgeWorkspaceBootstrapAck', ok: d.ok === true });
+      vscode.postMessage({
+        type: 'bridgeWorkspaceBootstrapAck',
+        ok: d.ok === true,
+        ...(typeof d.reason === 'string' ? { reason: d.reason } : {}),
+      });
       return;
     }
     // 打开外链：转发给扩展 → vscode.env.openExternal

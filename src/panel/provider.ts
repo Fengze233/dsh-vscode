@@ -43,6 +43,11 @@ export interface PanelProviderUiOpts {
    * 缺省 undefined = 不绑定（侧边栏/恢复的标签页）。
    */
   bootstrapWorkspace?: () => boolean;
+  /**
+   * 工作区绑定完成回调（v0.5.1）：ok=false 时 reason 带失败原因，扩展写进输出日志。
+   * 绑定成功/失败都会回调一次（页面销毁时不会回调）。
+   */
+  onWorkspaceBootstrapAck?: (ok: boolean, reason?: string) => void;
 }
 
 export class DshPanelProvider implements vscode.WebviewViewProvider {
@@ -310,7 +315,8 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
         break;
       case 'bridgeWorkspaceBootstrapAck':
         // v0.5.1：工作区绑定完成（成功或降级）→ 之后的重渲染不再下发 bootstrapWorkspace，
-        // 并唤醒等待中的「添加到对话」
+        // 并唤醒等待中的「添加到对话」；失败原因交给扩展写日志
+        this.ui.onWorkspaceBootstrapAck?.(msg.ok, msg.reason);
         this.settleWorkspaceBootstrap();
         break;
     }

@@ -36,7 +36,7 @@ export function workspaceBootstrapRoot(data: unknown): string | null;
 export function workspaceListsReady(workspacePhase: unknown, sessionPhase: unknown): boolean;
 
 /** 构造「工作区绑定完成」回执（v0.5.1；ok=false 表示降级/失败，不应重试） */
-export function buildWorkspaceBootstrapAck(ok: unknown): { kind: 'workspaceBootstrapAck'; ok: boolean };
+export function buildWorkspaceBootstrapAck(ok: unknown, reason?: unknown): { kind: 'workspaceBootstrapAck'; ok: boolean; reason?: string };
 
 /**
  * DSH 页面里「文件入口」按钮的稳定选择器（issue #22）：

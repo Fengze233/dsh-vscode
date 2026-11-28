@@ -159,12 +159,16 @@ test('insertMentions 下发插入请求，页面回执后返回 true', async () 
 });
 
 test('新标签页只在绑定完成前请求绑定工作区，回执后重渲染不再请求', () => {
+  let ackResult: { ok: boolean; reason?: string } | null = null;
   const provider = new DshPanelProvider(
     fakeManager() as never,
     undefined, undefined,
     () => '/proj', () => true, () => false,
     async (u) => u, () => true,
-    { bootstrapWorkspace: () => true }, // 扩展侧：设置开 + 有工作区
+    {
+      bootstrapWorkspace: () => true, // 扩展侧：设置开 + 有工作区
+      onWorkspaceBootstrapAck: (ok, reason) => { ackResult = { ok, reason }; },
+    },
   );
   const view = fakeView();
   provider.resolveWebview(view.webview as never);
@@ -173,7 +177,8 @@ test('新标签页只在绑定完成前请求绑定工作区，回执后重渲�
 
   // 桥接完成绑定之后（例如鉴权/代理刷新触发重渲染）：不再重复请求切换工作区。
   // 注意不能用 bridgeAck 做闸门：握手回执远早于绑定完成，提前停发会在页面重载时打断绑定。
-  view.fire({ type: 'bridgeWorkspaceBootstrapAck', ok: true });
+  view.fire({ type: 'bridgeWorkspaceBootstrapAck', ok: false, reason: 'boom' });
+  assert.deepEqual(ackResult, { ok: false, reason: 'boom' }, '失败原因应回传');
   provider.refreshContextBar();
   assert.ok(view.webview.html.includes('const BOOTSTRAP_WORKSPACE = false;'), '回执后不得再触发');
 });

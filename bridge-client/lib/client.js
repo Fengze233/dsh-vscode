@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     // —— 握手状态 ——
     let bridgeToken = ""; // 父页面下发的握手 token；未握手前为空，不激活任何拦截
     // 桥接包版本（与插件版本统一，随包发布；安装器按「版本不一致或 client.js 内容不一致」强制重装）
-    const BRIDGE_VERSION = "0.5.1-test2";
+    const BRIDGE_VERSION = "0.5.1-test3";
 
     // —— 剪贴板写桥接：VS Code webview 对跨源 iframe 的 navigator.clipboard.writeText 有权限拦截 ——
     // 背景：即使 iframe 声明 allow="clipboard-write"，VS Code（Electron）仍会拒绝写入
@@ -921,6 +921,7 @@ window.__ModuleLoader__.load({
     /** 注册（幂等）VS Code 工作区并打开它的空白会话；失败只记日志，绝不打扰用户 */
     async function bindWorkspace(root, services) {
       let ok = false;
+      let reason = "";
       try {
         const { workspaces, uiWorkspace } = services;
         if (workspaces && typeof workspaces.create === "function"
@@ -932,14 +933,19 @@ window.__ModuleLoader__.load({
             await uiWorkspace.openWorkspace(workspaceId);
             ok = true;
             console.log("[dsh-vscode-bridge] bound workspace:", root);
+          } else {
+            reason = "workspace id empty";
           }
+        } else {
+          reason = "workspace services unavailable";
         }
       } catch (err) {
+        reason = String(err);
         console.warn("[dsh-vscode-bridge] bind workspace failed", err);
       }
-      // 无论成败都回执：扩展据此停止在重渲染时重发请求（避免页面被反复重载打断/反复切换）
+      // 无论成败都回执（带失败原因）：扩展据此停止重渲染时重发请求，并把原因写进 DSH 日志
       try {
-        parent.postMessage(buildWorkspaceBootstrapAck(ok), "*");
+        parent.postMessage(buildWorkspaceBootstrapAck(ok, reason), "*");
       } catch (err) {
         // 父页面不可达（独立浏览器打开）时忽略
       }

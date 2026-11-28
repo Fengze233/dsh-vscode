@@ -615,8 +615,12 @@ export function activate(context: vscode.ExtensionContext): void {
       void context.globalState.update(MIC_HINT_DISMISSED_KEY, true);
       refreshPanels(); // 重渲染：提示块从 DOM 里去掉
     },
-    // 只有新开的编辑区标签页传这个 getter（provider 收到握手回执后停止下发）；侧边栏/恢复的标签页不传
+    // 只有新开的编辑区标签页传这个 getter（provider 收到绑定完成回执后停止下发）；侧边栏/恢复的标签页不传
     ...(bootstrapWorkspace === undefined ? {} : { bootstrapWorkspace }),
+    // v0.5.1：绑定结果写进输出通道（DSH: 复制日志 可见），失败原因由桥接带回
+    onWorkspaceBootstrapAck: (ok, reason) => {
+      appendLog(`[workspace] 新标签页工作区绑定${ok ? '完成' : '未完成'}${reason ? `（${reason}）` : ''}`);
+    },
   });
 
   /** 用户浏览器可打开的 DSH 地址：优先带 token 的启动网址（0.1.2 起浏览器需要它完成登录） */

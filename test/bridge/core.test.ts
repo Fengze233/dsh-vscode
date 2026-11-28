@@ -246,8 +246,13 @@ test('workspaceListsReady：两个列表都 ready 才放行，服务缺失视为
   assert.equal(workspaceListsReady(undefined, undefined), true);
 });
 
-test('buildWorkspaceBootstrapAck：统一回执形状，ok 只取严格布尔', () => {
+test('buildWorkspaceBootstrapAck：统一回执形状，ok 只取严格布尔，reason 可选', () => {
   assert.deepEqual(buildWorkspaceBootstrapAck(true), { kind: 'workspaceBootstrapAck', ok: true });
   assert.deepEqual(buildWorkspaceBootstrapAck(false), { kind: 'workspaceBootstrapAck', ok: false });
   assert.deepEqual(buildWorkspaceBootstrapAck('yes'), { kind: 'workspaceBootstrapAck', ok: false });
+  // 失败原因带回扩展日志；空串/非字符串不带字段
+  assert.deepEqual(buildWorkspaceBootstrapAck(false, 'boom'), {
+    kind: 'workspaceBootstrapAck', ok: false, reason: 'boom',
+  });
+  assert.deepEqual(buildWorkspaceBootstrapAck(false, ''), { kind: 'workspaceBootstrapAck', ok: false });
 });

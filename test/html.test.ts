@@ -267,6 +267,7 @@ test('readyPage 握手携带 VS Code 工作区绑定字段（v0.5.1）', () => {
   // 绑定完成回执：iframe → 扩展（扩展据此停止重渲染时重发请求）
   assert.ok(html.includes("kind === 'workspaceBootstrapAck'"), '应接收绑定完成回执');
   assert.ok(html.includes("type: 'bridgeWorkspaceBootstrapAck'"), '应转发给扩展宿主');
+  assert.ok(html.includes('reason: d.reason'), '失败原因应一并转发');
   // 恢复的标签页 / 未接线时不请求绑定
   const restored = readyPage('http://127.0.0.1:3080/', ctx(), { token: 't', enabled: true });
   assert.ok(restored.includes('const BOOTSTRAP_WORKSPACE = false;'));
@@ -276,6 +277,21 @@ test('readyPage 握手携带 VS Code 工作区绑定字段（v0.5.1）', () => {
   });
   assert.ok(escaped.includes('const WORKSPACE_ROOT = "/a\\u003c/script>b";'), '应转义 <');
   assert.ok(!escaped.includes('"/a</script>b"'), '不得把原始路径直接写进脚本');
+});
+
+test('内联握手脚本不得被内容里的 </script 提前截断（脚本开闭标签数量一致）', () => {
+  // 真机回归（0.5.1-test2）：握手脚本的注释里出现了 </script> 字面量，HTML 解析器会提前结束
+  // <script>，剩余代码被当作文本在页面上闪一下，桥接握手永远不启动（工作区绑定/文件/剪贴板全部失效）。
+  for (const html of [
+    readyPage('http://127.0.0.1:3080/', ctx(), {
+      token: 'tok123', enabled: true, workspaceRoot: '/a</script>b', bootstrapWorkspace: true,
+    }),
+    readyPage('http://127.0.0.1:3080/', ctx(), { token: 'tok123', enabled: true }),
+  ]) {
+    const opens = (html.match(/<script\b/gu) ?? []).length;
+    const closes = (html.match(/<\/script>/gu) ?? []).length;
+    assert.equal(closes, opens, '每个 <script> 必须有且只有一个对应的结束标签');
+  }
 });
 
 test('readyPage 在麦克风不可用时给出「用浏览器打开」提示（VS Code webview 限制）', () => {
