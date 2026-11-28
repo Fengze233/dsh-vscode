@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     // —— 握手状态 ——
     let bridgeToken = ""; // 父页面下发的握手 token；未握手前为空，不激活任何拦截
     // 桥接包版本（与插件版本统一，随包发布；安装器按「版本不一致或 client.js 内容不一致」强制重装）
-    const BRIDGE_VERSION = "0.5.1";
+    const BRIDGE_VERSION = "0.5.1-test2";
 
     // —— 剪贴板写桥接：VS Code webview 对跨源 iframe 的 navigator.clipboard.writeText 有权限拦截 ——
     // 背景：即使 iframe 声明 allow="clipboard-write"，VS Code（Electron）仍会拒绝写入
@@ -544,6 +544,9 @@ window.__ModuleLoader__.load({
       if (d.kind === "bridgeHello" && typeof d.token === "string" && d.token !== "") {
         bridgeToken = d.token;
         imageFallbackEnabled = d.imageFallback === true; // v0.3.0：非视觉模型图片降级开关（随 hello 下发）
+        // v0.5.1：新开编辑区标签页时绑定 VS Code 工作区（恢复的标签页不会带 bootstrapWorkspace=true）。
+        // hello 每 250ms 重发一次，noteWorkspaceBootstrap 内部只认第一次。
+        noteWorkspaceBootstrap(d);
         // 诊断日志：页面可据此确认握手成功与降级开关状态（排查“图片上传不生效”用）
         console.log("[dsh-vscode-bridge] handshake ok, v" + BRIDGE_VERSION + ", imageFallback=" + imageFallbackEnabled);
         // 附件图片捕获已由工厂期常驻绑定（bindImageCapture），此处仅刷新开关即可生效
@@ -843,6 +846,105 @@ window.__ModuleLoader__.load({
     // 取不到时保持 undefined：转发不带 cwd，宿主退回工作区根（旧行为，绝不丢点击）。
     let dshCtx = null;
 
+    // —— VS Code 工作区绑定（v0.5.1） ——
+    // 新开编辑区标签页时，让 DSH 把当前工作区切到 VS Code 打开的工作区文件夹，并在其中打开
+    // （复用）空白会话；重载恢复的标签页由扩展侧下发 bootstrapWorkspace=false，不触发。
+    // 依赖 DSH 客户端服务 workspaces（注册/查询）与 uiWorkspace（切换并打开空白会话）；
+    // 老版本 DSH 没有这两个服务时静默降级，不影响文件/剪贴板等既有桥接能力。
+    let pendingWorkspaceBootstrapRoot = null; // 待执行的工作区根（一次性）
+    let workspaceServices = null; // { workspaces, uiWorkspace, sessions }
+    const WORKSPACE_BOOTSTRAP_TIMEOUT_MS = 4000; // 等 DSH 列表就绪的上限
+
+    /** 从 bridgeHello 取绑定请求（hello 会重发，这里只认第一次） */
+    function noteWorkspaceBootstrap(data) {
+      if (pendingWorkspaceBootstrapRoot !== null) return;
+      const root = workspaceBootstrapRoot(data);
+      if (root === null) return;
+      pendingWorkspaceBootstrapRoot = root;
+      maybeBootstrapWorkspace();
+    }
+
+    /** 服务与请求都就绪时执行一次绑定 */
+    function maybeBootstrapWorkspace() {
+      if (pendingWorkspaceBootstrapRoot === null) return;
+      const services = resolveWorkspaceServices();
+      if (services === null) return; // 服务未就绪：等 ctx.inject 回调再次调用
+      const root = pendingWorkspaceBootstrapRoot;
+      pendingWorkspaceBootstrapRoot = null; // 一次性
+      void bindWorkspace(root, services);
+    }
+
+    /** 取工作区相关服务；缺失（老版本 DSH）时返回 null → 自动降级为无操作 */
+    function resolveWorkspaceServices() {
+      if (workspaceServices !== null) return workspaceServices;
+      if (!dshCtx || typeof dshCtx.get !== "function") return null;
+      try {
+        const workspaces = dshCtx.get("workspaces");
+        const uiWorkspace = dshCtx.get("uiWorkspace");
+        if (!workspaces || !uiWorkspace) return null;
+        workspaceServices = { workspaces, uiWorkspace, sessions: dshCtx.get("sessions") };
+        return workspaceServices;
+      } catch (err) {
+        console.warn("[dsh-vscode-bridge] workspace services unavailable", err);
+        return null;
+      }
+    }
+
+    /** 读客户端列表的 phase（异常时 undefined = 视为就绪，避免卡死） */
+    function listPhase(source) {
+      try {
+        const snapshot = source && typeof source.getSnapshot === "function" ? source.getSnapshot() : null;
+        return snapshot ? snapshot.phase : undefined;
+      } catch (err) {
+        return undefined;
+      }
+    }
+
+    /** 等 workspaces/sessions 列表就绪：connectBlank 才能复用空白会话，不会每开一页新建会话 */
+    function waitForWorkspaceLists(services, timeoutMs) {
+      const ready = () => workspaceListsReady(
+        services.workspaces ? listPhase(services.workspaces.list) : undefined,
+        services.sessions ? listPhase(services.sessions.list) : undefined,
+      );
+      if (ready()) return Promise.resolve();
+      return new Promise((resolve) => {
+        const startedAt = Date.now();
+        const timer = setInterval(() => {
+          if (ready() || Date.now() - startedAt >= timeoutMs) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 100);
+      });
+    }
+
+    /** 注册（幂等）VS Code 工作区并打开它的空白会话；失败只记日志，绝不打扰用户 */
+    async function bindWorkspace(root, services) {
+      let ok = false;
+      try {
+        const { workspaces, uiWorkspace } = services;
+        if (workspaces && typeof workspaces.create === "function"
+          && uiWorkspace && typeof uiWorkspace.openWorkspace === "function") {
+          await waitForWorkspaceLists(services, WORKSPACE_BOOTSTRAP_TIMEOUT_MS);
+          const view = await workspaces.create({ path: root });
+          const workspaceId = view && view.workspaceId;
+          if (typeof workspaceId === "string" && workspaceId !== "") {
+            await uiWorkspace.openWorkspace(workspaceId);
+            ok = true;
+            console.log("[dsh-vscode-bridge] bound workspace:", root);
+          }
+        }
+      } catch (err) {
+        console.warn("[dsh-vscode-bridge] bind workspace failed", err);
+      }
+      // 无论成败都回执：扩展据此停止在重渲染时重发请求（避免页面被反复重载打断/反复切换）
+      try {
+        parent.postMessage(buildWorkspaceBootstrapAck(ok), "*");
+      } catch (err) {
+        // 父页面不可达（独立浏览器打开）时忽略
+      }
+    }
+
     // —— 入口：立即可绑定的拦截先挂载；图片捕获在握手后才绑定 ——
     bindLinkInterception();
     bindImageCapture(); // 附件图片捕获常驻挂载（未握手/关闭时经 imageFallbackEnabled 过滤，零干扰）
@@ -858,10 +960,22 @@ window.__ModuleLoader__.load({
     }, true);
     window.addEventListener("blur", hideMenu);
     window.addEventListener("scroll", hideMenu, true);
-    // cordis 插件约定：apply 挂载点。DSH 在挂载本插件时把客户端根上下文传进来，
-    // 这里保存下来供文件转发取会话 cwd（issue #32）；不注册任何副作用，避免影响宿主。
+    // cordis 插件约定：apply 挂载点。DSH 在挂载本插件时把客户端根上下文传进来：
+    // 保存下来供文件转发取会话 cwd（issue #32）；工作区绑定（v0.5.1）需要的
+    // workspaces/uiWorkspace 服务用 inject 等就绪，老版本 DSH 缺服务时自动降级。
     exports.apply = (ctx) => {
       dshCtx = ctx ?? null;
+      if (dshCtx && typeof dshCtx.inject === "function") {
+        try {
+          dshCtx.inject(["workspaces", "uiWorkspace"], () => {
+            maybeBootstrapWorkspace();
+          });
+        } catch (err) {
+          // 极老版本 cordis 不支持 inject：退回「握手时按需 get」路径，不影响其余桥接能力
+          console.warn("[dsh-vscode-bridge] workspace inject unavailable", err);
+        }
+      }
+      maybeBootstrapWorkspace();
     };
     return module.exports;
   }

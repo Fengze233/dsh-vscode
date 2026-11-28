@@ -64,6 +64,51 @@ export function resolveSessionCwd(ctx, sessionId) {
 }
 
 /**
+ * 从 bridgeHello 里取 VS Code 工作区绑定请求（v0.5.1）。
+ *
+ * 只有扩展显式下发 `bootstrapWorkspace === true` 且 `workspaceRoot` 为非空字符串时才返回路径；
+ * 其余情况（旧扩展、没有打开工作区文件夹、恢复的标签页）都返回 null。
+ * hello 会每 250ms 重发，客户端的「只认第一次」由调用方维护，这里只负责稳定的解析规则。
+ *
+ * @param data 父页面下发的 bridgeHello 消息
+ * @returns VS Code 工作区根的绝对路径，或 null
+ */
+export function workspaceBootstrapRoot(data) {
+  if (!data || data.bootstrapWorkspace !== true) return null;
+  if (typeof data.workspaceRoot !== 'string' || data.workspaceRoot === '') return null;
+  return data.workspaceRoot;
+}
+
+/**
+ * 两个客户端列表是否都已到达 ready（v0.5.1）。
+ *
+ * 绑定工作区前等它就绪：DSH 的 connectBlank 只有在 sessions 列表里能找到该 workspace 的
+ * 空白会话时才会复用它；列表没就绪时每次开标签页都会新建一个会话。
+ * undefined 表示服务/列表不存在（老版本 DSH）：视为就绪，避免无限等待。
+ *
+ * @param workspacePhase workspaces.list 的 phase（'pending' | 'ready' | undefined）
+ * @param sessionPhase sessions.list 的 phase（'pending' | 'ready' | undefined）
+ * @returns 是否可安全执行工作区绑定
+ */
+export function workspaceListsReady(workspacePhase, sessionPhase) {
+  const ready = (phase) => phase === undefined || phase === 'ready';
+  return ready(workspacePhase) && ready(sessionPhase);
+}
+
+/**
+ * 构造「工作区绑定完成」回执（v0.5.1，iframe → 父页面 → 扩展）。
+ *
+ * 扩展收到任何结果的回执都会停止在新标签页重渲染时重发绑定请求；
+ * ok=false 表示老版本 DSH 缺服务/路径非法/注册失败，扩展不该反复重试。
+ *
+ * @param ok 绑定是否成功
+ * @returns 上行消息
+ */
+export function buildWorkspaceBootstrapAck(ok) {
+  return { kind: 'workspaceBootstrapAck', ok: ok === true };
+}
+
+/**
  * DSH 页面里「文件入口」按钮的稳定选择器（issue #22）。
  *
  * 背景与实证（DSH 0.1.5-rc.2 产物）：

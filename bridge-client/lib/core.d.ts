@@ -24,6 +24,21 @@ export function cwdMissReason(ctx: unknown, sessionId: unknown): string;
 export function resolveSessionCwd(ctx: unknown, sessionId: unknown): string | undefined;
 
 /**
+ * 从 bridgeHello 取 VS Code 工作区绑定请求（v0.5.1）：
+ * 只有 bootstrapWorkspace === true 且 workspaceRoot 为非空字符串时返回路径，否则 null。
+ */
+export function workspaceBootstrapRoot(data: unknown): string | null;
+
+/**
+ * workspaces/sessions 两个客户端列表是否都已 ready（v0.5.1）；
+ * undefined 表示服务或列表不存在（老版本 DSH），视为就绪。
+ */
+export function workspaceListsReady(workspacePhase: unknown, sessionPhase: unknown): boolean;
+
+/** 构造「工作区绑定完成」回执（v0.5.1；ok=false 表示降级/失败，不应重试） */
+export function buildWorkspaceBootstrapAck(ok: unknown): { kind: 'workspaceBootstrapAck'; ok: boolean };
+
+/**
  * DSH 页面里「文件入口」按钮的稳定选择器（issue #22）：
  * 覆盖 markdown 文件名（CSS Module 哈希类名）/ produced 芯片 / present 卡片，
  * 并排除 aria-haspopup 的宿主菜单按钮。

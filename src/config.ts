@@ -21,6 +21,8 @@ export interface RawDshConfig {
   bridgeEnabled?: boolean;
   /** 多根工作区取第几个根目录（dsh.workspaceRootIndex） */
   workspaceRootIndex?: number;
+  /** 新开编辑区标签页时是否绑定 VS Code 工作区（dsh.workspace.autoOpen；默认开） */
+  workspaceAutoOpen?: boolean;
   /** 是否抑制桥接警告（dsh.bridge.silenceWarning） */
   silenceWarning?: boolean;
   /** dsh 可执行文件绝对路径（空串 = 用 PATH 里的 dsh） */
@@ -57,6 +59,8 @@ export interface DshConfig {
   bridgeEnabled: boolean;
   /** 多根工作区取第几个根目录（dsh.workspaceRootIndex） */
   workspaceRootIndex: number;
+  /** 新开编辑区标签页时把 DSH 切到当前 VS Code 工作区并在其中打开空白会话（dsh.workspace.autoOpen） */
+  workspaceAutoOpen: boolean;
   /** 是否抑制桥接警告（dsh.bridge.silenceWarning） */
   silenceWarning: boolean;
   /** dsh 可执行文件绝对路径（空串 = 用 PATH 里的 dsh） */
@@ -89,6 +93,8 @@ export const DEFAULTS: DshConfig = {
   extraArgs: [],
   bridgeEnabled: true,
   workspaceRootIndex: 0,
+  // 新标签页绑定 VS Code 工作区：默认开启（DSH 默认 workspace 与 VS Code 文件夹无关，issue 反馈的核心诉求）
+  workspaceAutoOpen: true,
   silenceWarning: false,
   executablePath: '',
   openInBrowser: false,
@@ -226,6 +232,9 @@ export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors:
     workspaceRootIndex = raw.workspaceRootIndex;
   }
 
+  // workspaceAutoOpen（dsh.workspace.autoOpen）：布尔设置沿用既有缺省处理（非法静默回退）
+  const workspaceAutoOpen = typeof raw.workspaceAutoOpen === 'boolean' ? raw.workspaceAutoOpen : DEFAULTS.workspaceAutoOpen;
+
   // executablePath：非字符串静默回退默认 ''；空字符串合法（表示用 PATH 里的 dsh）
   const executablePath = typeof raw.executablePath === 'string' ? raw.executablePath : DEFAULTS.executablePath;
 
@@ -294,7 +303,7 @@ export function normalizeConfig(raw: RawDshConfig): { config: DshConfig; errors:
   return {
     config: {
       profile, launchPreference, desktopCommandPath,
-      host, port, autoStart, stopOnExit, extraArgs, bridgeEnabled, workspaceRootIndex,
+      host, port, autoStart, stopOnExit, extraArgs, bridgeEnabled, workspaceRootIndex, workspaceAutoOpen,
       silenceWarning, executablePath, openInBrowser, remoteEnabled, imageFallback,
       startTimeoutMs, env, useEnvProxy, panelZoomLevel,
     },
@@ -338,6 +347,7 @@ export function readConfig(): { config: DshConfig; errors: string[] } {
     extraArgs: ws.get<string[]>('extraArgs'),
     bridgeEnabled: ws.get<boolean>('bridge.enabled'),
     workspaceRootIndex: ws.get<number>('workspaceRootIndex'),
+    workspaceAutoOpen: ws.get<boolean>('workspace.autoOpen'),
     silenceWarning: ws.get<boolean>('bridge.silenceWarning'),
     executablePath: ws.get<string>('executablePath'),
     openInBrowser: ws.get<boolean>('openInBrowser'),

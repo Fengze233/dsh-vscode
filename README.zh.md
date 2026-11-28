@@ -228,6 +228,7 @@ DSH ≥ 0.1.2 需要浏览器会话。插件启动的服务会自动登录；在
 | `dsh.useEnvProxy` | `false` | 给子进程的 `NODE_OPTIONS` 追加 `--use-env-proxy` |
 | `dsh.panel.zoomLevel` | `1` | 内嵌页面缩放，0.5–1.5 |
 | `dsh.workspaceRootIndex` | `0` | 多根工作区：用第几个根作为 `dsh web` 的工作目录 |
+| `dsh.workspace.autoOpen` | `true` | 新开的 DSH 标签页自动切到当前 VS Code 工作区并在其中打开（复用）空白会话；重载恢复的标签页不受影响 |
 | `dsh.bridge.enabled` | `true` | 启用编辑器桥接（文件链接、剪贴板、撤销/重做、图片） |
 | `dsh.bridge.silenceWarning` | `false` | 抑制桥接降级警告 |
 
@@ -281,7 +282,7 @@ dsh web: http://127.0.0.1:3080/?token=<one-time token>
 
 ```bash
 npm install
-npm run test          # 350 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话）
+npm run test          # 357 个单元/集成测试（含真实 dsh web 全流程：服务生命周期、鉴权会话）
 npm run compile       # 构建 out/extension.js
 npm run watch         # 监听构建
 npm run typecheck     # 类型检查

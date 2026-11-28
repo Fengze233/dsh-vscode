@@ -1,5 +1,24 @@
 ## [0.5.1] - 2026-11-28
 
+### 新增
+
+- **新开的 DSH 标签页自动绑定 VS Code 工作区**：以前 DSH 的 Web UI 会话总是落在它自己
+  workspace 列表里选中的目录（首次使用是 `<Documents>/deepseek-harness/default-workspace`），
+  与 VS Code 当前打开的文件夹无关。现在新开的编辑区标签页会在握手时把 VS Code 工作区根
+  （`dsh.workspaceRootIndex` 选出的那个根）交给页面桥接，桥接调用 DSH 客户端接口
+  `workspaces.create({ path })`（幂等）与 `uiWorkspace.openWorkspace(id)`，把 DSH 切到该工作区
+  并打开（复用）一个空白会话。重载窗口恢复的标签页不触发，保留原会话；侧边栏入口不触发。
+- **设置 `dsh.workspace.autoOpen`**（默认 `true`）：关闭后保持 DSH 自己上次的工作区；
+  没有打开工作区文件夹时自动跳过。多个 VS Code 窗口共用同一个 DSH 端口时，后打开的新标签页
+  会把共享服务的默认工作区切到自己窗口的文件夹（既有共享服务设计，记为已知边界）。
+
+### 实现说明
+
+- 扩展在 `bridgeHello` 中新增 `workspaceRoot` / `bootstrapWorkspace` 两个字段；桥接收到后等
+  `workspaces` / `sessions` 客户端列表就绪再切换（保证空白会话复用，不会每开一页新建会话），
+  并在收到桥接的「绑定完成」回执后停止下发（页面重渲染/重载不会反复切换）。老版本 DSH 缺少
+  `workspaces` / `uiWorkspace` 服务时静默降级，不影响文件/剪贴板等既有桥接能力。
+
 ### 修复
 
 - **编辑区标签页图标不显示（图一）**：`createWebviewPanel` 创建/序列化器恢复的标签页都没有设置
@@ -23,7 +42,7 @@
 
 ### 测试
 
-测试用例共 350 个；本地验证 347 个通过、3 个按环境门控跳过（Windows 专属用例 1 个 +
+测试用例共 357 个；本地验证 354 个通过、3 个按环境门控跳过（Windows 专属用例 1 个 +
 需要可写 DSH_HOME 的真实 dsh 集成用例 2 个）。
 
 ## [0.5.0] - 2026-11-21

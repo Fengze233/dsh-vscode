@@ -19,7 +19,7 @@ test('合法配置原样通过', () => {
   assert.deepEqual(config, {
     profile: 'web',
     host: 'localhost', port: 4000, autoStart: false, stopOnExit: false, extraArgs: ['--trusted-host', 'x:1'],
-    bridgeEnabled: true, workspaceRootIndex: 0, silenceWarning: false, executablePath: '',
+    bridgeEnabled: true, workspaceRootIndex: 0, workspaceAutoOpen: true, silenceWarning: false, executablePath: '',
     openInBrowser: false, remoteEnabled: false, imageFallback: true,
     // issue #23：启动总超时改为可配，默认 45s（旧硬编码 15s 会把已就绪的服务判超时）
     startTimeoutMs: 45000,
@@ -115,6 +115,16 @@ test('normalizeConfig 处理桥接新设置项的缺省与非法值', () => {
   const r3 = normalizeConfig({ workspaceRootIndex: -1 });
   assert.equal(r3.config.workspaceRootIndex, 0); // 非法回退默认
   assert.equal(r3.errors.length, 1);
+});
+
+test('workspaceAutoOpen 默认开，仅显式布尔值生效', () => {
+  assert.equal(DEFAULTS.workspaceAutoOpen, true);
+  assert.equal(normalizeConfig({}).config.workspaceAutoOpen, true);
+  assert.equal(normalizeConfig({ workspaceAutoOpen: false }).config.workspaceAutoOpen, false);
+  // 非布尔（手改 settings.json 的脏值）静默回退默认，不阻塞其它设置
+  const dirty = normalizeConfig({ workspaceAutoOpen: 'yes' as unknown as boolean });
+  assert.equal(dirty.config.workspaceAutoOpen, true);
+  assert.deepEqual(dirty.errors, []);
 });
 
 test('workspaceRootIndex 非法分支逐类回退并记录错误', () => {

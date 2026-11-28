@@ -73,6 +73,10 @@ test('活动栏/辅助侧边栏容器图标必须单文件（viewsContainers.ico
 test('v0.3.0 设置项：remote.enabled 默认 false、image.fallback 默认 true、openInBrowser 默认 false', () => {
   const p = pkg();
   const props = p.contributes.configuration.properties;
+  // v0.5.1：新标签页绑定 VS Code 工作区（默认开，可关）
+  assert.equal(props['dsh.workspace.autoOpen'].type, 'boolean');
+  assert.equal(props['dsh.workspace.autoOpen'].default, true);
+  assert.equal(props['dsh.workspace.autoOpen'].markdownDescription, '%dsh.config.workspaceAutoOpen%');
   assert.equal(props['dsh.remote.enabled'].default, false);
   assert.equal(props['dsh.image.fallback'].default, true);
   assert.equal(props['dsh.openInBrowser'].default, false);

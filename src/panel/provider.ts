@@ -35,6 +35,14 @@ export interface PanelProviderUiOpts {
   micHintEnabled?: () => boolean;
   /** 用户点了提示上的关闭：扩展侧负责持久化，之后 refreshPanels() 重渲染即不再出现 */
   onMicHintDismiss?: () => void;
+  /**
+   * 新开编辑区标签页时是否让 DSH 绑定当前 VS Code 工作区（v0.5.1）。
+   *
+   * 扩展侧提供 getter（负责设置/工作区是否存在）；provider 在收到桥接的「绑定完成」回执后
+   * 自动停止下发，因此页面重渲染/重载不会重复触发；重载恢复的标签页（不传该 getter）也不会触发。
+   * 缺省 undefined = 不绑定（侧边栏/恢复的标签页）。
+   */
+  bootstrapWorkspace?: () => boolean;
 }
 
 export class DshPanelProvider implements vscode.WebviewViewProvider {
@@ -54,6 +62,12 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
   private renderGen = 0;
   /** manager 状态订阅的退订函数（多标签页场景下 dispose 必须解绑，否则监听器随标签页数量增长） */
   private unsubscribeFromManager: (() => void) | null = null;
+  /** 是否已收到「工作区绑定完成」回执：收到后不再下发请求，避免重渲染/重载反复切换 */
+  private workspaceBootstrapDone = false;
+  /** 是否已下发过工作区绑定请求（「添加到对话」等操作据此等切换完成再写入） */
+  private workspaceBootstrapRequested = false;
+  /** 等待绑定完成回执的 resolver（超时由等待方自行解除） */
+  private bootstrapWaiters: Array<() => void> = [];
 
   /**
    * @param manager 服务管理器（面板与服务状态联动）
@@ -92,6 +106,33 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
     this.unsubscribeFromManager = null;
     this.webview = null;
     this.insertWaiter = null;
+    this.settleWorkspaceBootstrap(); // 解除等待中的「添加到对话」，避免命令挂住
+  }
+
+  /** 标记工作区绑定已结束（成功/失败/面板销毁）并唤醒所有等待者 */
+  private settleWorkspaceBootstrap(): void {
+    this.workspaceBootstrapDone = true;
+    const waiters = this.bootstrapWaiters;
+    this.bootstrapWaiters = [];
+    for (const wake of waiters) wake();
+  }
+
+  /**
+   * 等本次页面加载的工作区绑定完成（没有请求时立即返回）。
+   *
+   * 为什么需要：新开的标签页可能正在从旧 workspace 切到 VS Code 工作区；如果这时立刻
+   * 插入 @引用，文本会写进即将被切走的会话（用户看到"添加成功"但引用不在新会话里）。
+   * 超时也继续（不能让右键命令无限挂住），后续的插入重试仍有机会落在切换后的输入框。
+   */
+  private async waitForWorkspaceBootstrap(timeoutMs: number): Promise<void> {
+    if (!this.workspaceBootstrapRequested || this.workspaceBootstrapDone) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, timeoutMs);
+      this.bootstrapWaiters.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   }
 
   /** 强制按最新状态重渲染（会话兑换完成/代理就绪后由扩展调用，弥补 onChange 之外的触发源） */
@@ -164,7 +205,15 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
    * 每次尝试都等页面回执，全部超时才判定失败（由调用方提示用户）。
    */
   async insertMentions(mentions: string[]): Promise<boolean> {
+    // 新标签页可能正在切到 VS Code 工作区：等切换完成再写，避免引用落进即将被切走的会话。
+    // 只在循环里等一次（绑定可能在命令执行期间才开始）；没有待办绑定时同步跳过，
+    // 普通面板保持原来的「调用即下发」时序。
+    let waitedForBootstrap = false;
     for (let attempt = 0; attempt < 4; attempt += 1) {
+      if (!waitedForBootstrap && this.workspaceBootstrapRequested && !this.workspaceBootstrapDone) {
+        waitedForBootstrap = true;
+        await this.waitForWorkspaceBootstrap(2500);
+      }
       const w = this.webview;
       if (w === null) return false;
       if (await this.postInsertAndWait(w, mentions)) return true;
@@ -258,6 +307,11 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
       case 'bridgeAck':
         // 握手回执：通知注入的回调（Task 7 据此评估桥接状态；version 供日志确认桥接代码版本）
         this.onBridgeAck?.(msg.ok, msg.version);
+        break;
+      case 'bridgeWorkspaceBootstrapAck':
+        // v0.5.1：工作区绑定完成（成功或降级）→ 之后的重渲染不再下发 bootstrapWorkspace，
+        // 并唤醒等待中的「添加到对话」
+        this.settleWorkspaceBootstrap();
         break;
     }
   }
@@ -436,6 +490,16 @@ export class DshPanelProvider implements vscode.WebviewViewProvider {
               token: this.bridgeToken,
               enabled: this.bridgeEnabled(), // 由 dsh.bridge.enabled 配置驱动（Task 7 接入）
               imageFallback: this.imageFallback(), // v0.3.0：降级开关随握手消息带给桥接客户端
+              workspaceRoot: this.workspaceRoot(), // v0.5.1：新标签页绑定 VS Code 工作区（无文件夹时 undefined）
+              // 收到绑定完成回执后不再请求：页面重渲染（缩放/鉴权刷新）会重载 iframe，
+              // 早停会把桥接侧还没跑完的异步绑定打断，所以必须等回执而不是等握手
+              bootstrapWorkspace: (() => {
+                const bootstrap = this.workspaceBootstrapDone
+                  ? false
+                  : (this.ui.bootstrapWorkspace?.() ?? false);
+                if (bootstrap) this.workspaceBootstrapRequested = true;
+                return bootstrap;
+              })(),
             },
             // 面板缩放（issue #8）：未接线时 1（不缩放）
             this.ui.zoomLevel?.() ?? 1,

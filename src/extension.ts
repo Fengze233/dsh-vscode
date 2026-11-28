@@ -602,7 +602,7 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   /** 面板 UI 接线（会话三态 + 代理地址覆盖 + 登录提交回调） */
-  const panelUi = (): PanelProviderUiOpts => ({
+  const panelUi = (bootstrapWorkspace?: () => boolean): PanelProviderUiOpts => ({
     authState: () => authSessionState,
     frameBaseOverride: () =>
       authProxyStarted && authSessionState === 'ok' && manager?.getSnapshot().state === 'ready' ? (authProxy?.baseUrl ?? null) : null,
@@ -615,6 +615,8 @@ export function activate(context: vscode.ExtensionContext): void {
       void context.globalState.update(MIC_HINT_DISMISSED_KEY, true);
       refreshPanels(); // 重渲染：提示块从 DOM 里去掉
     },
+    // 只有新开的编辑区标签页传这个 getter（provider 收到握手回执后停止下发）；侧边栏/恢复的标签页不传
+    ...(bootstrapWorkspace === undefined ? {} : { bootstrapWorkspace }),
   });
 
   /** 用户浏览器可打开的 DSH 地址：优先带 token 的启动网址（0.1.2 起浏览器需要它完成登录） */
@@ -715,10 +717,20 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
-  /** 把一个编辑区面板接到独立 provider 上（新建与「重载窗口后由序列化器恢复」两条路径共用） */
-  const attachEditorPanel = (panel: vscode.WebviewPanel): DshPanelProvider => {
+  /**
+   * 把一个编辑区面板接到独立 provider 上（新建与「重载窗口后由序列化器恢复」两条路径共用）。
+   *
+   * @param fresh 是否本次新开的标签页：true 时给它一次「绑定 VS Code 工作区」的机会
+   *   （v0.5.1）；序列化器恢复的标签页传 false，避免重载后把用户原来的会话切走。
+   */
+  const attachEditorPanel = (panel: vscode.WebviewPanel, fresh: boolean): DshPanelProvider => {
     const existing = editorPanels.get(panel);
     if (existing !== undefined) return existing;
+    // 只对新标签页下发绑定请求；provider 在收到桥接握手回执后自动停止下发（重渲染不会重复切换）。
+    // 设置关闭或没有打开工作区文件夹时返回 false；恢复的标签页不传这个 getter（不触发）。
+    const bootstrapWorkspace = fresh
+      ? (): boolean => readConfig().config.workspaceAutoOpen && workspaceRootGetter() !== undefined
+      : undefined;
     const provider = new DshPanelProvider(
       manager!,
       undefined, // 编辑区入口不重复弹「移到右侧栏」的一次性引导
@@ -728,7 +740,7 @@ export function activate(context: vscode.ExtensionContext): void {
       remoteEnabledGetter,
       resolveExternalUrl,
       imageFallbackGetter,
-      panelUi(),
+      panelUi(bootstrapWorkspace),
     );
     editorPanels.set(panel, provider);
     panels.push(provider); // 配置变更 / 鉴权完成时由 refreshPanels() 一并刷新
@@ -774,7 +786,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // 切走标签页时不销毁 iframe：DSH 页面会话、滚动位置与桥接握手都保留
       retainContextWhenHidden: true,
     });
-    return attachEditorPanel(panel);
+    return attachEditorPanel(panel, true);
   };
 
   /** 当前应接收「添加到对话」的 provider：最近激活的标签页；一个都没开时返回 null（调用方会新开） */
@@ -850,7 +862,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // 不注册的话每次 Reload 都要手动再点一次图标（真机反馈）。
     vscode.window.registerWebviewPanelSerializer('dsh.editor', {
       deserializeWebviewPanel: async (panel: vscode.WebviewPanel) => {
-        attachEditorPanel(panel);
+        attachEditorPanel(panel, false);
       },
     }),
     // 编辑器标题栏图标：默认在编辑区标签页打开（与 Claude Code 同形态，可多开），不再跳右侧侧边栏；

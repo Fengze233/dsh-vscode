@@ -158,6 +158,48 @@ test('insertMentions 下发插入请求，页面回执后返回 true', async () 
   });
 });
 
+test('新标签页只在绑定完成前请求绑定工作区，回执后重渲染不再请求', () => {
+  const provider = new DshPanelProvider(
+    fakeManager() as never,
+    undefined, undefined,
+    () => '/proj', () => true, () => false,
+    async (u) => u, () => true,
+    { bootstrapWorkspace: () => true }, // 扩展侧：设置开 + 有工作区
+  );
+  const view = fakeView();
+  provider.resolveWebview(view.webview as never);
+  assert.ok(view.webview.html.includes('const WORKSPACE_ROOT = "/proj";'), '应携带工作区根');
+  assert.ok(view.webview.html.includes('const BOOTSTRAP_WORKSPACE = true;'), '首次渲染应请求绑定');
+
+  // 桥接完成绑定之后（例如鉴权/代理刷新触发重渲染）：不再重复请求切换工作区。
+  // 注意不能用 bridgeAck 做闸门：握手回执远早于绑定完成，提前停发会在页面重载时打断绑定。
+  view.fire({ type: 'bridgeWorkspaceBootstrapAck', ok: true });
+  provider.refreshContextBar();
+  assert.ok(view.webview.html.includes('const BOOTSTRAP_WORKSPACE = false;'), '回执后不得再触发');
+});
+
+test('绑定进行中时「添加到对话」先等回执，避免把引用写进即将切走的会话', async () => {
+  const provider = new DshPanelProvider(
+    fakeManager() as never,
+    undefined, undefined,
+    () => '/proj', () => true, () => false,
+    async (u) => u, () => true,
+    { bootstrapWorkspace: () => true },
+  );
+  const view = fakeView();
+  provider.resolveWebview(view.webview as never); // 渲染 ready 页 → 记录工作区绑定请求
+  const posted = (): Array<{ type?: string }> => view.posted as Array<{ type?: string }>;
+  const inserts = (): number => posted().filter((m) => m.type === 'bridgeInsertMentions').length;
+
+  const pending = provider.insertMentions(['@src/a.ts']);
+  assert.equal(inserts(), 0, '绑定完成前不得下发插入请求');
+  view.fire({ type: 'bridgeWorkspaceBootstrapAck', ok: true }); // 切换完成
+  await new Promise((resolve) => setTimeout(resolve, 0)); // 等等待者被唤醒后的微任务
+  assert.equal(inserts(), 1, '回执后应正常下发一次');
+  view.fire({ type: 'bridgeInsertMentionsAck', ok: true });
+  assert.equal(await pending, true);
+});
+
 test('insertMentions 在没有绑定 webview 时直接返回 false', async () => {
   const provider = new DshPanelProvider(
     fakeManager() as never,
